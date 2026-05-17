@@ -487,6 +487,18 @@ static NSString * const kGroupByCategoryDefault = @"installer.groupByCategory";
                        background:[UIColor.secondaryLabelColor colorWithAlphaComponent:0.14]
                         textColor:UIColor.secondaryLabelColor];
     }
+    if (pkg.kind == PackageInstallKindNanoRegistry) {
+        if (intent != PackageQueueIntentNone) {
+            NSString *text = (intent == PackageQueueIntentInstall) ? @"APPLY QUEUED" : @"REMOVE QUEUED";
+            UIColor *color = self.view.tintColor;
+            return [self pillWithText:text
+                           background:[color colorWithAlphaComponent:0.18]
+                            textColor:color];
+        }
+        return [self pillWithText:@"MANUAL"
+                       background:[UIColor.secondaryLabelColor colorWithAlphaComponent:0.14]
+                        textColor:UIColor.secondaryLabelColor];
+    }
     if (intent != PackageQueueIntentNone) {
         NSString *text = (intent == PackageQueueIntentInstall) ? @"Queued" : @"Removing";
         UIColor *color = self.view.tintColor;
@@ -576,6 +588,31 @@ static NSString * const kGroupByCategoryDefault = @"installer.groupByCategory";
         enable.image = [UIImage systemImageNamed:@"icloud"];
 
         UISwipeActionsConfiguration *cfg = [UISwipeActionsConfiguration configurationWithActions:@[disable, enable]];
+        cfg.performsFirstActionWithFullSwipe = NO;
+        return cfg;
+    }
+
+    if (pkg.kind == PackageInstallKindNanoRegistry && intent == PackageQueueIntentNone) {
+        UIContextualAction *apply = [UIContextualAction
+            contextualActionWithStyle:UIContextualActionStyleNormal
+                                title:@"Apply"
+                              handler:^(UIContextualAction *a, UIView *v, void (^done)(BOOL)) {
+            [q queueIntent:PackageQueueIntentInstall forPackage:pkg];
+            done(YES);
+        }];
+        apply.backgroundColor = self.view.tintColor;
+        apply.image = [UIImage systemImageNamed:@"applewatch.radiowaves.left.and.right"];
+
+        UIContextualAction *remove = [UIContextualAction
+            contextualActionWithStyle:UIContextualActionStyleDestructive
+                                title:@"Remove"
+                              handler:^(UIContextualAction *a, UIView *v, void (^done)(BOOL)) {
+            [q queueIntent:PackageQueueIntentUninstall forPackage:pkg];
+            done(YES);
+        }];
+        remove.image = [UIImage systemImageNamed:@"xmark.circle"];
+
+        UISwipeActionsConfiguration *cfg = [UISwipeActionsConfiguration configurationWithActions:@[apply, remove]];
         cfg.performsFirstActionWithFullSwipe = NO;
         return cfg;
     }

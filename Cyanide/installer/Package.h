@@ -18,6 +18,13 @@ typedef NS_ENUM(NSInteger, PackageInstallKind) {
     // Installing calls darksword_ota_set_disabled(true); uninstalling calls
     // darksword_ota_set_disabled(false). State tracked in a defaults intent key.
     PackageInstallKindOTA = 1,
+
+    // One-shot plist edit gated by kexploit + sandbox patch (NanoRegistry
+    // watchOS pairing-compatibility override). Installing calls
+    // settings_apply_nano_registry_now(YES) which writes the four
+    // compatibility keys from the Settings bundle; uninstalling clears them.
+    // No live RC loop, doesn't run settings_run_actions.
+    PackageInstallKindNanoRegistry = 2,
 };
 
 @interface Package : NSObject

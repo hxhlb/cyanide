@@ -57,6 +57,7 @@ extern kern_return_t mach_vm_deallocate(task_t task, mach_vm_address_t address, 
 #define BREAKPOINT_DISABLE 0
 
 uint64_t g_RC_taskAddr;
+uint64_t g_RC_targetProcOverride = 0;
 bool g_RC_creatingExtraThread;
 mach_port_t g_RC_firstExceptionPort;
 mach_port_t g_RC_secondExceptionPort;
@@ -873,7 +874,15 @@ int init_remote_call(const char* process, bool useMigFilterBypass) {
         return -1;
     }
     
-    uint64_t procAddr = proc_find_by_name(process);
+    uint64_t procAddr;
+    if (g_RC_targetProcOverride) {
+        procAddr = g_RC_targetProcOverride;
+        g_RC_targetProcOverride = 0;
+        printf("[%s:%d] using caller-supplied proc override for %s proc=%#llx\n",
+               __FUNCTION__, __LINE__, process, procAddr);
+    } else {
+        procAddr = proc_find_by_name(process);
+    }
     if (!procAddr || procAddr == (uint64_t)-1 || !is_kaddr_valid(procAddr + off_proc_p_pid)) {
         printf("[%s:%d] process not found or invalid: %s proc=%#llx\n",
                __FUNCTION__, __LINE__, process, procAddr);

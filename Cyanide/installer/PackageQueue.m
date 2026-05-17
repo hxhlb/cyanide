@@ -126,37 +126,67 @@ NSString * const PackageQueueDidChangeNotification = @"PackageQueueDidChangeNoti
 {
     NSArray<Package *> *toInstall   = self.queuedInstalls;
     NSArray<Package *> *toUninstall = self.queuedUninstalls;
-    BOOL needsRunActions = NO;
-    for (Package *pkg in toInstall) {
-        if (pkg.kind != PackageInstallKindOTA) {
-            needsRunActions = YES;
-            break;
-        }
-    }
-    if (!needsRunActions) {
-        for (Package *pkg in toUninstall) {
-            if (pkg.kind != PackageInstallKindOTA) {
-                needsRunActions = YES;
-                break;
-            }
-        }
-    }
 
-    for (Package *pkg in toInstall)   [pkg applyCommittedState:YES];
-    for (Package *pkg in toUninstall) [pkg applyCommittedState:NO];
+    // Split packages into "stateful" (toggle: just flips an NSUserDefaults
+    // BOOL — fast, safe to call on main) and "heavy" (OTA / NanoRegistry —
+    // run kexploit + plist write, blocking). Apply stateful inline so
+    // settings_run_actions sees the right flags; dispatch heavy to a
+    // background queue so the InstallProgressViewController's log can
+    // actually scroll while it runs.
+    NSMutableArray<Package *> *heavyInstalls   = [NSMutableArray array];
+    NSMutableArray<Package *> *heavyUninstalls = [NSMutableArray array];
+    BOOL needsRunActions = NO;
+
+    for (Package *pkg in toInstall) {
+        if (pkg.kind == PackageInstallKindToggle) {
+            needsRunActions = YES;
+            [pkg applyCommittedState:YES];
+        } else {
+            [heavyInstalls addObject:pkg];
+        }
+    }
+    for (Package *pkg in toUninstall) {
+        if (pkg.kind == PackageInstallKindToggle) {
+            needsRunActions = YES;
+            [pkg applyCommittedState:NO];
+        } else {
+            [heavyUninstalls addObject:pkg];
+        }
+    }
 
     [self.installs removeAllObjects];
     [self.uninstalls removeAllObjects];
     [self notifyChange];
 
-    if (needsRunActions) {
-        settings_run_actions();
-    } else {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [[NSNotificationCenter defaultCenter] postNotificationName:kSettingsActionsDidCompleteNotification
-                                                                object:nil];
-        });
+    BOOL hasHeavy = (heavyInstalls.count + heavyUninstalls.count) > 0;
+
+    if (!hasHeavy) {
+        if (needsRunActions) {
+            settings_run_actions();
+        } else {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [[NSNotificationCenter defaultCenter]
+                    postNotificationName:kSettingsActionsDidCompleteNotification
+                                  object:nil];
+            });
+        }
+        return;
     }
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        for (Package *pkg in heavyInstalls)   [pkg applyCommittedState:YES];
+        for (Package *pkg in heavyUninstalls) [pkg applyCommittedState:NO];
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (needsRunActions) {
+                settings_run_actions();
+            } else {
+                [[NSNotificationCenter defaultCenter]
+                    postNotificationName:kSettingsActionsDidCompleteNotification
+                                  object:nil];
+            }
+        });
+    });
 }
 
 - (void)notifyChange

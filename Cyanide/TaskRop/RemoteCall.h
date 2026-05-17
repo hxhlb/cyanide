@@ -31,6 +31,12 @@ typedef struct {
 
 mach_port_t create_exception_port(void);
 int disable_excguard_kill(uint64_t task);
+// One-shot override consumed by the next call to init_remote_call. When
+// non-zero, init_remote_call skips its proc_find_by_name lookup and uses
+// this kernel proc address directly. Useful when there are multiple
+// processes with the same name (e.g. system vs per-user cfprefsd) and we
+// need to target a specific one. Reset to 0 by init_remote_call.
+extern uint64_t g_RC_targetProcOverride;
 int init_remote_call(const char* process, bool useMigFilterBypass);
 uint64_t do_remote_call_stable(int timeout, const char *name, uint64_t x0, uint64_t x1, uint64_t x2, uint64_t x3, uint64_t x4, uint64_t x5, uint64_t x6, uint64_t x7);
 uint64_t do_remote_call_stable_addr(int timeout, uint64_t pcAddr, const char *name, uint64_t x0, uint64_t x1, uint64_t x2, uint64_t x3, uint64_t x4, uint64_t x5, uint64_t x6, uint64_t x7);

@@ -51,6 +51,10 @@
             if (![d boolForKey:self.enabledKey]) return NO;
             return settings_tweak_is_applied(self.enabledKey);
         case PackageInstallKindOTA:
+        case PackageInstallKindNanoRegistry:
+            // Manual-control packages: no persistent "installed" state from
+            // the app's POV. The detail view shows an Apply/Remove menu and
+            // each commit is a fresh one-shot run.
             return NO;
     }
 }
@@ -89,6 +93,15 @@
             } else {
                 log_user("[INSTALLER] OTA %s failed; install state was not changed.\n",
                          installed ? "disable" : "enable");
+            }
+            return;
+        case PackageInstallKindNanoRegistry:
+            if (settings_apply_nano_registry_now(installed)) {
+                log_user("[INSTALLER] Watch pairing override %s.\n",
+                         installed ? "applied" : "removed");
+            } else {
+                log_user("[INSTALLER] Watch pairing override %s failed; state was not changed.\n",
+                         installed ? "apply" : "remove");
             }
             return;
     }

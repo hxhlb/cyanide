@@ -10,8 +10,10 @@
 #import "tweaks/statbar.h"
 #import "tweaks/rssidisplay.h"
 #import "tweaks/axonlite.h"
+#import "tweaks/typebanner.h"
 #import "tweaks/darksword_tweaks.h"
 #import "tweaks/darksword_ota.h"
+#import "tweaks/nano_registry.h"
 #import "DSKeepAlive.h"
 #import "TaskRop/RemoteCall.h"
 #import "kexploit/kutils.h"
@@ -108,6 +110,17 @@ NSString * const kSettingsRSSIDisplayCell    = @"RSSIDisplayCell";
 
 NSString * const kSettingsAxonLiteEnabled = @"AxonLiteEnabled";
 
+NSString * const kSettingsTypeBannerEnabled = @"TypeBannerEnabled";
+
+// NanoRegistry pairing-compatibility editor. Numbers are the watchOS pairing
+// compatibility versions that NRPairingCompatibilityVersionInfo reads from
+// /var/mobile/Library/Preferences/com.apple.NanoRegistry.plist via
+// CFPreferencesCopyValue("com.apple.NanoRegistry").
+NSString * const kSettingsNanoMaxPairing       = @"NanoRegistryMaxPairing";
+NSString * const kSettingsNanoMinPairing       = @"NanoRegistryMinPairing";
+NSString * const kSettingsNanoMinPairingChipID = @"NanoRegistryMinPairingChipID";
+NSString * const kSettingsNanoMinQuickSwitch   = @"NanoRegistryMinQuickSwitch";
+
 NSString * const kSettingsLogUploadEnabled = @"LogUploadEnabled";
 
 static void cyanide_upload_log_if_enabled(void);
@@ -130,6 +143,8 @@ static volatile int g_rssi_live_running = 0;
 static volatile int g_rssi_live_stop_requested = 0;
 static volatile int g_axonlite_live_running = 0;
 static volatile int g_axonlite_live_stop_requested = 0;
+static volatile int g_typebanner_live_running = 0;
+static volatile int g_typebanner_live_stop_requested = 0;
 static volatile int g_app_in_background = 0;
 static volatile int g_screen_awake = 1;
 static volatile int g_screen_locked = 0;
@@ -146,6 +161,27 @@ static const NSInteger kSBCDefaultDockIcons = 4;
 static const NSInteger kSBCDefaultCols = 4;
 static const NSInteger kSBCDefaultRows = 6;
 static const BOOL kSBCDefaultHideLabels = NO;
+// Conservative seed values for the NanoRegistry editor. We pick the
+// permissive iOS 26 numbers as the local seed because they're a superset of
+// iOS 18 (every iOS 18 watch still validates with min=24). The user can
+// "Load Current" or just hit Apply to drop them onto the device.
+static const NSInteger kNanoDefaultMaxPairing       = 25;
+static const NSInteger kNanoDefaultMinPairing       = 24;
+static const NSInteger kNanoDefaultMinPairingChipID = 10;
+static const NSInteger kNanoDefaultMinQuickSwitch   = 6;
+// "Pair newer watch on this iPhone" preset: maximally permissive.
+// Upper gate is pinned to the UI row ceiling (anything <= this passes the
+// max check) and every lower gate is pinned to 1 (anything >= 1 passes the
+// min check). This intentionally also lets older watches pair — the goal of
+// the preset is "version is not the bottleneck, period." If the override is
+// actually being read by NanoRegistry, pairing will not fail on the version
+// gates with these values.
+static const NSInteger kNanoPresetNewerMaxPairing       = 999;
+static const NSInteger kNanoPresetNewerMinPairing       = 1;
+static const NSInteger kNanoPresetNewerMinPairingChipID = 1;
+static const NSInteger kNanoPresetNewerMinQuickSwitch   = 1;
+static const NSInteger kNanoUIRowMin = 1;
+static const NSInteger kNanoUIRowMax = 999;
 static const useconds_t kStatBarLiveIntervalUS = 1000000;
 static const useconds_t kStatBarLiveBackgroundIntervalUS = 1000000;
 static const NSUInteger kStatBarLiveMaxTicks = 43200;
@@ -156,6 +192,13 @@ static const NSUInteger kRSSILiveMaxTicks = 43200;
 static const useconds_t kAxonLiteLiveIntervalUS = 500000;
 static const useconds_t kAxonLiteLiveBackgroundIntervalUS = 1500000;
 static const NSUInteger kAxonLiteLiveMaxTicks = 43200;
+// TypeBanner polls MobileSMS for typing indicators (limited to when Messages
+// is running) and then updates a banner window in SpringBoard. Each tick
+// alternates between two RemoteCall sessions, so it is heavier than the
+// single-session live loops above and runs at a slower cadence.
+static const useconds_t kTypeBannerLiveIntervalUS = 1500000;
+static const useconds_t kTypeBannerLiveBackgroundIntervalUS = 3000000;
+static const NSUInteger kTypeBannerLiveMaxTicks = 28800;
 static NSString * const kSettingsRemoteCallStateDidChangeNotification = @"SettingsRemoteCallStateDidChangeNotification";
 NSString * const kSettingsActionsDidCompleteNotification = @"SettingsActionsDidCompleteNotification";
 static NSString * const kSettingsCleanupStateDidChangeNotification = @"SettingsCleanupStateDidChangeNotification";
@@ -227,6 +270,7 @@ static NSArray<NSString *> *settings_rc_backed_tweak_keys(void)
             kSettingsStatBarEnabled,
             kSettingsRSSIDisplayEnabled,
             kSettingsAxonLiteEnabled,
+            kSettingsTypeBannerEnabled,
             kSettingsPowercuffEnabled,
             kSettingsDSDisableAppLibrary,
             kSettingsDSDisableIconFlyIn,
@@ -281,6 +325,7 @@ static uint64_t settings_now_us(void) {
 static void settings_apply_statbar_once_async(const char *reason);
 static void settings_apply_rssi_once_async(const char *reason);
 static void settings_start_rssi_live_loop(void);
+static void settings_start_typebanner_live_loop(void);
 static void settings_notify_remote_call_state_changed(void);
 static void settings_request_all_live_loops_stop(const char *reason);
 
@@ -442,6 +487,7 @@ static void settings_handle_springboard_restart(void)
             statbar_forget_remote_state();
             rssidisplay_forget_remote_state();
             axonlite_forget_remote_state();
+            typebanner_forget_remote_state();
             if (hadSession) {
                 abandon_remote_call();
             }
@@ -625,6 +671,7 @@ static void settings_request_all_live_loops_stop(const char *reason)
     g_statbar_live_stop_requested = 1;
     g_rssi_live_stop_requested = 1;
     g_axonlite_live_stop_requested = 1;
+    g_typebanner_live_stop_requested = 1;
     if (reason) {
         printf("[SETTINGS] requested all live RemoteCall loops stop: %s\n", reason);
     }
@@ -634,7 +681,8 @@ static void settings_wait_live_loops_stopped_for_switch(const char *reason)
 {
     uint64_t startUS = settings_now_us();
     BOOL logged = NO;
-    while (g_statbar_live_running || g_rssi_live_running || g_axonlite_live_running) {
+    while (g_statbar_live_running || g_rssi_live_running ||
+           g_axonlite_live_running || g_typebanner_live_running) {
         uint64_t nowUS = settings_now_us();
         uint64_t elapsedUS = (startUS != 0 && nowUS >= startUS) ? nowUS - startUS : 0;
         if (!logged) {
@@ -643,14 +691,16 @@ static void settings_wait_live_loops_stopped_for_switch(const char *reason)
             logged = YES;
         }
         if (elapsedUS >= 2000000ULL) {
-            printf("[SETTINGS] live loop stop wait timed out%s%s stat=%d rssi=%d axon=%d\n",
+            printf("[SETTINGS] live loop stop wait timed out%s%s stat=%d rssi=%d axon=%d type=%d\n",
                    reason ? ": " : "", reason ?: "",
-                   g_statbar_live_running, g_rssi_live_running, g_axonlite_live_running);
+                   g_statbar_live_running, g_rssi_live_running,
+                   g_axonlite_live_running, g_typebanner_live_running);
             break;
         }
         usleep(50000);
     }
-    if (logged && !g_statbar_live_running && !g_rssi_live_running && !g_axonlite_live_running) {
+    if (logged && !g_statbar_live_running && !g_rssi_live_running &&
+        !g_axonlite_live_running && !g_typebanner_live_running) {
         printf("[SETTINGS] live RemoteCall loops stopped%s%s\n",
                reason ? ": " : "", reason ?: "");
     }
@@ -1185,6 +1235,117 @@ static void settings_run_ota_action(BOOL disable)
     });
 }
 
+static void settings_nano_set_defaults_values(NSInteger maxV, NSInteger minV, NSInteger minChipV, NSInteger minQuickV)
+{
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    [d setInteger:maxV     forKey:kSettingsNanoMaxPairing];
+    [d setInteger:minV     forKey:kSettingsNanoMinPairing];
+    [d setInteger:minChipV forKey:kSettingsNanoMinPairingChipID];
+    [d setInteger:minQuickV forKey:kSettingsNanoMinQuickSwitch];
+}
+
+static void settings_nano_load_from_plist_into_defaults(BOOL logResult)
+{
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    nano_registry_values values = {
+        .max_pairing         = (int)[d integerForKey:kSettingsNanoMaxPairing],
+        .min_pairing         = (int)[d integerForKey:kSettingsNanoMinPairing],
+        .min_pairing_chip_id = (int)[d integerForKey:kSettingsNanoMinPairingChipID],
+        .min_quick_switch    = (int)[d integerForKey:kSettingsNanoMinQuickSwitch],
+    };
+    bool present = false;
+    bool ok = nano_registry_load(&values, &present);
+    if (!ok) {
+        if (logResult) log_user("[NANO] Could not read existing override plist (parse failure).\n");
+        return;
+    }
+    [d setInteger:values.max_pairing         forKey:kSettingsNanoMaxPairing];
+    [d setInteger:values.min_pairing         forKey:kSettingsNanoMinPairing];
+    [d setInteger:values.min_pairing_chip_id forKey:kSettingsNanoMinPairingChipID];
+    [d setInteger:values.min_quick_switch    forKey:kSettingsNanoMinQuickSwitch];
+    if (logResult) {
+        log_user(present
+                 ? "[NANO] Loaded existing override: max=%d min=%d minChip=%d minQuick=%d.\n"
+                 : "[NANO] No override present on device. Editor populated with current/seed values.\n",
+                 values.max_pairing, values.min_pairing,
+                 values.min_pairing_chip_id, values.min_quick_switch);
+    }
+}
+
+// Synchronous entry point used by both the Settings UI buttons and the
+// Installer's PackageQueue commit path. Logs progress to the in-app log so
+// the InstallProgressViewController shows real lines during the apply.
+BOOL settings_apply_nano_registry_now(BOOL apply)
+{
+    if (!settings_ensure_kexploit()) {
+        log_user("[NANO] Failed: kernel primitives were not acquired.\n");
+        return NO;
+    }
+
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    bool ok;
+    nano_registry_values values = {
+        .max_pairing         = (int)[d integerForKey:kSettingsNanoMaxPairing],
+        .min_pairing         = (int)[d integerForKey:kSettingsNanoMinPairing],
+        .min_pairing_chip_id = (int)[d integerForKey:kSettingsNanoMinPairingChipID],
+        .min_quick_switch    = (int)[d integerForKey:kSettingsNanoMinQuickSwitch],
+    };
+    if (apply) {
+        log_user("[NANO] Applying pairing override max=%d min=%d minChip=%d minQuick=%d.\n",
+                 values.max_pairing, values.min_pairing,
+                 values.min_pairing_chip_id, values.min_quick_switch);
+        ok = nano_registry_apply(&values);
+        if (!ok) {
+            log_user("[FAIL] NanoRegistry override write failed — see log for [NANO] lines.\n");
+        }
+    } else {
+        log_user("[NANO] Removing pairing override keys.\n");
+        ok = nano_registry_clear();
+        if (!ok) {
+            log_user("[FAIL] NanoRegistry override clear failed — see log for [NANO] lines.\n");
+        }
+    }
+
+    // The file write above is necessary but not sufficient — cfprefsd owns
+    // the in-memory cache that every CFPreferencesCopyValue call serves
+    // from, and it will overwrite our plist with its stale cache the next
+    // time any process writes to com.apple.NanoRegistry via the API. Push
+    // the same values into cfprefsd's cache so the cache *has* our
+    // override and future serializations preserve it.
+    if (ok) {
+        bool pushed = nano_registry_push_to_cfprefsd(&values, apply ? true : false);
+        if (!pushed) {
+            log_user("[NANO] cfprefsd push failed; on-disk override may be overwritten by cfprefsd's stale cache.\n");
+        }
+    }
+
+    return ok ? YES : NO;
+}
+
+static void settings_run_nano_apply_action(void)
+{
+    dispatch_async(dispatch_get_global_queue(0, 0), ^{
+        (void)settings_apply_nano_registry_now(YES);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [[NSNotificationCenter defaultCenter]
+                postNotificationName:kSettingsActionsDidCompleteNotification
+                              object:nil];
+        });
+    });
+}
+
+static void settings_run_nano_clear_action(void)
+{
+    dispatch_async(dispatch_get_global_queue(0, 0), ^{
+        (void)settings_apply_nano_registry_now(NO);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [[NSNotificationCenter defaultCenter]
+                postNotificationName:kSettingsActionsDidCompleteNotification
+                              object:nil];
+        });
+    });
+}
+
 static void settings_start_statbar_live_loop(void)
 {
     if (!settings_device_supported()) return;
@@ -1658,6 +1819,114 @@ static void settings_start_axonlite_live_loop(void)
     });
 }
 
+static void settings_start_typebanner_live_loop(void)
+{
+    if (!settings_device_supported()) return;
+    if (settings_cleanup_in_progress()) return;
+
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    if (![d boolForKey:kSettingsTypeBannerEnabled]) return;
+
+    if (__sync_lock_test_and_set(&g_typebanner_live_running, 1)) {
+        static volatile int loggedAlready = 0;
+        if (__sync_bool_compare_and_swap(&loggedAlready, 0, 1)) {
+            printf("[SETTINGS] TypeBanner live loop already running\n");
+        }
+        return;
+    }
+
+    if (settings_cleanup_in_progress()) {
+        __sync_lock_release(&g_typebanner_live_running);
+        return;
+    }
+
+    g_typebanner_live_stop_requested = 0;
+    dispatch_async(dispatch_get_global_queue(0, 0), ^{
+        NSUInteger tick = 0;
+        NSUInteger failures = 0;
+
+        printf("[SETTINGS] TypeBanner live loop started interval=%uus background=%uus max=%lu\n",
+               kTypeBannerLiveIntervalUS,
+               kTypeBannerLiveBackgroundIntervalUS,
+               (unsigned long)kTypeBannerLiveMaxTicks);
+
+        @try {
+            // Initial sleep so we don't fight the Apply Tweaks teardown of
+            // the shared SpringBoard session in the same instant we'd want to
+            // grab a session of our own.
+            settings_live_loop_sleep_interruptible(0,
+                                                   settings_live_interval(kTypeBannerLiveIntervalUS,
+                                                                          kTypeBannerLiveBackgroundIntervalUS),
+                                                   &g_typebanner_live_stop_requested);
+
+            while ([d boolForKey:kSettingsTypeBannerEnabled] &&
+                   !settings_cleanup_in_progress() &&
+                   !g_typebanner_live_stop_requested &&
+                   tick < kTypeBannerLiveMaxTicks) {
+                useconds_t intervalUS = settings_live_interval(kTypeBannerLiveIntervalUS,
+                                                               kTypeBannerLiveBackgroundIntervalUS);
+                uint64_t tickStartUS = settings_now_us();
+                bool ok = false;
+
+                // TypeBanner manages its own MobileSMS + SpringBoard sessions
+                // inside typebanner_run_once(). We don't take the shared
+                // SpringBoard RC lock — the lock is for tweaks that share the
+                // long-lived SpringBoard session held during Apply Tweaks.
+                @try {
+                    ok = typebanner_run_once();
+                } @catch (NSException *e) {
+                    printf("[SETTINGS] TypeBanner tick exception: %s\n", e.reason.UTF8String);
+                    ok = false;
+                }
+
+                if (tick == 0) printf("[SETTINGS] TypeBanner result=%d\n", ok);
+                if (ok) {
+                    failures = 0;
+                } else {
+                    failures++;
+                    printf("[SETTINGS] TypeBanner tick failed tick=%lu failures=%lu\n",
+                           (unsigned long)tick, (unsigned long)failures);
+                    if (failures >= settings_live_failure_limit(3)) break;
+                }
+
+                tick++;
+                if (![d boolForKey:kSettingsTypeBannerEnabled] ||
+                    g_typebanner_live_stop_requested ||
+                    tick >= kTypeBannerLiveMaxTicks) break;
+
+                settings_live_loop_sleep_interruptible(0,
+                                                       intervalUS,
+                                                       &g_typebanner_live_stop_requested);
+
+                uint64_t nowUS = settings_now_us();
+                uint64_t elapsedUS = tickStartUS != 0 && nowUS >= tickStartUS ? nowUS - tickStartUS : 0;
+                if (tick == 1) {
+                    printf("[SETTINGS] TypeBanner tick=0 elapsed=%lluus\n", elapsedUS);
+                }
+            }
+        } @finally {
+            // Best-effort hide the banner before exiting — drops any stale
+            // pill that might persist in SpringBoard's window list.
+            if (init_remote_call("SpringBoard", false) == 0) {
+                @try {
+                    typebanner_hide_in_springboard_session();
+                } @catch (NSException *e) {
+                    printf("[SETTINGS] TypeBanner final hide exception: %s\n", e.reason.UTF8String);
+                }
+                destroy_remote_call();
+            }
+            typebanner_forget_remote_state();
+
+            printf("[SETTINGS] TypeBanner live loop exited ticks=%lu enabled=%d failures=%lu stop=%d\n",
+                   (unsigned long)tick,
+                   [d boolForKey:kSettingsTypeBannerEnabled],
+                   (unsigned long)failures,
+                   g_typebanner_live_stop_requested);
+            __sync_lock_release(&g_typebanner_live_running);
+        }
+    });
+}
+
 static void settings_apply_axonlite_once_async(const char *reason)
 {
     if (!settings_device_supported()) return;
@@ -1711,7 +1980,8 @@ void settings_application_did_enter_background(void)
     BOOL anyLiveLoopNeeded =
         ([d boolForKey:kSettingsAxonLiteEnabled]    && g_springboard_rc_ready) ||
         (settings_rssi_install_allowed() && [d boolForKey:kSettingsRSSIDisplayEnabled] && g_springboard_rc_ready) ||
-        ([d boolForKey:kSettingsStatBarEnabled]     && g_springboard_rc_ready);
+        ([d boolForKey:kSettingsStatBarEnabled]     && g_springboard_rc_ready) ||
+        [d boolForKey:kSettingsTypeBannerEnabled];
     if (anyLiveLoopNeeded) {
         if ([d boolForKey:kSettingsKeepAlive]) {
             ds_keepalive_apply_enabled(YES);
@@ -1745,6 +2015,9 @@ void settings_application_will_enter_foreground(void)
     settings_apply_statbar_once_async("will enter foreground");
     settings_apply_rssi_once_async("will enter foreground");
     settings_apply_axonlite_once_async("will enter foreground");
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:kSettingsTypeBannerEnabled]) {
+        settings_start_typebanner_live_loop();
+    }
 }
 
 void settings_application_did_become_active(void)
@@ -1755,6 +2028,9 @@ void settings_application_did_become_active(void)
     settings_apply_statbar_once_async("became active");
     settings_apply_rssi_once_async("became active");
     settings_apply_axonlite_once_async("became active");
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:kSettingsTypeBannerEnabled]) {
+        settings_start_typebanner_live_loop();
+    }
 }
 
 static BOOL settings_key_is_sbc(NSString *key)
@@ -1785,6 +2061,11 @@ static BOOL settings_key_is_axonlite(NSString *key)
     return [key isEqualToString:kSettingsAxonLiteEnabled];
 }
 
+static BOOL settings_key_is_typebanner(NSString *key)
+{
+    return [key isEqualToString:kSettingsTypeBannerEnabled];
+}
+
 static BOOL settings_key_is_dark_tweak(NSString *key)
 {
     return [key isEqualToString:kSettingsDSDisableAppLibrary] ||
@@ -1801,6 +2082,7 @@ static BOOL settings_key_affects_package_state(NSString *key)
            [key isEqualToString:kSettingsStatBarEnabled] ||
            [key isEqualToString:kSettingsRSSIDisplayEnabled] ||
            [key isEqualToString:kSettingsAxonLiteEnabled] ||
+           [key isEqualToString:kSettingsTypeBannerEnabled] ||
            settings_key_is_dark_tweak(key);
 }
 
@@ -1818,6 +2100,36 @@ static void settings_schedule_live_apply_for_key(NSString *key)
     }
 
     NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+
+    if (settings_key_is_typebanner(key)) {
+        // TypeBanner does not depend on the shared SpringBoard session; it
+        // owns its own MobileSMS + SpringBoard sessions inside the live loop.
+        if ([d boolForKey:kSettingsTypeBannerEnabled]) {
+            settings_mark_tweak_applied(kSettingsTypeBannerEnabled, YES);
+            settings_notify_package_queue_changed_async();
+            settings_start_typebanner_live_loop();
+        } else {
+            g_typebanner_live_stop_requested = 1;
+            settings_mark_tweak_applied(kSettingsTypeBannerEnabled, NO);
+            settings_notify_package_queue_changed_async();
+            // Best-effort hide if a session is reachable. The live loop will
+            // also hide on its own way out, but doing it here gets the pill
+            // off the screen faster after the user toggles off.
+            dispatch_async(dispatch_get_global_queue(0, 0), ^{
+                if (init_remote_call("SpringBoard", false) == 0) {
+                    @try {
+                        typebanner_hide_in_springboard_session();
+                    } @catch (NSException *e) {
+                        printf("[SETTINGS] TypeBanner toggle-off hide exception: %s\n",
+                               e.reason.UTF8String);
+                    }
+                    destroy_remote_call();
+                }
+                typebanner_forget_remote_state();
+            });
+        }
+        return;
+    }
 
     if (settings_key_is_axonlite(key)) {
         if ([d boolForKey:kSettingsAxonLiteEnabled] && g_springboard_rc_ready) {
@@ -2010,6 +2322,13 @@ void settings_register_defaults(void)
         kSettingsRSSIDisplayCell:    @YES,
 
         kSettingsAxonLiteEnabled: @NO,
+
+        kSettingsTypeBannerEnabled: @NO,
+
+        kSettingsNanoMaxPairing:       @(kNanoDefaultMaxPairing),
+        kSettingsNanoMinPairing:       @(kNanoDefaultMinPairing),
+        kSettingsNanoMinPairingChipID: @(kNanoDefaultMinPairingChipID),
+        kSettingsNanoMinQuickSwitch:   @(kNanoDefaultMinQuickSwitch),
     }];
     // Signal Readouts is temporarily blocked from installation because its
     // live RemoteCall refresh still interferes with other SpringBoard tweaks.
@@ -2047,6 +2366,10 @@ void settings_run_actions(void)
             BOOL runStatBar = [d boolForKey:kSettingsStatBarEnabled];
             BOOL runRSSI = settings_rssi_install_allowed() && [d boolForKey:kSettingsRSSIDisplayEnabled];
             BOOL runAxonLite = [d boolForKey:kSettingsAxonLiteEnabled];
+            BOOL runTypeBanner = [d boolForKey:kSettingsTypeBannerEnabled];
+            // TypeBanner does its own session management (alternates MobileSMS
+            // and SpringBoard), so it doesn't gate the shared SpringBoard
+            // session that other tweaks need during Apply Tweaks.
             BOOL needsSpringBoard = runSandboxEscape || runSBC || runDarkTweaks || runStatBar || runRSSI || runAxonLite;
 
             NSUInteger total = 1;
@@ -2059,6 +2382,7 @@ void settings_run_actions(void)
             if (runStatBar) total++;
             if (runRSSI) total++;
             if (runAxonLite) total++;
+            if (runTypeBanner) total++;
             NSUInteger step = 0;
 
             settings_log_run_context();
@@ -2265,6 +2589,14 @@ void settings_run_actions(void)
                 } else {
                     g_axonlite_live_stop_requested = 1;
                 }
+                if (runTypeBanner) {
+                    settings_progress(&step, total, "Starting TypeBanner Messages poll");
+                    settings_mark_tweak_applied(kSettingsTypeBannerEnabled, YES);
+                    log_user("[OK] TypeBanner polling Messages every ~1.5s.\n");
+                    settings_start_typebanner_live_loop();
+                } else {
+                    g_typebanner_live_stop_requested = 1;
+                }
             }
 
             log_user("[DONE] Run complete. Verbose trace captured the raw call stream.\n");
@@ -2300,8 +2632,10 @@ typedef NS_ENUM(NSInteger, SettingsSection) {
     SectionStatBar,
     SectionRSSI,
     SectionAxonLite,
+    SectionTypeBanner,
     SectionPowercuff,
     SectionDarkSwordTweaks,
+    SectionNanoRegistry,
     SectionCount,
 };
 
@@ -2501,6 +2835,17 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 {
     [super viewWillAppear:animated];
     [self reloadManualActions];
+
+    // When the NanoRegistry detail panel is about to show, refresh the
+    // steppers from whatever's currently on disk so the editor reflects any
+    // override that's already been applied (or by another tool).
+    if (self.detailMode && self.underlyingSection == SectionNanoRegistry) {
+        settings_nano_load_from_plist_into_defaults(NO);
+        if (self.isViewLoaded) {
+            [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:0]
+                          withRowAnimation:UITableViewRowAnimationNone];
+        }
+    }
 }
 
 - (void)viewDidAppear:(BOOL)animated
@@ -2606,6 +2951,60 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     ];
 }
 
+- (NSArray<NSDictionary *> *)nanoRegistryRows
+{
+    return @[
+        @{ @"kind": @"stepper",
+           @"key": kSettingsNanoMaxPairing,
+           @"title": @"Max Allowed Pairing Version",
+           @"subtitle": @"Highest watchOS pairing version this iPhone will accept. Raise this to pair a NEWER watch on this iPhone. (Apple defaults: 24 on iOS 18, 25 on iOS 26.)",
+           @"min": @(kNanoUIRowMin),
+           @"max": @(kNanoUIRowMax),
+           @"default": @(kNanoDefaultMaxPairing) },
+
+        @{ @"kind": @"stepper",
+           @"key": kSettingsNanoMinPairing,
+           @"title": @"Min Required Pairing Version",
+           @"subtitle": @"Lowest version this iPhone will accept from any paired watch. Lower this only to pair OLDER watches Apple no longer lists as supported. (Apple defaults: 23 on iOS 18, 24 on iOS 26.)",
+           @"min": @(kNanoUIRowMin),
+           @"max": @(kNanoUIRowMax),
+           @"default": @(kNanoDefaultMinPairing) },
+
+        @{ @"kind": @"stepper",
+           @"key": kSettingsNanoMinPairingChipID,
+           @"title": @"Min Pairing Version (per S-chip)",
+           @"subtitle": @"Per-chip lower gate. Apple uses this to drop legacy S-chip watches (e.g. Series 3/S3) below a certain compatibility version. Stock: 10. Lower only when reviving an old watch model.",
+           @"min": @(kNanoUIRowMin),
+           @"max": @(kNanoUIRowMax),
+           @"default": @(kNanoDefaultMinPairingChipID) },
+
+        @{ @"kind": @"stepper",
+           @"key": kSettingsNanoMinQuickSwitch,
+           @"title": @"Min Quick Switch Version",
+           @"subtitle": @"Lowest version a watch can be to participate in Apple Watch quick-switch (multiple paired watches). Stock: 6. Independent from the Min Required Pairing gate.",
+           @"min": @(kNanoUIRowMin),
+           @"max": @(kNanoUIRowMax),
+           @"default": @(kNanoDefaultMinQuickSwitch) },
+
+        @{ @"kind": @"button",
+           @"title": @"Load Current Override From Device",
+           @"action": @"nano-load" },
+
+        @{ @"kind": @"button",
+           @"title": @"Preset: Pair a Newer WatchOS",
+           @"action": @"nano-preset-newer" },
+
+        @{ @"kind": @"button",
+           @"title": @"Apply Pairing Override",
+           @"action": @"nano-apply" },
+
+        @{ @"kind": @"button",
+           @"title": @"Remove Override",
+           @"action": @"nano-clear",
+           @"destructive": @YES },
+    ];
+}
+
 - (NSArray<NSDictionary *> *)darkSwordTweakRows
 {
     return @[];
@@ -2632,6 +3031,11 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     return @[];
 }
 
+- (NSArray<NSDictionary *> *)typebannerRows
+{
+    return @[];
+}
+
 + (NSArray<NSDictionary<NSString *, NSString *> *> *)settingsSummaryForSection:(NSInteger)section
 {
     NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
@@ -2650,6 +3054,11 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     } else if (section == SectionPowercuff) {
         NSString *lvl = [d stringForKey:kSettingsPowercuffLevel] ?: @"heavy";
         [out addObject:@{@"title": @"Level", @"value": lvl}];
+    } else if (section == SectionNanoRegistry) {
+        [out addObject:@{@"title": @"Max pairing",        @"value": [@([d integerForKey:kSettingsNanoMaxPairing])       stringValue]}];
+        [out addObject:@{@"title": @"Min pairing",        @"value": [@([d integerForKey:kSettingsNanoMinPairing])       stringValue]}];
+        [out addObject:@{@"title": @"Min (chip-ID)",      @"value": [@([d integerForKey:kSettingsNanoMinPairingChipID]) stringValue]}];
+        [out addObject:@{@"title": @"Min quick-switch",   @"value": [@([d integerForKey:kSettingsNanoMinQuickSwitch])   stringValue]}];
     }
     return out;
 }
@@ -2661,10 +3070,12 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         case SectionSBC:       return self.sbcRows;
         case SectionDarkSwordTweaks: return self.darkSwordTweakRows;
         case SectionOTA:       return self.otaRows;
+        case SectionNanoRegistry: return self.nanoRegistryRows;
         case SectionPowercuff: return self.powercuffRows;
         case SectionStatBar:   return self.statbarRows;
         case SectionRSSI:      return self.rssiRows;
         case SectionAxonLite:  return self.axonLiteRows;
+        case SectionTypeBanner: return self.typebannerRows;
         default: return @[];
     }
 }
@@ -2683,6 +3094,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         @{ @"title": @"StatBar",            @"icon": @"thermometer.medium",                  @"color": [UIColor systemRedColor],    @"section": @(SectionStatBar) },
         @{ @"title": @"Signal Display",     @"icon": @"antenna.radiowaves.left.and.right",   @"color": [UIColor systemBlueColor],   @"section": @(SectionRSSI) },
         @{ @"title": @"Axon Lite",          @"icon": @"bell.badge.fill",                     @"color": [UIColor systemRedColor],    @"section": @(SectionAxonLite) },
+        @{ @"title": @"TypeBanner",         @"icon": @"ellipsis.bubble.fill",                @"color": [UIColor systemTealColor],   @"section": @(SectionTypeBanner) },
         @{ @"title": @"Powercuff",          @"icon": @"bolt.slash.fill",                     @"color": [UIColor systemOrangeColor], @"section": @(SectionPowercuff) },
         @{ @"title": @"SpringBoard Tweaks", @"icon": @"apps.iphone",                         @"color": [UIColor systemIndigoColor], @"section": @(SectionDarkSwordTweaks) },
     ];
@@ -2691,7 +3103,8 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 - (NSArray<NSDictionary *> *)allSystemBundleRows
 {
     return @[
-        @{ @"title": @"OTA Updates", @"icon": @"icloud.slash.fill", @"color": [UIColor systemGrayColor], @"section": @(SectionOTA) },
+        @{ @"title": @"OTA Updates",       @"icon": @"icloud.slash.fill",    @"color": [UIColor systemGrayColor],   @"section": @(SectionOTA) },
+        @{ @"title": @"Watch Pairing",     @"icon": @"applewatch.radiowaves.left.and.right", @"color": [UIColor systemPurpleColor], @"section": @(SectionNanoRegistry) },
     ];
 }
 
@@ -2783,6 +3196,17 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     if (s == SectionOTA) {
         return @"Edits launchd disabled.plist. A reboot or userspace restart is required for changes to take effect.";
     }
+    if (s == SectionNanoRegistry) {
+        return @"Writes /var/mobile/Library/Preferences/com.apple.NanoRegistry.plist. "
+               @"Apple's NRPairingCompatibilityVersionInfo reads these four numbers to decide "
+               @"if a paired watch (and its watchOS version) is acceptable.\n\n"
+               @"USE CASE: pair a watch whose pairing-compatibility version is higher than this "
+               @"iPhone's iOS would normally accept (i.e. a newer watchOS on older iOS). Raise "
+               @"\"Max\". Leave the \"Min\" fields alone unless you also need to revive a much "
+               @"older watch.\n\n"
+               @"Respring or reboot after Apply so cfprefsd drops its cache. Stock defaults: "
+               @"iOS 18 = 24/23/10/6, iOS 26 = 25/24/10/6.";
+    }
     if (s == SectionPowercuff) {
         return @"Underclocks the CPU/GPU via thermalmonitord by simulating a thermal pressure level. Lasts until reboot. Heavier levels save battery at the cost of responsiveness.";
     }
@@ -2794,6 +3218,9 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     }
     if (s == SectionAxonLite) {
         return @"RemoteCall-only Axon port. It uses a live app-side loop rather than substrate hooks, so it lasts for the active Cyanide SpringBoard session.";
+    }
+    if (s == SectionTypeBanner) {
+        return @"Partial TypeMillennium port. Detection runs against the Messages app's own view hierarchy over RemoteCall and only fires while Messages.app is running. The original system-wide imagent hook needs code injection, which isn't available in this environment.";
     }
     return nil;
 }
@@ -3357,7 +3784,22 @@ void cyanide_present_contact(UIViewController *host)
         cell.textLabel.textAlignment = NSTextAlignmentNatural;
         cell.textLabel.textColor = supported ? UIColor.labelColor : UIColor.tertiaryLabelColor;
         NSInteger value = [d integerForKey:row[@"key"]];
-        cell.textLabel.text = [NSString stringWithFormat:@"%@: %ld", row[@"title"], (long)value];
+        NSString *combined = [NSString stringWithFormat:@"%@: %ld", row[@"title"], (long)value];
+        NSString *subtitle = row[@"subtitle"];
+        if (subtitle.length > 0) {
+            UIListContentConfiguration *config = [UIListContentConfiguration cellConfiguration];
+            config.text = combined;
+            config.secondaryText = subtitle;
+            config.textToSecondaryTextVerticalPadding = 3;
+            config.textProperties.color = supported ? UIColor.labelColor : UIColor.tertiaryLabelColor;
+            config.secondaryTextProperties.color = supported ? UIColor.secondaryLabelColor : UIColor.tertiaryLabelColor;
+            config.secondaryTextProperties.font = [UIFont systemFontOfSize:12];
+            config.secondaryTextProperties.numberOfLines = 0;
+            cell.contentConfiguration = config;
+        } else {
+            cell.contentConfiguration = nil;
+            cell.textLabel.text = combined;
+        }
         UIStepper *stp = [[UIStepper alloc] init];
         stp.minimumValue = [row[@"min"] doubleValue];
         stp.maximumValue = [row[@"max"] doubleValue];
@@ -3479,14 +3921,32 @@ void cyanide_present_contact(UIViewController *host)
     NSDictionary *row = [self rowForTag:sender.tag];
     NSInteger value = (NSInteger)sender.value;
     [[NSUserDefaults standardUserDefaults] setInteger:value forKey:row[@"key"]];
-    settings_schedule_live_apply_for_key(row[@"key"]);
-    [self presentApplyLogIfRunning];
+
+    // NanoRegistry steppers are seed values for an explicit Apply button;
+    // they don't drive a live SpringBoard RC loop, so skip the auto-apply.
+    NSString *key = row[@"key"];
+    BOOL isNano = [key isEqualToString:kSettingsNanoMaxPairing]
+                || [key isEqualToString:kSettingsNanoMinPairing]
+                || [key isEqualToString:kSettingsNanoMinPairingChipID]
+                || [key isEqualToString:kSettingsNanoMinQuickSwitch];
+    if (!isNano) {
+        settings_schedule_live_apply_for_key(key);
+        [self presentApplyLogIfRunning];
+    }
 
     UIView *v = sender.superview;
     while (v && ![v isKindOfClass:UITableViewCell.class]) v = v.superview;
     UITableViewCell *cell = (UITableViewCell *)v;
     if (cell) {
-        cell.textLabel.text = [NSString stringWithFormat:@"%@: %ld", row[@"title"], (long)value];
+        NSString *combined = [NSString stringWithFormat:@"%@: %ld", row[@"title"], (long)value];
+        NSString *subtitle = row[@"subtitle"];
+        if (subtitle.length > 0 && [cell.contentConfiguration isKindOfClass:UIListContentConfiguration.class]) {
+            UIListContentConfiguration *config = (UIListContentConfiguration *)[(id<NSCopying>)cell.contentConfiguration copyWithZone:nil];
+            config.text = combined;
+            cell.contentConfiguration = config;
+        } else {
+            cell.textLabel.text = combined;
+        }
     }
 }
 
@@ -3637,6 +4097,51 @@ void cyanide_present_contact(UIViewController *host)
 
     if (indexPath.section == SectionOTA) {
         settings_run_ota_action(indexPath.row == 0);
+        return;
+    }
+
+    if (indexPath.section == SectionNanoRegistry) {
+        NSDictionary *row = [self rowsForSection:indexPath.section][indexPath.row];
+        if (![row[@"kind"] isEqualToString:@"button"]) return;
+        NSString *action = row[@"action"];
+
+        if ([action isEqualToString:@"nano-load"]) {
+            settings_nano_load_from_plist_into_defaults(YES);
+            [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:0]
+                          withRowAnimation:UITableViewRowAnimationNone];
+        } else if ([action isEqualToString:@"nano-preset-newer"]) {
+            settings_nano_set_defaults_values(kNanoPresetNewerMaxPairing,
+                                              kNanoPresetNewerMinPairing,
+                                              kNanoPresetNewerMinPairingChipID,
+                                              kNanoPresetNewerMinQuickSwitch);
+            log_user("[NANO] Loaded preset for newer watchOS: max=%ld min=%ld minChip=%ld minQuick=%ld. Hit Apply to write.\n",
+                     (long)kNanoPresetNewerMaxPairing,
+                     (long)kNanoPresetNewerMinPairing,
+                     (long)kNanoPresetNewerMinPairingChipID,
+                     (long)kNanoPresetNewerMinQuickSwitch);
+            [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:0]
+                          withRowAnimation:UITableViewRowAnimationNone];
+        } else if ([action isEqualToString:@"nano-apply"]) {
+            UIAlertController *ac = [UIAlertController
+                alertControllerWithTitle:@"Apply Pairing Override?"
+                                 message:@"This writes com.apple.NanoRegistry.plist with the four numbers above. Respring or reboot afterwards for cfprefsd to drop its cache."
+                          preferredStyle:UIAlertControllerStyleAlert];
+            [ac addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+            [ac addAction:[UIAlertAction actionWithTitle:@"Apply" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+                settings_run_nano_apply_action();
+            }]];
+            settings_present_controller(ac, self);
+        } else if ([action isEqualToString:@"nano-clear"]) {
+            UIAlertController *ac = [UIAlertController
+                alertControllerWithTitle:@"Remove Pairing Override?"
+                                 message:@"Removes only the four override keys; other NanoRegistry state is preserved. Respring or reboot afterwards."
+                          preferredStyle:UIAlertControllerStyleAlert];
+            [ac addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+            [ac addAction:[UIAlertAction actionWithTitle:@"Remove" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_) {
+                settings_run_nano_clear_action();
+            }]];
+            settings_present_controller(ac, self);
+        }
         return;
     }
 

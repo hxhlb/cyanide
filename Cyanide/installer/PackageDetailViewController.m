@@ -32,22 +32,42 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     return self.package.kind == PackageInstallKindOTA;
 }
 
-- (NSString *)otaActionTitleForIntent:(PackageQueueIntent)intent installed:(BOOL)installed
+// "Manual-control" packages are stateless from the Installer's POV: the user
+// just queues an install or uninstall intent and confirms. OTA and the
+// NanoRegistry override both fit. The detail view shows a menu instead of a
+// toggle button so the user sees both options.
+- (BOOL)isManualPackage
 {
-    if (intent == PackageQueueIntentInstall) return @"Cancel Disable";
-    if (intent == PackageQueueIntentUninstall) return @"Cancel Enable";
+    return self.package.kind == PackageInstallKindOTA
+        || self.package.kind == PackageInstallKindNanoRegistry;
+}
+
+- (NSString *)manualActionTitleForIntent:(PackageQueueIntent)intent
+{
+    if (intent != PackageQueueIntentNone) {
+        if (self.package.kind == PackageInstallKindNanoRegistry) {
+            return (intent == PackageQueueIntentInstall) ? @"Cancel Apply" : @"Cancel Remove";
+        }
+        return (intent == PackageQueueIntentInstall) ? @"Cancel Disable" : @"Cancel Enable";
+    }
+    if (self.package.kind == PackageInstallKindNanoRegistry) return @"Apply/Remove";
     return @"Disable/Enable";
 }
 
-- (NSString *)otaStateText
+- (NSString *)manualStateText
 {
     PackageQueueIntent intent = [[PackageQueue sharedQueue] intentForPackage:self.package];
+    if (self.package.kind == PackageInstallKindNanoRegistry) {
+        if (intent == PackageQueueIntentInstall) return @"Apply Queued";
+        if (intent == PackageQueueIntentUninstall) return @"Remove Queued";
+        return @"Manual Control";
+    }
     if (intent == PackageQueueIntentInstall) return @"Disable Queued";
     if (intent == PackageQueueIntentUninstall) return @"Enable Queued";
     return @"Manual Control";
 }
 
-- (UIColor *)otaStateColor
+- (UIColor *)manualStateColor
 {
     PackageQueueIntent intent = [[PackageQueue sharedQueue] intentForPackage:self.package];
     if (intent != PackageQueueIntentNone) return self.view.tintColor;
@@ -56,26 +76,50 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
 
 - (NSArray<NSArray<NSString *> *> *)currentInfoRows
 {
-    if (![self isOTAPackage]) return self.infoRows;
+    if (![self isManualPackage]) return self.infoRows;
     NSMutableArray<NSArray<NSString *> *> *rows = [self.infoRows mutableCopy];
-    [rows addObject:@[@"State", [self otaStateText]]];
+    [rows addObject:@[@"State", [self manualStateText]]];
     return rows;
 }
 
-- (void)queueOTASetDisabled:(BOOL)disabled
+- (void)queueManualIntent:(PackageQueueIntent)intent
 {
-    PackageQueueIntent intent = disabled ? PackageQueueIntentInstall : PackageQueueIntentUninstall;
-    log_user("[INSTALLER] Queued OTA %s\n", disabled ? "disable" : "enable");
+    if (self.package.kind == PackageInstallKindNanoRegistry) {
+        log_user("[INSTALLER] Queued watch-pairing %s\n",
+                 intent == PackageQueueIntentInstall ? "apply" : "remove");
+    } else {
+        log_user("[INSTALLER] Queued OTA %s\n",
+                 intent == PackageQueueIntentInstall ? "disable" : "enable");
+    }
     [[PackageQueue sharedQueue] queueIntent:intent forPackage:self.package];
 }
 
-- (UIMenu *)otaActionMenu
+- (UIMenu *)manualActionMenu
 {
+    if (self.package.kind == PackageInstallKindNanoRegistry) {
+        UIAction *apply = [UIAction actionWithTitle:@"Apply Pairing Override"
+                                              image:[UIImage systemImageNamed:@"applewatch.radiowaves.left.and.right"]
+                                         identifier:nil
+                                            handler:^(__kindof UIAction *_) {
+            [self queueManualIntent:PackageQueueIntentInstall];
+        }];
+
+        UIAction *remove = [UIAction actionWithTitle:@"Remove Pairing Override"
+                                               image:[UIImage systemImageNamed:@"xmark.circle"]
+                                          identifier:nil
+                                             handler:^(__kindof UIAction *_) {
+            [self queueManualIntent:PackageQueueIntentUninstall];
+        }];
+        remove.attributes = UIMenuElementAttributesDestructive;
+
+        return [UIMenu menuWithTitle:@"Watch Pairing Override" children:@[apply, remove]];
+    }
+
     UIAction *disable = [UIAction actionWithTitle:@"Disable OTA Updates"
                                             image:[UIImage systemImageNamed:@"icloud.slash"]
                                        identifier:nil
                                           handler:^(__kindof UIAction *_) {
-        [self queueOTASetDisabled:YES];
+        [self queueManualIntent:PackageQueueIntentInstall];
     }];
     disable.attributes = UIMenuElementAttributesDestructive;
 
@@ -83,7 +127,7 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
                                            image:[UIImage systemImageNamed:@"icloud"]
                                       identifier:nil
                                          handler:^(__kindof UIAction *_) {
-        [self queueOTASetDisabled:NO];
+        [self queueManualIntent:PackageQueueIntentUninstall];
     }];
 
     return [UIMenu menuWithTitle:@"OTA Updates" children:@[disable, enable]];
@@ -204,9 +248,9 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
 
     // Status badge (optional)
     UIView *badge = nil;
-    if ([self isOTAPackage]) {
-        UIColor *color = [self otaStateColor];
-        badge = [self badgeWithText:[self otaStateText].uppercaseString
+    if ([self isManualPackage]) {
+        UIColor *color = [self manualStateColor];
+        badge = [self badgeWithText:[self manualStateText].uppercaseString
                          background:[color colorWithAlphaComponent:0.16]
                           textColor:color];
     } else if (self.package.isInstallDisabled) {
@@ -287,12 +331,13 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
 {
     PackageQueueIntent intent = [[PackageQueue sharedQueue] intentForPackage:self.package];
     BOOL installed = self.package.isInstalled;
+    BOOL manual = [self isManualPackage];
 
     NSString *title;
     UIBarButtonItemStyle style = UIBarButtonItemStylePlain;
     UIColor *tint = nil;
-    if ([self isOTAPackage]) {
-        title = [self otaActionTitleForIntent:intent installed:installed];
+    if (manual) {
+        title = [self manualActionTitleForIntent:intent];
         tint = (intent != PackageQueueIntentNone)
             ? UIColor.secondaryLabelColor
             : self.view.tintColor;
@@ -311,12 +356,13 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
         style = UIBarButtonItemStyleDone;
     }
 
+    BOOL useMenu = manual && intent == PackageQueueIntentNone;
     UIBarButtonItem *item = [[UIBarButtonItem alloc] initWithTitle:title
                                                              style:style
-                                                            target:([self isOTAPackage] && intent == PackageQueueIntentNone) ? nil : self
-                                                            action:([self isOTAPackage] && intent == PackageQueueIntentNone) ? nil : @selector(didTapAction)];
-    if ([self isOTAPackage] && intent == PackageQueueIntentNone) {
-        item.menu = [self otaActionMenu];
+                                                            target:useMenu ? nil : self
+                                                            action:useMenu ? nil : @selector(didTapAction)];
+    if (useMenu) {
+        item.menu = [self manualActionMenu];
     }
     if (tint) item.tintColor = tint;
     item.enabled = !self.package.isInstallDisabled || installed || intent != PackageQueueIntentNone;
@@ -340,7 +386,10 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
         [self promptConfigureBeforeInstall];
         return;
     }
-    if ([self isOTAPackage]) {
+    // Manual packages dispatch via menu — didTapAction should never run for
+    // them when intent == None (the bar item carries a UIMenu instead of a
+    // selector target).
+    if ([self isManualPackage]) {
         return;
     } else if (self.package.isInstalled) {
         log_user("[INSTALLER] Queued uninstall: %s\n", self.package.name.UTF8String);
@@ -475,8 +524,8 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
             NSString *value = row.count > 1 ? row[1] : @"";
             cell.textLabel.text = label;
             cell.detailTextLabel.text = value;
-            cell.detailTextLabel.textColor = ([self isOTAPackage] && [label isEqualToString:@"State"])
-                ? [self otaStateColor]
+            cell.detailTextLabel.textColor = ([self isManualPackage] && [label isEqualToString:@"State"])
+                ? [self manualStateColor]
                 : UIColor.secondaryLabelColor;
             cell.detailTextLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
             return cell;

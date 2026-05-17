@@ -11,10 +11,11 @@
 // Mirrors of the private SettingsSection enum values in SettingsViewController.m
 // (kept in sync — must match the underlying section indices used for the
 // detail-mode SettingsViewController push).
-static const NSInteger kSecSBC       = 4;
-static const NSInteger kSecStatBar   = 5;
-static const NSInteger kSecRSSI      = 6;
-static const NSInteger kSecPowercuff = 8;
+static const NSInteger kSecSBC          = 4;
+static const NSInteger kSecStatBar      = 5;
+static const NSInteger kSecRSSI         = 6;
+static const NSInteger kSecPowercuff    = 9;
+static const NSInteger kSecNanoRegistry = 11;
 
 + (NSArray<Package *> *)allPackages
 {
@@ -89,6 +90,32 @@ static const NSInteger kSecPowercuff = 8;
                                      enabledKey:kSettingsAxonLiteEnabled
                                           isNew:YES];
         axon.unstableWarning = @"Heavily buggy work-in-progress. Expect SpringBoard crashes, dropped notifications, layout glitches, and breakage between Cyanide builds. Don't rely on it for anything important.";
+
+        Package *typeBanner = [[Package alloc] initWithIdentifier:@"com.darksword.typebanner"
+                                           name:@"TypeBanner"
+                               shortDescription:@"iMessage typing banner under the Dynamic Island"
+                                longDescription:@"Port of TypeMillennium. Shows a pill banner just below the Dynamic Island whenever the active Messages conversation list shows a typing indicator.\n\nv1 limitation: detection runs against the Messages app's own view hierarchy via RemoteCall, so it only fires while Messages.app is running. The original tweak's system-wide imagent hook requires code injection, which is not available in this sandboxed environment without a code-signing bypass.\n\nNo extra configuration."
+                                        version:version
+                                         author:@"zeroxjf"
+                                       category:@"Beta"
+                                     symbolName:@"ellipsis.bubble.fill"
+                                           kind:PackageInstallKindToggle
+                                     enabledKey:kSettingsTypeBannerEnabled
+                                          isNew:YES];
+        typeBanner.unstableWarning = @"Detection is MobileSMS-only — typing events fire only while Messages.app is running. Polling Messages over RemoteCall every ~1.5s; battery cost is non-trivial.";
+
+        Package *nanoRegistry = [[Package alloc] initWithIdentifier:@"com.darksword.nanoregistry"
+                                           name:@"Watch Pairing Override"
+                               shortDescription:@"Pair newer watchOS on this iOS / revive older watches"
+                                longDescription:@"Edits com.apple.NanoRegistry.plist so NRPairingCompatibilityVersionInfo accepts a watch whose pairing-compatibility version is otherwise gated by this iOS.\n\nFour numeric knobs (live in the Settings tab): the upper gate (raise to pair a newer watch) and three lower gates (lower only to revive an older watch).\n\nInstalling writes the override using the four numbers currently configured. Uninstalling removes them. A respring or reboot is required afterwards so cfprefsd drops its cached copy.\n\nApple defaults: iOS 18 uses 24/23/10/6, iOS 26 uses 25/24/10/6."
+                                        version:version
+                                         author:@"zeroxjf"
+                                       category:@"System"
+                                     symbolName:@"applewatch.radiowaves.left.and.right"
+                                           kind:PackageInstallKindNanoRegistry
+                                     enabledKey:nil
+                                          isNew:YES];
+        nanoRegistry.settingsSection = kSecNanoRegistry;
 
         list = @[
             statBar,
@@ -167,9 +194,12 @@ static const NSInteger kSecPowercuff = 8;
                                      enabledKey:nil
                                           isNew:NO],
 
+            nanoRegistry,
+
             // Beta last so the warning sits at the bottom of the Installer.
             signal,
             axon,
+            typeBanner,
         ];
     });
     return list;
@@ -183,6 +213,7 @@ static const NSInteger kSecPowercuff = 8;
         @"Home Screen Layout",
         @"Performance",
         @"System Updates",
+        @"System",
         @"SpringBoard Tweaks",
     ];
     NSMutableArray<NSString *> *all = [NSMutableArray array];

@@ -222,12 +222,36 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
     QueueReviewSection s = (QueueReviewSection)indexPath.section;
     switch (s) {
         case QueueReviewSectionInstall:
-            cell.detailTextLabel.text = (pkg.kind == PackageInstallKindOTA) ? @"Pending OTA disable" : @"Pending install";
-            cell.detailTextLabel.textColor = (pkg.kind == PackageInstallKindOTA) ? UIColor.systemOrangeColor : UIColor.systemGreenColor;
+            switch (pkg.kind) {
+                case PackageInstallKindOTA:
+                    cell.detailTextLabel.text = @"Pending OTA disable";
+                    cell.detailTextLabel.textColor = UIColor.systemOrangeColor;
+                    break;
+                case PackageInstallKindNanoRegistry:
+                    cell.detailTextLabel.text = @"Pending override apply";
+                    cell.detailTextLabel.textColor = self.view.tintColor;
+                    break;
+                default:
+                    cell.detailTextLabel.text = @"Pending install";
+                    cell.detailTextLabel.textColor = UIColor.systemGreenColor;
+                    break;
+            }
             break;
         case QueueReviewSectionUninstall:
-            cell.detailTextLabel.text = (pkg.kind == PackageInstallKindOTA) ? @"Pending OTA enable" : @"Pending removal";
-            cell.detailTextLabel.textColor = (pkg.kind == PackageInstallKindOTA) ? UIColor.systemGreenColor : UIColor.systemRedColor;
+            switch (pkg.kind) {
+                case PackageInstallKindOTA:
+                    cell.detailTextLabel.text = @"Pending OTA enable";
+                    cell.detailTextLabel.textColor = UIColor.systemGreenColor;
+                    break;
+                case PackageInstallKindNanoRegistry:
+                    cell.detailTextLabel.text = @"Pending override remove";
+                    cell.detailTextLabel.textColor = UIColor.systemRedColor;
+                    break;
+                default:
+                    cell.detailTextLabel.text = @"Pending removal";
+                    cell.detailTextLabel.textColor = UIColor.systemRedColor;
+                    break;
+            }
             break;
         case QueueReviewSectionReApply:
             cell.detailTextLabel.text = @"Installed; will re-apply";

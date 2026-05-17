@@ -35,6 +35,8 @@ extern NSString * const kSettingsRSSIDisplayCell;
 
 extern NSString * const kSettingsAxonLiteEnabled;
 
+extern NSString * const kSettingsTypeBannerEnabled;
+
 extern NSString * const kSettingsLogUploadEnabled;
 
 extern NSString * const kSettingsActionsDidCompleteNotification;
@@ -51,6 +53,12 @@ BOOL settings_device_supported(void);
 // inline. Presented from `host`.
 void cyanide_present_contact(UIViewController *host);
 BOOL settings_apply_ota_disabled(BOOL disabled);
+
+// Synchronously runs kexploit and writes/clears the NanoRegistry pairing-
+// compatibility override using the four numbers currently in NSUserDefaults
+// (kSettingsNanoMaxPairing, etc.). Returns YES on success.
+BOOL settings_apply_nano_registry_now(BOOL apply);
+
 void settings_run_actions(void);
 void settings_destroy_springboard_remote_call(void);
 void settings_destroy_springboard_remote_call_sync(void);
