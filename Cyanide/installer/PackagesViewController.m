@@ -58,6 +58,7 @@ static NSString * const kGroupByCategoryDefault = @"installer.groupByCategory";
     self.navigationItem.hidesSearchBarWhenScrolling = NO;
 
     [self installSortBarButton];
+    [self installTipsHeader];
     [self rebuildFilteredData];
 
     [[NSNotificationCenter defaultCenter] addObserver:self
@@ -89,6 +90,104 @@ static NSString * const kGroupByCategoryDefault = @"installer.groupByCategory";
 }
 
 #pragma mark - Sort menu
+
+#pragma mark - Tips header
+
+- (NSAttributedString *)tipsAttributedText
+{
+    UIFont *heading  = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    UIFont *body     = [UIFont systemFontOfSize:13 weight:UIFontWeightRegular];
+    UIFont *bodyBold = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+
+    UIColor *primary   = UIColor.labelColor;
+    UIColor *secondary = UIColor.secondaryLabelColor;
+    UIColor *warn      = UIColor.systemOrangeColor;
+
+    NSMutableParagraphStyle *para = [[NSMutableParagraphStyle alloc] init];
+    para.lineSpacing = 2.0;
+    para.paragraphSpacing = 8.0;
+
+    NSDictionary *bodyAttr     = @{NSFontAttributeName: body,     NSForegroundColorAttributeName: secondary, NSParagraphStyleAttributeName: para};
+    NSDictionary *bodyBoldAttr = @{NSFontAttributeName: bodyBold, NSForegroundColorAttributeName: primary,   NSParagraphStyleAttributeName: para};
+    NSDictionary *warnBoldAttr = @{NSFontAttributeName: bodyBold, NSForegroundColorAttributeName: warn,      NSParagraphStyleAttributeName: para};
+    NSDictionary *headAttr     = @{NSFontAttributeName: heading,  NSForegroundColorAttributeName: primary,   NSParagraphStyleAttributeName: para};
+
+    NSMutableAttributedString *as = [[NSMutableAttributedString alloc] init];
+    [as appendAttributedString:[[NSAttributedString alloc] initWithString:@"What's New & Tips\n" attributes:headAttr]];
+
+    [as appendAttributedString:[[NSAttributedString alloc] initWithString:@"Axon Lite is much faster and more reliable now — snappier filter switching, no duplicate icons, and the bundle row settles into place immediately on the lockscreen.\n" attributes:bodyAttr]];
+
+    [as appendAttributedString:[[NSAttributedString alloc] initWithString:@"Heads up: " attributes:warnBoldAttr]];
+    [as appendAttributedString:[[NSAttributedString alloc] initWithString:@"don't force-quit Cyanide from the App Switcher." attributes:bodyBoldAttr]];
+    [as appendAttributedString:[[NSAttributedString alloc] initWithString:@" Live tweaks (StatBar, Axon Lite, etc.) stop the moment the app is killed.\n" attributes:bodyAttr]];
+
+    [as appendAttributedString:[[NSAttributedString alloc] initWithString:@"Logs auto-upload (with your consent) to help me catch issues. If you need more specific help, hit the button below — it'll open an email to me with your latest log + device info already included." attributes:bodyAttr]];
+
+    return as;
+}
+
+- (void)installTipsHeader
+{
+    CGFloat width = self.tableView.bounds.size.width;
+    if (width <= 0) width = UIScreen.mainScreen.bounds.size.width;
+
+    CGFloat horizontalMargin = 16.0;
+    CGFloat verticalPadding  = 14.0;
+    CGFloat cardInset        = 14.0;
+    CGFloat textWidth        = width - horizontalMargin * 2 - cardInset * 2;
+    CGFloat buttonGap        = 12.0;
+    CGFloat buttonHeight     = 36.0;
+
+    UILabel *label = [[UILabel alloc] init];
+    label.numberOfLines = 0;
+    label.attributedText = [self tipsAttributedText];
+    label.preferredMaxLayoutWidth = textWidth;
+    CGSize labelFit = [label sizeThatFits:CGSizeMake(textWidth, CGFLOAT_MAX)];
+    label.frame = CGRectMake(cardInset, cardInset, textWidth, labelFit.height);
+
+    UIButtonConfiguration *cfg = [UIButtonConfiguration tintedButtonConfiguration];
+    cfg.title = @"Contact zeroxjf";
+    cfg.image = [UIImage systemImageNamed:@"envelope.fill"];
+    cfg.imagePadding = 6.0;
+    cfg.imagePlacement = NSDirectionalRectEdgeLeading;
+    cfg.cornerStyle = UIButtonConfigurationCornerStyleMedium;
+    __weak typeof(self) weakSelf = self;
+    UIButton *contact = [UIButton buttonWithConfiguration:cfg
+                                            primaryAction:[UIAction actionWithHandler:^(UIAction *_) {
+        typeof(self) strongSelf = weakSelf;
+        if (strongSelf) cyanide_present_contact(strongSelf);
+    }]];
+    CGFloat buttonY = cardInset + labelFit.height + buttonGap;
+    contact.frame = CGRectMake(cardInset, buttonY, textWidth, buttonHeight);
+
+    UIView *card = [[UIView alloc] initWithFrame:CGRectMake(horizontalMargin,
+                                                            verticalPadding,
+                                                            width - horizontalMargin * 2,
+                                                            buttonY + buttonHeight + cardInset)];
+    card.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
+    card.layer.cornerRadius = 12.0;
+    card.layer.cornerCurve = kCACornerCurveContinuous;
+    [card addSubview:label];
+    [card addSubview:contact];
+
+    UIView *container = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width,
+                                                                 card.frame.size.height + verticalPadding * 2)];
+    [container addSubview:card];
+
+    self.tableView.tableHeaderView = container;
+}
+
+- (void)viewDidLayoutSubviews
+{
+    [super viewDidLayoutSubviews];
+    UIView *hdr = self.tableView.tableHeaderView;
+    if (!hdr) return;
+    // Re-fit on width changes (rotation, split view, etc.) by rebuilding the
+    // header in place when the table's width no longer matches our cached size.
+    if (fabs(hdr.frame.size.width - self.tableView.bounds.size.width) > 0.5) {
+        [self installTipsHeader];
+    }
+}
 
 - (void)installSortBarButton
 {

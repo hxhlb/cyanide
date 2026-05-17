@@ -20,6 +20,7 @@
 #import "installer/PackageCatalog.h"
 #import "installer/PackageQueue.h"
 #import <WebKit/WebKit.h>
+#import <MessageUI/MessageUI.h>
 #import <notify.h>
 #import <sys/utsname.h>
 #import <time.h>
@@ -110,6 +111,8 @@ NSString * const kSettingsAxonLiteEnabled = @"AxonLiteEnabled";
 NSString * const kSettingsLogUploadEnabled = @"LogUploadEnabled";
 
 static void cyanide_upload_log_if_enabled(void);
+static void cyanide_start_session_uploads(void);
+static void cyanide_stop_session_uploads(void);
 
 extern int  escape_sbx_demo2(void);
 extern int  escape_sbx_demo2_in_session(void);
@@ -2034,6 +2037,7 @@ void settings_run_actions(void)
             return;
         }
         log_session_begin();
+        cyanide_start_session_uploads();
         @try {
             BOOL patchSandboxExt = [d boolForKey:kSettingsRunPatchSandboxExt];
             BOOL runPowercuff = [d boolForKey:kSettingsPowercuffEnabled];
@@ -2265,6 +2269,9 @@ void settings_run_actions(void)
 
             log_user("[DONE] Run complete. Verbose trace captured the raw call stream.\n");
         } @finally {
+            // Stop the periodic checkpoint uploader before the final upload so
+            // the timer can't race a duplicate snapshot in after the closing one.
+            cyanide_stop_session_uploads();
             log_session_end();
             __sync_lock_release(&g_settings_actions_running);
             settings_reconcile_applied_from_defaults();
@@ -2361,6 +2368,26 @@ static NSString *settings_pretty_date_for_iso(NSString *iso)
 @property (nonatomic, assign) NSInteger underlyingSection;
 @property (nonatomic, copy)   NSString *bundleTitle;
 @end
+
+// Singleton delegate so MFMailCompose's host VC doesn't need to conform. Lives
+// for the app's lifetime — a single instance handles every dismissal across
+// every entry point (Settings → Contact, Installer → Contact button, etc.).
+@interface _CyanideMailDelegate : NSObject <MFMailComposeViewControllerDelegate>
+@end
+@implementation _CyanideMailDelegate
+- (void)mailComposeController:(MFMailComposeViewController *)c
+          didFinishWithResult:(MFMailComposeResult)r error:(NSError *)e
+{
+    (void)r; (void)e;
+    [c dismissViewControllerAnimated:YES completion:nil];
+}
+@end
+static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
+    static _CyanideMailDelegate *d;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ d = [[_CyanideMailDelegate alloc] init]; });
+    return d;
+}
 
 @implementation SettingsViewController
 
@@ -2515,7 +2542,7 @@ static NSString *settings_pretty_date_for_iso(NSString *iso)
     [icon setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
 
     UILabel *label = [[UILabel alloc] init];
-    label.text = @"Cyanide is not a permanent jailbreak — tweaks apply this session only and reset on reboot. Live tweaks like StatBar and Axon Lite stop if you force-quit Cyanide from the App Switcher. A progress log opens automatically while changes are applying; tap Hide to dismiss.";
+    label.text = @"Cyanide is a limited tweak environment — tweaks apply this session only and reset on reboot. Live tweaks like StatBar and Axon Lite stop if you force-quit Cyanide from the App Switcher. A progress log opens automatically while changes are applying; tap Hide to dismiss.";
     label.textColor = UIColor.labelColor;
     label.font = [UIFont systemFontOfSize:13 weight:UIFontWeightRegular];
     label.numberOfLines = 0;
@@ -2908,8 +2935,8 @@ static NSString *settings_pretty_date_for_iso(NSString *iso)
         cell.imageView.image = [SettingsViewController iconBadgeWithSymbol:@"doc.text.magnifyingglass" color:UIColor.systemGrayColor size:29.0];
         cell.textLabel.text = @"View Log";
     } else if (row == 2) {
-        cell.imageView.image = [SettingsViewController iconBadgeWithSymbol:@"square.and.arrow.up" color:UIColor.systemGreenColor size:29.0];
-        cell.textLabel.text = @"Share Log";
+        cell.imageView.image = [SettingsViewController iconBadgeWithSymbol:@"envelope.fill" color:UIColor.systemGreenColor size:29.0];
+        cell.textLabel.text = @"Contact";
     } else {
         cell.imageView.image = [SettingsViewController iconBadgeWithSymbol:@"icloud.and.arrow.up" color:UIColor.systemIndigoColor size:29.0];
         cell.textLabel.text = @"Auto-Upload Logs";
@@ -2967,12 +2994,26 @@ static NSString *settings_pretty_date_for_iso(NSString *iso)
     [self.navigationController pushViewController:vc animated:YES];
 }
 
-static void cyanide_upload_log_if_enabled(void) {
+// Session-scoped state so checkpoint snapshots from one chain run get grouped
+// on the server side (same sessionId, monotonically increasing seq). A fresh
+// session begins at every settings_run_actions() entry.
+static dispatch_source_t g_cyanide_upload_timer = NULL;
+static NSString         *g_cyanide_upload_session_id = nil;
+static volatile int      g_cyanide_upload_seq = 0;
+
+// kind = "checkpoint" (periodic snapshot during a chain run) or "final"
+// (post-completion). Checkpoints exist so we still get a diagnostic when a
+// crashing RemoteCall takes SpringBoard down (and Cyanide with it) before
+// the post-completion upload fires.
+static void cyanide_upload_log_with_kind(NSString *kind) {
     if (![[NSUserDefaults standardUserDefaults] boolForKey:kSettingsLogUploadEnabled]) return;
     NSString *path = log_most_recent_session_path();
     if (!path) return;
     NSString *rawLog = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
     if (!rawLog.length) return;
+
+    int seq = __sync_add_and_fetch(&g_cyanide_upload_seq, 1);
+    NSString *sessionId = g_cyanide_upload_session_id ?: @"adhoc";
 
     NSString *appVersion = settings_app_version_string();
     NSString *appBuild = settings_app_build_string();
@@ -2990,8 +3031,12 @@ static void cyanide_upload_log_if_enabled(void) {
         @"ios_version : %@\n"
         @"device      : %@\n"
         @"log_file    : %@\n"
+        @"session_id  : %@\n"
+        @"kind        : %@\n"
+        @"seq         : %d\n"
         @"==============================\n\n",
-        appVersion, appBuild, iosVersion, machine, path.lastPathComponent];
+        appVersion, appBuild, iosVersion, machine, path.lastPathComponent,
+        sessionId, kind, seq];
 
     NSDictionary *body = @{
         @"log": [header stringByAppendingString:rawLog],
@@ -3002,6 +3047,9 @@ static void cyanide_upload_log_if_enabled(void) {
             @"source":     @"cyanide",
             @"ios":        iosVersion,
             @"device":     machine,
+            @"sessionId":  sessionId,
+            @"kind":       kind,
+            @"seq":        @(seq),
         }
     };
     NSData *data = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
@@ -3011,61 +3059,129 @@ static void cyanide_upload_log_if_enabled(void) {
     req.HTTPMethod = @"POST";
     [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
     req.HTTPBody = data;
-    printf("[LOG] uploading diagnostic log (%zu bytes) to R2...\n", (size_t)data.length);
+    printf("[LOG] uploading diagnostic (%s seq=%d, %zu bytes)...\n",
+           kind.UTF8String, seq, (size_t)data.length);
     [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
         if (e) {
-            printf("[LOG] upload failed: %s\n", e.localizedDescription.UTF8String);
+            printf("[LOG] upload %s failed: %s\n", kind.UTF8String, e.localizedDescription.UTF8String);
         } else {
             NSHTTPURLResponse *http = (NSHTTPURLResponse *)r;
-            printf("[LOG] upload ok: HTTP %ld\n", (long)http.statusCode);
+            printf("[LOG] upload %s ok: HTTP %ld\n", kind.UTF8String, (long)http.statusCode);
         }
     }] resume];
 }
 
-- (void)openFeedbackEmail
+static void cyanide_upload_log_if_enabled(void) {
+    cyanide_upload_log_with_kind(@"final");
+}
+
+// Begin periodic checkpoint uploads. First fires quickly (3s) so even a chain
+// that crashes during initial kexploit setup leaves a snapshot behind; then
+// every 8s. Cancelled in the run's @finally before the "final" upload so the
+// timer never races the closing snapshot.
+static void cyanide_start_session_uploads(void) {
+    if (![[NSUserDefaults standardUserDefaults] boolForKey:kSettingsLogUploadEnabled]) return;
+    if (g_cyanide_upload_timer) return;
+
+    g_cyanide_upload_session_id = [[NSUUID UUID] UUIDString];
+    g_cyanide_upload_seq = 0;
+
+    dispatch_queue_t q = dispatch_get_global_queue(QOS_CLASS_UTILITY, 0);
+    dispatch_source_t t = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, q);
+    dispatch_source_set_timer(t,
+        dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)),
+        (uint64_t)(8 * NSEC_PER_SEC),
+        (uint64_t)(2 * NSEC_PER_SEC));
+    dispatch_source_set_event_handler(t, ^{
+        cyanide_upload_log_with_kind(@"checkpoint");
+    });
+    dispatch_resume(t);
+    g_cyanide_upload_timer = t;
+}
+
+static void cyanide_stop_session_uploads(void) {
+    if (!g_cyanide_upload_timer) return;
+    dispatch_source_cancel(g_cyanide_upload_timer);
+    g_cyanide_upload_timer = NULL;
+}
+
+// Contact owner (zeroxjf) with the diagnostic log inline in the body. Build
+// info sits between the user's typing area at the top and the log dump
+// below, so the user just types above the signature and hits send.
+- (void)openContactEmail
 {
+    cyanide_present_contact(self);
+}
+
+// Public entry point for the Contact flow. Builds the email body (signature
+// + inline diagnostic log) and presents MFMailComposeViewController from
+// `host` when Mail is set up, else opens a mailto: URL with a truncated log
+// tail so third-party mail apps still get useful context.
+void cyanide_present_contact(UIViewController *host)
+{
+    if (!host) return;
+
+    NSString *appVersion = settings_app_version_string();
+    NSString *iosVersion = [UIDevice currentDevice].systemVersion ?: @"unknown";
+    struct utsname info; uname(&info);
+    NSString *machine = [NSString stringWithUTF8String:info.machine];
+
+    // Single-line signature so it reads correctly even in mail clients that
+    // collapse newlines from mailto: bodies (Gmail-iOS being the worst offender).
+    NSString *signature = [NSString stringWithFormat:@"—— Cyanide %@ · iOS %@ · %@ ——",
+                           appVersion, iosVersion, machine];
+
     NSString *logPath = log_most_recent_session_path();
-    if (!logPath) {
-        UIAlertController *ac = [UIAlertController
-            alertControllerWithTitle:@"No Log Yet"
-                             message:@"Run a chain at least once to capture a log, then come back here to share it. Logs are also visible in Files app → On My iPhone → Cyanide."
-                      preferredStyle:UIAlertControllerStyleAlert];
-        [ac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-        [self presentViewController:ac animated:YES completion:nil];
+    NSString *logText = logPath
+        ? ([NSString stringWithContentsOfFile:logPath encoding:NSUTF8StringEncoding error:nil] ?: @"")
+        : @"";
+
+    NSString *subject = [NSString stringWithFormat:@"Cyanide %@ — Contact", appVersion];
+
+    // CRLF rather than LF so iOS Mail, Gmail, Outlook, and the mailto: URL
+    // path all preserve line breaks. Plain LF is fine in MFMailCompose but
+    // some third-party clients eat them when the body arrives via mailto:.
+    NSMutableString *body = [NSMutableString string];
+    [body appendString:@"\r\n\r\n\r\n"]; // breathing room at top for the user to type
+    [body appendString:signature];
+    [body appendString:@"\r\n\r\n"];
+    if (logText.length > 0) {
+        [body appendString:@"Diagnostic log:\r\n\r\n"];
+        [body appendString:logText];
+    } else {
+        [body appendString:@"(No diagnostic log captured yet — run a chain at least once and try again.)\r\n"];
+    }
+
+    if ([MFMailComposeViewController canSendMail]) {
+        MFMailComposeViewController *vc = [[MFMailComposeViewController alloc] init];
+        vc.mailComposeDelegate = _cyanide_mail_delegate();
+        [vc setToRecipients:@[@"zeroxjf@gmail.com"]];
+        [vc setSubject:subject];
+        [vc setMessageBody:body isHTML:NO];
+        [host presentViewController:vc animated:YES completion:nil];
         return;
     }
 
-    // Stage the log under NSTemporaryDirectory with a .txt extension so the
-    // share sheet treats it as plain text in every target app.
-    NSURL *src = [NSURL fileURLWithPath:logPath];
-    NSString *stem = src.lastPathComponent.stringByDeletingPathExtension;
-    NSString *txtName = [stem stringByAppendingPathExtension:@"txt"];
-    NSURL *dst = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:txtName]];
-    [[NSFileManager defaultManager] removeItemAtURL:dst error:nil];
-    NSError *copyErr = nil;
-    if (![[NSFileManager defaultManager] copyItemAtURL:src toURL:dst error:&copyErr]) {
-        UIAlertController *ac = [UIAlertController
-            alertControllerWithTitle:@"Couldn't Stage Log"
-                             message:copyErr.localizedDescription ?: @"Failed to prepare the log for sharing."
-                      preferredStyle:UIAlertControllerStyleAlert];
-        [ac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-        [self presentViewController:ac animated:YES completion:nil];
+    // Mail not configured — fall back to mailto:. Bodies get URL-encoded so
+    // long logs produce long URLs; in practice iOS LaunchServices accepts
+    // ~64KB and third-party mail apps still receive the full body. We send
+    // the full log regardless and trust the client to handle it.
+    NSCharacterSet *allowed = [NSCharacterSet URLQueryAllowedCharacterSet];
+    NSString *q = [NSString stringWithFormat:@"subject=%@&body=%@",
+        [subject stringByAddingPercentEncodingWithAllowedCharacters:allowed] ?: @"",
+        [body stringByAddingPercentEncodingWithAllowedCharacters:allowed] ?: @""];
+    NSURL *url = [NSURL URLWithString:[@"mailto:zeroxjf@gmail.com?" stringByAppendingString:q]];
+    if (url && [[UIApplication sharedApplication] canOpenURL:url]) {
+        [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
         return;
     }
 
-    NSString *logText = [NSString stringWithContentsOfURL:dst encoding:NSUTF8StringEncoding error:nil]
-                        ?: @"(empty log)";
-    UIActivityViewController *vc = [[UIActivityViewController alloc] initWithActivityItems:@[logText]
-                                                                     applicationActivities:nil];
-    // iPad needs a popover anchor; iPhone ignores these properties.
-    if (vc.popoverPresentationController) {
-        vc.popoverPresentationController.sourceView = self.view;
-        vc.popoverPresentationController.sourceRect = CGRectMake(self.view.bounds.size.width / 2.0,
-                                                                  self.view.bounds.size.height / 2.0,
-                                                                  0, 0);
-        vc.popoverPresentationController.permittedArrowDirections = 0;
-    }
-    [self presentViewController:vc animated:YES completion:nil];
+    UIAlertController *ac = [UIAlertController
+        alertControllerWithTitle:@"Mail Not Available"
+                         message:@"Set up Mail in iOS Settings to send feedback, or DM @zeroxjf on Twitter. View Log in Settings to copy the latest diagnostic log."
+                  preferredStyle:UIAlertControllerStyleAlert];
+    [ac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    [host presentViewController:ac animated:YES completion:nil];
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
@@ -3428,7 +3544,7 @@ static void cyanide_upload_log_if_enabled(void) {
             case RootSectionAbout:
                 if (indexPath.row == 0)      [self openTwitter];
                 else if (indexPath.row == 1) [self openViewLog];
-                else if (indexPath.row == 2) [self openFeedbackEmail];
+                else if (indexPath.row == 2) [self openContactEmail];
                 // row 3: toggle — handled by UISwitch target, no action here
                 return;
             case RootSectionCount:
