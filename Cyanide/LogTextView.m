@@ -207,6 +207,25 @@ void log_session_end(void) {
     pthread_mutex_unlock(&log_mutex);
 }
 
+NSString *log_inapp_buffer_snapshot(void) {
+    pthread_mutex_lock(&log_mutex);
+    NSMutableString *out = [NSMutableString stringWithCapacity:log_count * 80];
+    for (int i = 0; i < log_count; i++) {
+        [out appendFormat:@"%s\n", log_buf[i]];
+    }
+    // Also flush the in-progress line that hasn't seen its newline yet, so
+    // mid-flight chain state isn't dropped from the snapshot.
+    if (line_pos > 0) {
+        char tail[LOG_LINE_SIZE];
+        int n = line_pos < LOG_LINE_SIZE - 1 ? line_pos : LOG_LINE_SIZE - 1;
+        memcpy(tail, line_buf, n);
+        tail[n] = '\0';
+        [out appendFormat:@"%s", tail];
+    }
+    pthread_mutex_unlock(&log_mutex);
+    return out;
+}
+
 NSString *log_most_recent_session_path(void) {
     @autoreleasepool {
         NSURL *dir = log_session_dir_url();

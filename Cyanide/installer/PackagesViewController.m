@@ -93,37 +93,78 @@ static NSString * const kGroupByCategoryDefault = @"installer.groupByCategory";
 
 #pragma mark - Tips header
 
-- (NSAttributedString *)tipsAttributedText
+// Each entry becomes a row in the card: leading SF Symbol icon, then bold
+// title + body text wrapping below. Order matters — top to bottom.
+- (NSArray<NSDictionary *> *)tipsEntries
 {
-    UIFont *heading  = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
-    UIFont *body     = [UIFont systemFontOfSize:13 weight:UIFontWeightRegular];
-    UIFont *bodyBold = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+    return @[
+        @{ @"icon":  @"bolt.fill",
+           @"color": UIColor.systemYellowColor,
+           @"title": @"Axon Lite — still beta",
+           @"body":  @"Recent passes improved filter switching speed and fixed the duplicate-icon bug, but it's a beta and still has rough edges. Hit Contact below if you run into one." },
+        @{ @"icon":  @"exclamationmark.triangle.fill",
+           @"color": UIColor.systemOrangeColor,
+           @"title": @"Don't force-quit Cyanide",
+           @"body":  @"From the App Switcher kills live tweaks instantly — StatBar, Axon Lite, and anything else running per session stops the moment the app dies." },
+        @{ @"icon":  @"envelope.fill",
+           @"color": UIColor.systemBlueColor,
+           @"title": @"Need specific help?",
+           @"body":  @"Diagnostic logs auto-upload (with consent) so I can catch issues. Use the button below to reach me directly with your device info — tell me what you ran into." },
+    ];
+}
 
-    UIColor *primary   = UIColor.labelColor;
-    UIColor *secondary = UIColor.secondaryLabelColor;
-    UIColor *warn      = UIColor.systemOrangeColor;
+// Builds the icon + title/body subview for one tip row at a fixed width.
+// Returns the row with its frame already sized to fit the text.
+- (UIView *)buildTipRowWithIcon:(NSString *)iconName
+                          color:(UIColor *)color
+                          title:(NSString *)title
+                           body:(NSString *)body
+                          width:(CGFloat)width
+{
+    CGFloat iconSize  = 22.0;
+    CGFloat iconGap   = 12.0;
+    CGFloat textX     = iconSize + iconGap;
+    CGFloat textWidth = width - textX;
+
+    UIView *row = [[UIView alloc] init];
+
+    UIImageSymbolConfiguration *symCfg =
+        [UIImageSymbolConfiguration configurationWithPointSize:16.0 weight:UIImageSymbolWeightSemibold];
+    UIImageView *icon = [[UIImageView alloc] initWithImage:
+        [[UIImage systemImageNamed:iconName withConfiguration:symCfg]
+            imageWithTintColor:color renderingMode:UIImageRenderingModeAlwaysOriginal]];
+    icon.contentMode = UIViewContentModeCenter;
+    icon.frame = CGRectMake(0, 1, iconSize, iconSize);
+    [row addSubview:icon];
 
     NSMutableParagraphStyle *para = [[NSMutableParagraphStyle alloc] init];
-    para.lineSpacing = 2.0;
-    para.paragraphSpacing = 8.0;
-
-    NSDictionary *bodyAttr     = @{NSFontAttributeName: body,     NSForegroundColorAttributeName: secondary, NSParagraphStyleAttributeName: para};
-    NSDictionary *bodyBoldAttr = @{NSFontAttributeName: bodyBold, NSForegroundColorAttributeName: primary,   NSParagraphStyleAttributeName: para};
-    NSDictionary *warnBoldAttr = @{NSFontAttributeName: bodyBold, NSForegroundColorAttributeName: warn,      NSParagraphStyleAttributeName: para};
-    NSDictionary *headAttr     = @{NSFontAttributeName: heading,  NSForegroundColorAttributeName: primary,   NSParagraphStyleAttributeName: para};
+    para.lineSpacing = 1.5;
 
     NSMutableAttributedString *as = [[NSMutableAttributedString alloc] init];
-    [as appendAttributedString:[[NSAttributedString alloc] initWithString:@"What's New & Tips\n" attributes:headAttr]];
+    [as appendAttributedString:[[NSAttributedString alloc] initWithString:title attributes:@{
+        NSFontAttributeName: [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold],
+        NSForegroundColorAttributeName: UIColor.labelColor,
+        NSParagraphStyleAttributeName: para,
+    }]];
+    [as appendAttributedString:[[NSAttributedString alloc] initWithString:@"\n" attributes:@{
+        NSFontAttributeName: [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold],
+    }]];
+    [as appendAttributedString:[[NSAttributedString alloc] initWithString:body attributes:@{
+        NSFontAttributeName: [UIFont systemFontOfSize:13 weight:UIFontWeightRegular],
+        NSForegroundColorAttributeName: UIColor.secondaryLabelColor,
+        NSParagraphStyleAttributeName: para,
+    }]];
 
-    [as appendAttributedString:[[NSAttributedString alloc] initWithString:@"Axon Lite is much faster and more reliable now — snappier filter switching, no duplicate icons, and the bundle row settles into place immediately on the lockscreen.\n" attributes:bodyAttr]];
+    UILabel *label = [[UILabel alloc] init];
+    label.numberOfLines = 0;
+    label.preferredMaxLayoutWidth = textWidth;
+    label.attributedText = as;
+    CGSize fit = [label sizeThatFits:CGSizeMake(textWidth, CGFLOAT_MAX)];
+    label.frame = CGRectMake(textX, 0, textWidth, fit.height);
+    [row addSubview:label];
 
-    [as appendAttributedString:[[NSAttributedString alloc] initWithString:@"Heads up: " attributes:warnBoldAttr]];
-    [as appendAttributedString:[[NSAttributedString alloc] initWithString:@"don't force-quit Cyanide from the App Switcher." attributes:bodyBoldAttr]];
-    [as appendAttributedString:[[NSAttributedString alloc] initWithString:@" Live tweaks (StatBar, Axon Lite, etc.) stop the moment the app is killed.\n" attributes:bodyAttr]];
-
-    [as appendAttributedString:[[NSAttributedString alloc] initWithString:@"Logs auto-upload (with your consent) to help me catch issues. If you need more specific help, hit the button below — it'll open an email to me with your latest log + device info already included." attributes:bodyAttr]];
-
-    return as;
+    row.frame = CGRectMake(0, 0, width, MAX(fit.height, iconSize));
+    return row;
 }
 
 - (void)installTipsHeader
@@ -132,19 +173,57 @@ static NSString * const kGroupByCategoryDefault = @"installer.groupByCategory";
     if (width <= 0) width = UIScreen.mainScreen.bounds.size.width;
 
     CGFloat horizontalMargin = 16.0;
-    CGFloat verticalPadding  = 14.0;
+    CGFloat topPadding       = 14.0;
+    CGFloat bottomPadding    = 0.0;     // section header below adds its own breathing room
     CGFloat cardInset        = 14.0;
-    CGFloat textWidth        = width - horizontalMargin * 2 - cardInset * 2;
-    CGFloat buttonGap        = 12.0;
+    CGFloat contentWidth     = width - horizontalMargin * 2 - cardInset * 2;
+    CGFloat rowGap           = 14.0;
+    CGFloat headingGap       = 10.0;    // gap after heading
+    CGFloat buttonGap        = 14.0;
     CGFloat buttonHeight     = 36.0;
 
-    UILabel *label = [[UILabel alloc] init];
-    label.numberOfLines = 0;
-    label.attributedText = [self tipsAttributedText];
-    label.preferredMaxLayoutWidth = textWidth;
-    CGSize labelFit = [label sizeThatFits:CGSizeMake(textWidth, CGFLOAT_MAX)];
-    label.frame = CGRectMake(cardInset, cardInset, textWidth, labelFit.height);
+    NSMutableArray<UIView *> *placed = [NSMutableArray array];
+    CGFloat y = cardInset;
 
+    // Heading: "What's New & Tips" with a sparkles glyph for some personality.
+    UILabel *heading = [[UILabel alloc] init];
+    heading.numberOfLines = 1;
+    NSMutableAttributedString *headAS = [[NSMutableAttributedString alloc] init];
+    NSTextAttachment *sparkle = [[NSTextAttachment alloc] init];
+    UIImageSymbolConfiguration *headCfg =
+        [UIImageSymbolConfiguration configurationWithPointSize:15.0 weight:UIImageSymbolWeightSemibold];
+    sparkle.image = [[UIImage systemImageNamed:@"sparkles" withConfiguration:headCfg]
+                        imageWithTintColor:UIColor.systemPurpleColor
+                          renderingMode:UIImageRenderingModeAlwaysOriginal];
+    [headAS appendAttributedString:[NSAttributedString attributedStringWithAttachment:sparkle]];
+    [headAS appendAttributedString:[[NSAttributedString alloc] initWithString:@"  What's New & Tips" attributes:@{
+        NSFontAttributeName: [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold],
+        NSForegroundColorAttributeName: UIColor.labelColor,
+    }]];
+    heading.attributedText = headAS;
+    CGSize headFit = [heading sizeThatFits:CGSizeMake(contentWidth, CGFLOAT_MAX)];
+    heading.frame = CGRectMake(cardInset, y, contentWidth, headFit.height);
+    [placed addObject:heading];
+    y += headFit.height + headingGap;
+
+    // Tip rows
+    NSArray<NSDictionary *> *entries = [self tipsEntries];
+    for (NSDictionary *entry in entries) {
+        UIView *row = [self buildTipRowWithIcon:entry[@"icon"]
+                                          color:entry[@"color"]
+                                          title:entry[@"title"]
+                                           body:entry[@"body"]
+                                          width:contentWidth];
+        CGRect f = row.frame;
+        f.origin = CGPointMake(cardInset, y);
+        row.frame = f;
+        [placed addObject:row];
+        y += f.size.height + rowGap;
+    }
+    y -= rowGap;        // last row didn't need trailing gap
+    y += buttonGap;     // explicit gap before the button
+
+    // Contact button
     UIButtonConfiguration *cfg = [UIButtonConfiguration tintedButtonConfiguration];
     cfg.title = @"Contact zeroxjf";
     cfg.image = [UIImage systemImageNamed:@"envelope.fill"];
@@ -157,21 +236,21 @@ static NSString * const kGroupByCategoryDefault = @"installer.groupByCategory";
         typeof(self) strongSelf = weakSelf;
         if (strongSelf) cyanide_present_contact(strongSelf);
     }]];
-    CGFloat buttonY = cardInset + labelFit.height + buttonGap;
-    contact.frame = CGRectMake(cardInset, buttonY, textWidth, buttonHeight);
+    contact.frame = CGRectMake(cardInset, y, contentWidth, buttonHeight);
+    [placed addObject:contact];
+    y += buttonHeight + cardInset;
 
     UIView *card = [[UIView alloc] initWithFrame:CGRectMake(horizontalMargin,
-                                                            verticalPadding,
+                                                            topPadding,
                                                             width - horizontalMargin * 2,
-                                                            buttonY + buttonHeight + cardInset)];
+                                                            y)];
     card.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
     card.layer.cornerRadius = 12.0;
     card.layer.cornerCurve = kCACornerCurveContinuous;
-    [card addSubview:label];
-    [card addSubview:contact];
+    for (UIView *v in placed) [card addSubview:v];
 
     UIView *container = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width,
-                                                                 card.frame.size.height + verticalPadding * 2)];
+                                                                 card.frame.size.height + topPadding + bottomPadding)];
     [container addSubview:card];
 
     self.tableView.tableHeaderView = container;
@@ -292,6 +371,44 @@ static NSString * const kGroupByCategoryDefault = @"installer.groupByCategory";
         return (NSInteger)self.packagesByCategory[cat].count;
     }
     return (NSInteger)self.flatPackages.count;
+}
+
+- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section
+{
+    // Tighten the first category header so it doesn't sit far below the tips
+    // card. Subsequent category headers keep their natural spacing.
+    if (section == 0) return 26.0;
+    return UITableViewAutomaticDimension;
+}
+
+- (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section
+{
+    // Custom only for the first category header so the gap to the tips card
+    // is tight. A plain UIView (not UITableViewHeaderFooterView) avoids the
+    // header-footer's built-in textLabel auto-rendering the system title on
+    // top of our own.
+    if (section != 0) return nil;
+    NSString *title = [self tableView:tableView titleForHeaderInSection:section];
+    if (!title.length) return nil;
+
+    UIView *hdr = [[UIView alloc] init];
+    UILabel *lbl = [[UILabel alloc] init];
+    // Match the system's plain-style header look: uppercase, footnote weight,
+    // secondary label color. Tracking is tightened a touch for the small caps.
+    NSDictionary *attrs = @{
+        NSFontAttributeName: [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold],
+        NSForegroundColorAttributeName: UIColor.secondaryLabelColor,
+        NSKernAttributeName: @(0.4),
+    };
+    lbl.attributedText = [[NSAttributedString alloc] initWithString:title.uppercaseString attributes:attrs];
+    lbl.translatesAutoresizingMaskIntoConstraints = NO;
+    [hdr addSubview:lbl];
+    [NSLayoutConstraint activateConstraints:@[
+        [lbl.leadingAnchor  constraintEqualToAnchor:hdr.layoutMarginsGuide.leadingAnchor],
+        [lbl.trailingAnchor constraintEqualToAnchor:hdr.layoutMarginsGuide.trailingAnchor],
+        [lbl.bottomAnchor   constraintEqualToAnchor:hdr.bottomAnchor constant:-4.0],
+    ]];
+    return hdr;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section

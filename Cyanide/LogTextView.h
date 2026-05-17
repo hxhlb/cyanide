@@ -30,6 +30,13 @@ void log_session_end(void);
 // Absolute path of the most recent session log file, or nil if none exist.
 NSString * _Nullable log_most_recent_session_path(void);
 
+// Snapshot of the in-app ring buffer (joined with '\n'). Always reflects the
+// current state of what the user sees in Settings → View Log — boot identity,
+// chain output, anything emitted via the printf macro / log_user. Returned
+// even when no chain session is active, so the Contact email can ship live
+// context regardless of whether log_session_begin/end ran.
+NSString *log_inapp_buffer_snapshot(void);
+
 // Mirror printf into the LogTextView ring buffer. Any TU that imports this
 // header gets its printf calls echoed both to stdout and to the in-app log.
 #define printf(fmt, ...) ({ \

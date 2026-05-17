@@ -3131,26 +3131,18 @@ void cyanide_present_contact(UIViewController *host)
     NSString *signature = [NSString stringWithFormat:@"—— Cyanide %@ · iOS %@ · %@ ——",
                            appVersion, iosVersion, machine];
 
-    NSString *logPath = log_most_recent_session_path();
-    NSString *logText = logPath
-        ? ([NSString stringWithContentsOfFile:logPath encoding:NSUTF8StringEncoding error:nil] ?: @"")
-        : @"";
-
     NSString *subject = [NSString stringWithFormat:@"Cyanide %@ — Contact", appVersion];
 
     // CRLF rather than LF so iOS Mail, Gmail, Outlook, and the mailto: URL
     // path all preserve line breaks. Plain LF is fine in MFMailCompose but
     // some third-party clients eat them when the body arrives via mailto:.
+    // Log inclusion is intentionally omitted for now — pipeline was unreliable
+    // (in-app buffer snapshot wasn't landing in the email). Build/device info
+    // still ships in the signature so I can at least see the user's setup.
     NSMutableString *body = [NSMutableString string];
     [body appendString:@"\r\n\r\n\r\n"]; // breathing room at top for the user to type
     [body appendString:signature];
-    [body appendString:@"\r\n\r\n"];
-    if (logText.length > 0) {
-        [body appendString:@"Diagnostic log:\r\n\r\n"];
-        [body appendString:logText];
-    } else {
-        [body appendString:@"(No diagnostic log captured yet — run a chain at least once and try again.)\r\n"];
-    }
+    [body appendString:@"\r\n"];
 
     if ([MFMailComposeViewController canSendMail]) {
         MFMailComposeViewController *vc = [[MFMailComposeViewController alloc] init];

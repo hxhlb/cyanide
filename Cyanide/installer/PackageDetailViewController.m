@@ -170,7 +170,8 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
 
 - (UIView *)buildHeaderView
 {
-    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 130.0)];
+    CGFloat width = self.view.bounds.size.width;
+    UIView *header = [[UIView alloc] init];
     header.backgroundColor = UIColor.clearColor;
 
     // Icon
@@ -208,23 +209,22 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
         badge = [self badgeWithText:[self otaStateText].uppercaseString
                          background:[color colorWithAlphaComponent:0.16]
                           textColor:color];
-        badge.translatesAutoresizingMaskIntoConstraints = NO;
-        [header addSubview:badge];
     } else if (self.package.isInstallDisabled) {
         badge = [self badgeWithText:@"BUGGY"
                          background:[UIColor.systemRedColor colorWithAlphaComponent:0.16]
                           textColor:UIColor.systemRedColor];
-        badge.translatesAutoresizingMaskIntoConstraints = NO;
-        [header addSubview:badge];
     } else if (self.package.isNew) {
         badge = [self badgeWithText:@"NEW"
                          background:[UIColor colorWithRed:0.95 green:0.55 blue:0.05 alpha:0.18]
                           textColor:[UIColor systemOrangeColor]];
+    }
+    if (badge) {
         badge.translatesAutoresizingMaskIntoConstraints = NO;
         [header addSubview:badge];
     }
 
-    [NSLayoutConstraint activateConstraints:@[
+    NSMutableArray<NSLayoutConstraint *> *cs = [NSMutableArray array];
+    [cs addObjectsFromArray:@[
         [iconView.topAnchor      constraintEqualToAnchor:header.topAnchor constant:10.0],
         [iconView.centerXAnchor  constraintEqualToAnchor:header.centerXAnchor],
         [iconView.widthAnchor    constraintEqualToConstant:60.0],
@@ -238,13 +238,28 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
         [subLabel.leadingAnchor   constraintEqualToAnchor:header.leadingAnchor constant:16.0],
         [subLabel.trailingAnchor  constraintEqualToAnchor:header.trailingAnchor constant:-16.0],
     ]];
-    if (badge) {
-        [NSLayoutConstraint activateConstraints:@[
-            [badge.topAnchor      constraintEqualToAnchor:subLabel.bottomAnchor constant:6.0],
-            [badge.centerXAnchor  constraintEqualToAnchor:header.centerXAnchor],
-        ]];
-    }
 
+    // Anchor the *last* element to the bottom so the header self-sizes. Bumped
+    // the sub→badge gap from 6→12 and the badge→bottom gap to 14 so the pill
+    // gets clear breathing room above and below (it was clipping the
+    // description box below before).
+    if (badge) {
+        [cs addObjectsFromArray:@[
+            [badge.topAnchor       constraintEqualToAnchor:subLabel.bottomAnchor constant:12.0],
+            [badge.centerXAnchor   constraintEqualToAnchor:header.centerXAnchor],
+            [badge.bottomAnchor    constraintEqualToAnchor:header.bottomAnchor constant:-14.0],
+        ]];
+    } else {
+        [cs addObject:[subLabel.bottomAnchor constraintEqualToAnchor:header.bottomAnchor constant:-12.0]];
+    }
+    [NSLayoutConstraint activateConstraints:cs];
+
+    // tableHeaderView needs an explicit frame — auto layout inside it doesn't
+    // size the slot. Ask the view for its natural height at the table's width.
+    CGSize fit = [header systemLayoutSizeFittingSize:CGSizeMake(width, UILayoutFittingCompressedSize.height)
+                       withHorizontalFittingPriority:UILayoutPriorityRequired
+                             verticalFittingPriority:UILayoutPriorityFittingSizeLevel];
+    header.frame = CGRectMake(0, 0, width, fit.height);
     return header;
 }
 
