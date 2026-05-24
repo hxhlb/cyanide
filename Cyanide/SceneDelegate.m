@@ -87,8 +87,9 @@
 - (void)sceneDidBecomeActive:(UIScene *)scene {
     [self selectInitialTabIfNeeded];
     settings_application_did_become_active();
-    // Independent paths: log collection opt-in notice (one-time) and update check
-    // (every foreground, deduped per-process by UpdateChecker.didCheckThisLaunch).
+    // Independent paths: log collection opt-in notice (one-time) and update
+    // check (every foreground; UpdateChecker enforces a per-process + 24-hour
+    // persisted throttle so the API isn't hammered).
     // The two can stack on first launch — that's intentional, an available
     // update shouldn't be hidden behind a privacy preference.
     [self showLogCollectionOptInNoticeIfNeeded];

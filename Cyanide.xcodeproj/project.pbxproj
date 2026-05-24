@@ -24,6 +24,7 @@
 		AAA297772F72D439000B5902 /* Cyanide.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Cyanide.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AAA2982D2F741178000B5902 /* ChOma.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = ChOma.xcodeproj; sourceTree = "<group>"; };
 		FB0A9F7E2FBBBE5100C03573 /* ChOma.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = ChOma.xcodeproj; sourceTree = "<group>"; };
+		FB222AA92FC36B8A001D5118 /* ChOma.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = ChOma.xcodeproj; sourceTree = "<group>"; };
 		FB4112152FB93FB800461945 /* ChOma.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = ChOma.xcodeproj; sourceTree = "<group>"; };
 		FB4117392FB9597C00461945 /* ChOma.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = ChOma.xcodeproj; sourceTree = "<group>"; };
 		FB5948FE2FC0DFEA006FB8AE /* ChOma.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = ChOma.xcodeproj; sourceTree = "<group>"; };
@@ -186,6 +187,13 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		FB222ADB2FC36B8A001D5118 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
 		FB4112462FB93FB800461945 /* Products */ = {
 			isa = PBXGroup;
 			children = (
@@ -337,10 +345,6 @@
 					ProjectRef = FB4117392FB9597C00461945 /* ChOma.xcodeproj */;
 				},
 				{
-					ProductGroup = FBFA386B2FB68E0600B9F081 /* Products */;
-					ProjectRef = FBFA38382FB68E0600B9F081 /* ChOma.xcodeproj */;
-				},
-				{
 					ProductGroup = FBE1CBB32FC0EA040043E3DA /* Products */;
 					ProjectRef = FBE1CB812FC0EA040043E3DA /* ChOma.xcodeproj */;
 				},
@@ -349,20 +353,16 @@
 					ProjectRef = AA794BC92F828668001F0544 /* ChOma.xcodeproj */;
 				},
 				{
-					ProductGroup = FBBF22B02FAE5E7E00AF5849 /* Products */;
-					ProjectRef = FBBF227D2FAE5E7E00AF5849 /* ChOma.xcodeproj */;
+					ProductGroup = FB0A9FB02FBBBE5100C03573 /* Products */;
+					ProjectRef = FB0A9F7E2FBBBE5100C03573 /* ChOma.xcodeproj */;
 				},
 				{
 					ProductGroup = FB4112462FB93FB800461945 /* Products */;
 					ProjectRef = FB4112152FB93FB800461945 /* ChOma.xcodeproj */;
 				},
 				{
-					ProductGroup = FB0A9FB02FBBBE5100C03573 /* Products */;
-					ProjectRef = FB0A9F7E2FBBBE5100C03573 /* ChOma.xcodeproj */;
-				},
-				{
-					ProductGroup = FBE1D66F2FC239CE0043E3DA /* Products */;
-					ProjectRef = FBE1D63D2FC239CE0043E3DA /* ChOma.xcodeproj */;
+					ProductGroup = FB222ADB2FC36B8A001D5118 /* Products */;
+					ProjectRef = FB222AA92FC36B8A001D5118 /* ChOma.xcodeproj */;
 				},
 				{
 					ProductGroup = FBA008852FB522840080FFE2 /* Products */;
@@ -377,12 +377,24 @@
 					ProjectRef = AAA2982D2F741178000B5902 /* ChOma.xcodeproj */;
 				},
 				{
-					ProductGroup = FB5949302FC0DFEA006FB8AE /* Products */;
-					ProjectRef = FB5948FE2FC0DFEA006FB8AE /* ChOma.xcodeproj */;
-				},
-				{
 					ProductGroup = FBAA38092FB96407003A81C6 /* Products */;
 					ProjectRef = FBAA37D72FB96407003A81C6 /* ChOma.xcodeproj */;
+				},
+				{
+					ProductGroup = FBFA386B2FB68E0600B9F081 /* Products */;
+					ProjectRef = FBFA38382FB68E0600B9F081 /* ChOma.xcodeproj */;
+				},
+				{
+					ProductGroup = FBBF22B02FAE5E7E00AF5849 /* Products */;
+					ProjectRef = FBBF227D2FAE5E7E00AF5849 /* ChOma.xcodeproj */;
+				},
+				{
+					ProductGroup = FBE1D66F2FC239CE0043E3DA /* Products */;
+					ProjectRef = FBE1D63D2FC239CE0043E3DA /* ChOma.xcodeproj */;
+				},
+				{
+					ProductGroup = FB5949302FC0DFEA006FB8AE /* Products */;
+					ProjectRef = FB5948FE2FC0DFEA006FB8AE /* ChOma.xcodeproj */;
 				},
 				{
 					ProductGroup = FBA376492FB7FE5600886898 /* Products */;
@@ -444,7 +456,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1001008;
+				CURRENT_PROJECT_VERSION = 1001009;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = F34HD53UWS;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
@@ -472,7 +484,7 @@
 					"$(PROJECT_DIR)/Cyanide/XPF/external/ChOma/external/ios",
 					"$(PROJECT_DIR)/Cyanide/resident/output",
 				);
-				MARKETING_VERSION = 1.1.8;
+				MARKETING_VERSION = 1.1.9;
 				OTHER_CFLAGS = "";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.zeroxjf.ios-cyanide1";
 				PRODUCT_NAME = Cyanide;
@@ -494,7 +506,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1001008;
+				CURRENT_PROJECT_VERSION = 1001009;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = F34HD53UWS;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
@@ -522,7 +534,7 @@
 					"$(PROJECT_DIR)/Cyanide/XPF/external/ChOma/external/ios",
 					"$(PROJECT_DIR)/Cyanide/resident/output",
 				);
-				MARKETING_VERSION = 1.1.8;
+				MARKETING_VERSION = 1.1.9;
 				OTHER_CFLAGS = "";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.zeroxjf.ios-cyanide1";
 				PRODUCT_NAME = Cyanide;

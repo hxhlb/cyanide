@@ -8,10 +8,20 @@
 static NSString * const kReleasesAPI             = @"https://api.github.com/repos/zeroxjf/cyanide-ios/releases/latest";
 static NSString * const kUpdateSkippedVersionKey = @"installer.update.skippedVersion";
 static NSString * const kUpdateSnoozeUntilKey    = @"installer.update.snoozeUntil";
+static NSString * const kUpdateLastCheckAtKey    = @"installer.update.lastCheckAt";
 static const NSTimeInterval kSnoozeDuration      = 24 * 60 * 60; // 24h
+// Auto-check throttle. Replaces the old "once per process" guard so a
+// long-running suspended process doesn't permanently squelch the launch
+// check. Only set after a *completed* HTTP response (success or controlled
+// rejection), so a network failure doesn't burn the window.
+static const NSTimeInterval kAutoCheckMinInterval = 24 * 60 * 60; // 24h
 
 @interface UpdateChecker ()
-@property (nonatomic, assign) BOOL didCheckThisLaunch;
+// True once a *completed* auto-check has run in this process. Combined with
+// the persisted timestamp below: a fresh process always gets one check, and
+// a long-resident process re-checks after the throttle window elapses.
+@property (nonatomic, assign) BOOL didCompleteAutoCheckThisProcess;
+@property (nonatomic, assign) BOOL autoCheckInFlight;
 @end
 
 @implementation UpdateChecker
@@ -54,12 +64,32 @@ static int compare_versions(NSString *a, NSString *b)
 
 - (void)checkForUpdatesIfNeededFrom:(UIViewController *)presenter
 {
-    if (self.didCheckThisLaunch) return;
-    self.didCheckThisLaunch = YES;
     if (!presenter) return;
+    if (self.autoCheckInFlight) return;
 
-    printf("[UPDATE] checking latest release (current=%s)\n",
-           self.currentVersion.UTF8String);
+    // Two-gate policy: fire when EITHER this process hasn't completed an
+    // auto-check yet, OR the persisted throttle window has elapsed. The
+    // per-process flag guarantees one check on cold launch even if a
+    // recently-quit prior process already stamped the timestamp; the
+    // timestamp re-arms within a long-resident process after kAutoCheckMinInterval.
+    BOOL processNeedsCheck = !self.didCompleteAutoCheckThisProcess;
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    NSDate *lastAt = [d objectForKey:kUpdateLastCheckAtKey];
+    BOOL throttleElapsed = YES;
+    if ([lastAt isKindOfClass:NSDate.class]) {
+        NSTimeInterval since = -[lastAt timeIntervalSinceNow];
+        throttleElapsed = (since < 0) || (since >= kAutoCheckMinInterval);
+    }
+    if (!processNeedsCheck && !throttleElapsed) {
+        NSTimeInterval since = lastAt ? -[lastAt timeIntervalSinceNow] : 0;
+        printf("[UPDATE] auto-check skipped: throttled (%.0fs since last, window=%.0fs)\n",
+               since, kAutoCheckMinInterval);
+        return;
+    }
+    self.autoCheckInFlight = YES;
+
+    printf("[UPDATE] checking latest release (current=%s, processFirst=%d, throttleElapsed=%d)\n",
+           self.currentVersion.UTF8String, processNeedsCheck, throttleElapsed);
 
     NSURL *url = [NSURL URLWithString:kReleasesAPI];
     NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url
@@ -72,7 +102,13 @@ static int compare_versions(NSString *a, NSString *b)
         dataTaskWithRequest:req
           completionHandler:^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error)
     {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (strongSelf) strongSelf.autoCheckInFlight = NO;
+
         if (error || !data) {
+            // Don't stamp the timestamp or set the per-process flag — a
+            // network failure shouldn't burn either gate; next foreground
+            // should retry.
             printf("[UPDATE] check failed: %s\n",
                    error ? error.localizedDescription.UTF8String : "no data");
             return;
@@ -88,26 +124,32 @@ static int compare_versions(NSString *a, NSString *b)
         NSString *htmlURL = release[@"html_url"];
         id bodyObj        = release[@"body"];
         NSString *body    = [bodyObj isKindOfClass:NSString.class] ? (NSString *)bodyObj : nil;
-        if (![tag isKindOfClass:NSString.class] || ![htmlURL isKindOfClass:NSString.class]) return;
+        if (![tag isKindOfClass:NSString.class] || ![htmlURL isKindOfClass:NSString.class]) {
+            printf("[UPDATE] release feed missing tag_name/html_url\n");
+            return;
+        }
 
-        __strong typeof(weakSelf) self_ = weakSelf;
-        if (!self_) return;
+        // From here we have a usable response — burn both gates.
+        if (strongSelf) strongSelf.didCompleteAutoCheckThisProcess = YES;
+        [[NSUserDefaults standardUserDefaults] setObject:[NSDate date] forKey:kUpdateLastCheckAtKey];
 
-        NSString *latest  = [self_ normalizeTag:tag];
-        NSString *current = [self_ currentVersion];
+        if (!strongSelf) return;
+
+        NSString *latest  = [strongSelf normalizeTag:tag];
+        NSString *current = [strongSelf currentVersion];
         if (compare_versions(latest, current) <= 0) {
             printf("[UPDATE] already on latest (current=%s latest=%s)\n",
                    current.UTF8String, latest.UTF8String);
             return;
         }
 
-        NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
-        NSString *skipped = [d stringForKey:kUpdateSkippedVersionKey];
+        NSUserDefaults *d2 = [NSUserDefaults standardUserDefaults];
+        NSString *skipped = [d2 stringForKey:kUpdateSkippedVersionKey];
         if (skipped && [skipped isEqualToString:latest]) {
             printf("[UPDATE] version %s skipped by user; not prompting\n", latest.UTF8String);
             return;
         }
-        NSDate *snoozeUntil = [d objectForKey:kUpdateSnoozeUntilKey];
+        NSDate *snoozeUntil = [d2 objectForKey:kUpdateSnoozeUntilKey];
         if ([snoozeUntil isKindOfClass:NSDate.class] && [snoozeUntil compare:[NSDate date]] == NSOrderedDescending) {
             printf("[UPDATE] snoozed until %s; not prompting\n", snoozeUntil.description.UTF8String);
             return;
@@ -117,11 +159,11 @@ static int compare_versions(NSString *a, NSString *b)
                latest.UTF8String, current.UTF8String);
 
         dispatch_async(dispatch_get_main_queue(), ^{
-            [self_ presentUpdateAlertFrom:presenter
-                                   latest:latest
-                                  current:current
-                                      url:htmlURL
-                                    notes:body];
+            [strongSelf presentUpdateAlertFrom:presenter
+                                        latest:latest
+                                       current:current
+                                           url:htmlURL
+                                         notes:body];
         });
     }];
     [task resume];

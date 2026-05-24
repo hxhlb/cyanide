@@ -28,5 +28,35 @@
 	</array>
 	<key>UIFileSharingEnabled</key>
 	<true/>
+	<key>CFBundleIcons</key>
+	<dict>
+		<key>CFBundleAlternateIcons</key>
+		<dict>
+			<key>Classic</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array>
+					<string>Cyanide-Classic</string>
+				</array>
+				<key>UIPrerenderedIcon</key>
+				<false/>
+			</dict>
+		</dict>
+	</dict>
+	<key>CFBundleIcons~ipad</key>
+	<dict>
+		<key>CFBundleAlternateIcons</key>
+		<dict>
+			<key>Classic</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array>
+					<string>Cyanide-Classic</string>
+				</array>
+				<key>UIPrerenderedIcon</key>
+				<false/>
+			</dict>
+		</dict>
+	</dict>
 </dict>
 </plist>

@@ -2640,7 +2640,7 @@ void settings_register_defaults(void)
         kSettingsStatBarCelsius: @NO,
         kSettingsStatBarShowNet:    @NO,
         kSettingsStatBarShowCPU:    @YES,
-        kSettingsStatBarShowLabels: @NO,
+        kSettingsStatBarShowLabels: @YES,
 
         kSettingsRSSIDisplayEnabled: @NO,
         kSettingsRSSIDisplayWifi:    @YES,
@@ -3044,6 +3044,7 @@ typedef NS_ENUM(NSInteger, RootSection) {
     RootSectionActions,
     RootSectionTweakBundles,
     RootSectionSystemBundles,
+    RootSectionAppIcon,
     RootSectionAbout,
     RootSectionExperimental,
     RootSectionWarning,
@@ -3469,10 +3470,10 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 - (NSArray<NSDictionary *> *)statbarRows
 {
     return @[
-        @{ @"kind": @"toggle", @"key": kSettingsStatBarCelsius, @"title": @"Celsius" },
-        @{ @"kind": @"toggle", @"key": kSettingsStatBarShowCPU, @"title": @"Show CPU %" },
-        @{ @"kind": @"toggle", @"key": kSettingsStatBarShowNet, @"title": @"Show network speed" },
-        @{ @"kind": @"toggle", @"key": kSettingsStatBarShowLabels, @"title": @"Show CPU / RAM labels" },
+        @{ @"kind": @"toggle", @"key": kSettingsStatBarCelsius,     @"title": @"Celsius" },
+        @{ @"kind": @"toggle", @"key": kSettingsStatBarShowCPU,     @"title": @"Show CPU %" },
+        @{ @"kind": @"toggle", @"key": kSettingsStatBarShowLabels,  @"title": @"Show CPU / RAM labels" },
+        @{ @"kind": @"toggle", @"key": kSettingsStatBarShowNet,     @"title": @"Show network speed" },
     ];
 }
 
@@ -3519,10 +3520,10 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         [out addObject:@{@"title": @"Home scale %",     @"value": [@([d integerForKey:kSettingsLayoutHomeScalePct]) stringValue]}];
         [out addObject:@{@"title": @"Dock scale %",     @"value": [@([d integerForKey:kSettingsLayoutDockScalePct]) stringValue]}];
     } else if (section == SectionStatBar) {
-        [out addObject:@{@"title": @"Celsius",          @"value": [d boolForKey:kSettingsStatBarCelsius] ? @"On" : @"Off"}];
-        [out addObject:@{@"title": @"Show CPU %",       @"value": [d boolForKey:kSettingsStatBarShowCPU]  ? @"On" : @"Off"}];
-        [out addObject:@{@"title": @"Show net speed",   @"value": [d boolForKey:kSettingsStatBarShowNet]  ? @"On" : @"Off"}];
+        [out addObject:@{@"title": @"Celsius",             @"value": [d boolForKey:kSettingsStatBarCelsius]    ? @"On" : @"Off"}];
+        [out addObject:@{@"title": @"Show CPU %",          @"value": [d boolForKey:kSettingsStatBarShowCPU]    ? @"On" : @"Off"}];
         [out addObject:@{@"title": @"Show CPU/RAM labels", @"value": [d boolForKey:kSettingsStatBarShowLabels] ? @"On" : @"Off"}];
+        [out addObject:@{@"title": @"Show net speed",      @"value": [d boolForKey:kSettingsStatBarShowNet]    ? @"On" : @"Off"}];
     } else if (section == SectionRSSI) {
         [out addObject:@{@"title": @"WiFi (bar count)", @"value": [d boolForKey:kSettingsRSSIDisplayWifi] ? @"On" : @"Off"}];
         [out addObject:@{@"title": @"Cellular (dBm)",   @"value": [d boolForKey:kSettingsRSSIDisplayCell] ? @"On" : @"Off"}];
@@ -3639,6 +3640,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         case RootSectionActions:        return 5;
         case RootSectionTweakBundles:   return (NSInteger)self.tweakBundleRows.count;
         case RootSectionSystemBundles:  return (NSInteger)self.systemBundleRows.count;
+        case RootSectionAppIcon:        return 2;
         case RootSectionAbout:          return 4;
         case RootSectionExperimental:   return 1;
         case RootSectionWarning:        return 1;
@@ -3655,6 +3657,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         case RootSectionActions:        return @"Quick Actions";
         case RootSectionTweakBundles:   return self.tweakBundleRows.count   > 0 ? @"Tweaks" : nil;
         case RootSectionSystemBundles:  return self.systemBundleRows.count  > 0 ? @"System" : nil;
+        case RootSectionAppIcon:        return @"App Icon";
         case RootSectionAbout:          return @"About";
         case RootSectionExperimental:   return @"Experimental";
         default:                        return nil;
@@ -3878,6 +3881,95 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 
 - (void)logUploadSwitchChanged:(UISwitch *)sw {
     [[NSUserDefaults standardUserDefaults] setBool:sw.isOn forKey:kSettingsLogUploadEnabled];
+}
+
+// "Classic" alternate icon is registered in Info.plist with CFBundleIconFiles
+// pointing to Cyanide-Classic@{2,3}x.png at the bundle root. Modern is the
+// asset-catalog primary, selected by passing nil to setAlternateIconName:.
++ (UIImage *)appIconPreviewForStyle:(NSString *)style
+{
+    NSString *name = [style isEqualToString:@"classic"] ? @"preview-classic" : @"preview-modern";
+    UIImage *raw = [UIImage imageNamed:name];
+    if (!raw) return nil;
+    // Render with iOS home-screen corner radius (≈22% of side) so the thumb
+    // matches what users see on SpringBoard. 52pt fits in the default subtitle
+    // cell row height without forcing layout overrides.
+    CGFloat side = 52.0;
+    CGFloat radius = side * 0.22;
+    UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat preferredFormat];
+    UIGraphicsImageRenderer *r = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(side, side) format:fmt];
+    return [r imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+        UIBezierPath *p = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(0, 0, side, side)
+                                                      cornerRadius:radius];
+        [p addClip];
+        [raw drawInRect:CGRectMake(0, 0, side, side)];
+    }];
+}
+
+- (NSString *)currentAppIconStyle
+{
+    NSString *alt = [UIApplication sharedApplication].alternateIconName;
+    return [alt isEqualToString:@"Classic"] ? @"classic" : @"modern";
+}
+
+- (UITableViewCell *)buildAppIconCellAtRow:(NSInteger)row tableView:(UITableView *)tableView
+{
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"appicon"];
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"appicon"];
+        cell.detailTextLabel.numberOfLines = 0;
+    }
+    cell.textLabel.font = [UIFont systemFontOfSize:17.0];
+    cell.textLabel.textColor = UIColor.labelColor;
+    cell.detailTextLabel.font = [UIFont systemFontOfSize:13.0];
+    cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
+    cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+
+    NSString *style = (row == 0) ? @"modern" : @"classic";
+    cell.imageView.image = [SettingsViewController appIconPreviewForStyle:style];
+
+    if (row == 0) {
+        cell.textLabel.text = @"Modern";
+        cell.detailTextLabel.text = @"Default — refreshed v2 mark.";
+    } else {
+        cell.textLabel.text = @"Classic";
+        cell.detailTextLabel.text = @"Original release artwork.";
+    }
+
+    BOOL selected = [[self currentAppIconStyle] isEqualToString:style];
+    cell.accessoryType = selected ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+    return cell;
+}
+
+- (void)selectAppIconAtRow:(NSInteger)row inTableView:(UITableView *)tableView
+{
+    NSString *style = (row == 0) ? @"modern" : @"classic";
+    if ([[self currentAppIconStyle] isEqualToString:style]) return;
+
+    if (![UIApplication sharedApplication].supportsAlternateIcons) {
+        UIAlertController *ac = [UIAlertController
+            alertControllerWithTitle:@"Can't Change Icon"
+                             message:@"This iOS build doesn't expose alternate icon switching."
+                      preferredStyle:UIAlertControllerStyleAlert];
+        [ac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+        [self presentViewController:ac animated:YES completion:nil];
+        return;
+    }
+
+    NSString *altName = [style isEqualToString:@"classic"] ? @"Classic" : nil;
+    [[UIApplication sharedApplication] setAlternateIconName:altName completionHandler:^(NSError * _Nullable error) {
+        if (error) {
+            printf("[SETTINGS] app icon switch to '%s' failed: %s\n",
+                   style.UTF8String,
+                   error.localizedDescription.UTF8String);
+        } else {
+            printf("[SETTINGS] app icon switched to %s\n", style.UTF8String);
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSIndexSet *idx = [NSIndexSet indexSetWithIndex:RootSectionAppIcon];
+            [tableView reloadSections:idx withRowAnimation:UITableViewRowAnimationNone];
+        });
+    }];
 }
 
 + (UIImage *)experimentalDangerChip
@@ -4323,6 +4415,8 @@ void cyanide_present_contact(UIViewController *host)
                 return [self buildBundleCellWithRow:self.tweakBundleRows[indexPath.row] tableView:tableView];
             case RootSectionSystemBundles:
                 return [self buildBundleCellWithRow:self.systemBundleRows[indexPath.row] tableView:tableView];
+            case RootSectionAppIcon:
+                return [self buildAppIconCellAtRow:indexPath.row tableView:tableView];
             case RootSectionAbout:
                 return [self buildAboutCellAtRow:indexPath.row tableView:tableView];
             case RootSectionExperimental:
@@ -4800,6 +4894,9 @@ void cyanide_present_contact(UIViewController *host)
                 [self.navigationController pushViewController:detail animated:YES];
                 return;
             }
+            case RootSectionAppIcon:
+                [self selectAppIconAtRow:indexPath.row inTableView:tableView];
+                return;
             case RootSectionAbout:
                 if (indexPath.row == 0)      [self openTwitter];
                 else if (indexPath.row == 1) [self openViewLog];
