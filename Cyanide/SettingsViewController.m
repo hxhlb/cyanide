@@ -267,10 +267,13 @@ static const NSUInteger kTypeBannerLiveMaxTicks = 28800;
 static const useconds_t kThemerLiveIntervalUS = 2000000;
 static const useconds_t kThemerLiveBackgroundIntervalUS = 10000000;
 static const NSUInteger kThemerLiveMaxTicks = 86400;
+static const NSUInteger kThemerLegacyLiveMaxTicks = 1;
 static const useconds_t kThemerRepairInitialDelayUS = 900000;
 static const useconds_t kThemerRepairIntervalUS = 450000;
 static NSString * const kSettingsRemoteCallStateDidChangeNotification = @"SettingsRemoteCallStateDidChangeNotification";
 NSString * const kSettingsActionsDidCompleteNotification = @"SettingsActionsDidCompleteNotification";
+NSString * const kSettingsActionsDidCompleteSuccessKey = @"success";
+NSString * const kSettingsActionsDidCompleteMessageKey = @"message";
 static NSString * const kSettingsCleanupStateDidChangeNotification = @"SettingsCleanupStateDidChangeNotification";
 
 static void settings_notify_cleanup_state_changed(void)
@@ -845,6 +848,36 @@ static void settings_request_all_live_loops_stop(const char *reason)
     }
 }
 
+static BOOL settings_has_active_termination_live_tweak(void)
+{
+    if (g_statbar_live_running || g_rssi_live_running ||
+        g_axonlite_live_running || g_typebanner_live_running) {
+        return YES;
+    }
+
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    return ([d boolForKey:kSettingsStatBarEnabled] &&
+            settings_tweak_is_applied(kSettingsStatBarEnabled)) ||
+           ([d boolForKey:kSettingsRSSIDisplayEnabled] &&
+            settings_tweak_is_applied(kSettingsRSSIDisplayEnabled)) ||
+           ([d boolForKey:kSettingsAxonLiteEnabled] &&
+            settings_tweak_is_applied(kSettingsAxonLiteEnabled)) ||
+           ([d boolForKey:kSettingsTypeBannerEnabled] &&
+            settings_tweak_is_applied(kSettingsTypeBannerEnabled));
+}
+
+static BOOL settings_has_persistent_springboard_remote_call_user(void)
+{
+    if (settings_has_active_termination_live_tweak() ||
+        g_themer_live_running || g_themer_repair_running) {
+        return YES;
+    }
+
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    return [d boolForKey:kSettingsThemerEnabled] &&
+           settings_tweak_is_applied(kSettingsThemerEnabled);
+}
+
 static void settings_wait_live_loops_stopped_for_switch(const char *reason)
 {
     uint64_t startUS = settings_now_us();
@@ -1317,6 +1350,12 @@ void settings_best_effort_termination_cleanup(const char *reason)
     const char *why = reason ?: "app termination";
     log_user("[CLEANUP] App termination requested (%s); attempting last-chance cleanup.\n", why);
     printf("[SETTINGS] best-effort termination cleanup requested: %s\n", why);
+
+    if (!settings_has_active_termination_live_tweak()) {
+        printf("[SETTINGS] termination cleanup skipped: no live tweaks active\n");
+        log_user("[CLEANUP] No live tweaks are active; skipping termination cleanup.\n");
+        return;
+    }
 
     settings_request_all_live_loops_stop("termination cleanup");
 
@@ -2491,11 +2530,16 @@ static void settings_start_themer_live_loop(void)
     dispatch_async(dispatch_get_global_queue(0, 0), ^{
         NSUInteger tick = 0;
         NSUInteger failures = 0;
+        NSInteger iosMajor = [[NSProcessInfo processInfo] operatingSystemVersion].majorVersion;
+        NSUInteger maxTicks = (iosMajor > 0 && iosMajor < 26)
+            ? kThemerLegacyLiveMaxTicks
+            : kThemerLiveMaxTicks;
 
-        printf("[SETTINGS] Themer dynamic live loop started interval=%uus background=%uus max=%lu\n",
+        printf("[SETTINGS] Themer dynamic live loop started interval=%uus background=%uus max=%lu iosMajor=%ld\n",
                kThemerLiveIntervalUS,
                kThemerLiveBackgroundIntervalUS,
-               (unsigned long)kThemerLiveMaxTicks);
+               (unsigned long)maxTicks,
+               (long)iosMajor);
 
         @try {
             // Start with a sleep so we don't pile a tick on top of the
@@ -2507,7 +2551,7 @@ static void settings_start_themer_live_loop(void)
             while ([d boolForKey:kSettingsThemerEnabled] &&
                    !settings_cleanup_in_progress() &&
                    !g_themer_live_stop_requested &&
-                   tick < kThemerLiveMaxTicks) {
+                   tick < maxTicks) {
                 useconds_t intervalUS = settings_live_interval(kThemerLiveIntervalUS,
                                                                kThemerLiveBackgroundIntervalUS);
                 bool ok = false;
@@ -2535,7 +2579,7 @@ static void settings_start_themer_live_loop(void)
                 tick++;
                 if (![d boolForKey:kSettingsThemerEnabled] ||
                     g_themer_live_stop_requested ||
-                    tick >= kThemerLiveMaxTicks) break;
+                    tick >= maxTicks) break;
 
                 intervalUS = settings_live_interval(kThemerLiveIntervalUS,
                                                     kThemerLiveBackgroundIntervalUS);
@@ -3104,6 +3148,8 @@ void settings_run_actions(void)
         }
         log_session_begin();
         cyanide_start_session_uploads();
+        BOOL runSucceeded = NO;
+        NSString *runCompletionMessage = @"Run failed. Check the log for details.";
         @try {
             BOOL patchSandboxExt = [d boolForKey:kSettingsRunPatchSandboxExt];
             BOOL runPowercuff = [d boolForKey:kSettingsPowercuffEnabled];
@@ -3114,10 +3160,11 @@ void settings_run_actions(void)
             BOOL runRSSI = settings_rssi_install_allowed() && [d boolForKey:kSettingsRSSIDisplayEnabled];
             BOOL runAxonLite = [d boolForKey:kSettingsAxonLiteEnabled];
             BOOL runTypeBanner = [d boolForKey:kSettingsTypeBannerEnabled];
+            BOOL runThemer = [d boolForKey:kSettingsThemerEnabled];
             BOOL runLayoutExtras = [d boolForKey:kSettingsLayoutExtrasEnabled];
             // TypeBanner prewarms its hidden SpringBoard window during Apply
             // and reuses the open SpringBoard session for text-only updates.
-            BOOL needsSpringBoard = runSandboxEscape || runSBC || runDarkTweaks || runStatBar || runRSSI || runAxonLite || runLayoutExtras || runTypeBanner;
+            BOOL needsSpringBoard = runSandboxEscape || runSBC || runDarkTweaks || runStatBar || runRSSI || runAxonLite || runLayoutExtras || runTypeBanner || runThemer;
 
             NSUInteger total = 1;
             if (patchSandboxExt) total++;
@@ -3127,6 +3174,7 @@ void settings_run_actions(void)
             if (runSBC) total++;
             if (runDarkTweaks) total++;
             if (runLayoutExtras) total++;
+            if (runThemer) total++;
             if (runStatBar) total++;
             if (runRSSI) total++;
             if (runAxonLite) total++;
@@ -3184,6 +3232,7 @@ void settings_run_actions(void)
             settings_progress(&step, total, "Preparing KRW primitives (socket/IOSurface path)");
             if (!settings_ensure_kexploit()) {
                 log_user("[RUN] Failed: kernel primitives were not acquired.\n");
+                runCompletionMessage = @"Failed: kernel primitives were not acquired.";
                 cyanide_upload_log_milestone(@"krw-failed");
                 return;
             }
@@ -3247,6 +3296,7 @@ void settings_run_actions(void)
                     settings_progress(&step, total, "Opening SpringBoard RemoteCall session");
                     if (!settings_ensure_springboard_remote_call_locked()) {
                         log_user("[RUN] Failed: could not open the SpringBoard control session.\n");
+                        runCompletionMessage = @"Failed: could not open the SpringBoard control session.";
                         cyanide_upload_log_milestone(@"springboard-remote-call-failed");
                         return;
                     }
@@ -3323,7 +3373,7 @@ void settings_run_actions(void)
                         cyanide_upload_log_milestone(ok ? @"layout-extras-applied" : @"layout-extras-warning");
                     }
 
-                    if ([d boolForKey:kSettingsThemerEnabled]) {
+                    if (runThemer) {
                         settings_progress(&step, total, "Applying Cyanide Themer");
                         bool ok = settings_apply_themer_from_defaults_locked(d);
                         settings_mark_tweak_applied(kSettingsThemerEnabled, ok);
@@ -3425,7 +3475,24 @@ void settings_run_actions(void)
             if (runStatBar || runRSSI || runAxonLite || runTypeBanner)
                 cyanide_upload_log_milestone(@"live-tweaks-started");
 
+            if (!settings_has_persistent_springboard_remote_call_user()) {
+                BOOL closedNonLiveRemoteCall = NO;
+                @synchronized (settings_rc_lock()) {
+                    if (!settings_has_persistent_springboard_remote_call_user() &&
+                        g_springboard_rc_ready) {
+                        settings_destroy_springboard_remote_call_locked("non-live run complete");
+                        closedNonLiveRemoteCall = YES;
+                    }
+                }
+                if (closedNonLiveRemoteCall) {
+                    log_user("[OK] SpringBoard RemoteCall closed; no live tweak needs it.\n");
+                    cyanide_upload_log_milestone(@"springboard-remote-call-closed");
+                }
+            }
+
             log_user("[DONE] Run complete. Verbose trace captured the raw call stream.\n");
+            runSucceeded = YES;
+            runCompletionMessage = @"Done. All tweaks applied in-session.";
             cyanide_upload_log_milestone(@"run-complete");
         } @finally {
             // Close any legacy uploader state before the final snapshot.
@@ -3439,10 +3506,15 @@ void settings_run_actions(void)
                 return;
             }
             dispatch_async(dispatch_get_main_queue(), ^{
+                NSDictionary *completionInfo = @{
+                    kSettingsActionsDidCompleteSuccessKey: @(runSucceeded),
+                    kSettingsActionsDidCompleteMessageKey: runCompletionMessage ?: @""
+                };
                 [[NSNotificationCenter defaultCenter] postNotificationName:PackageQueueDidChangeNotification
                                                                     object:[PackageQueue sharedQueue]];
                 [[NSNotificationCenter defaultCenter] postNotificationName:kSettingsActionsDidCompleteNotification
-                                                                    object:nil];
+                                                                    object:nil
+                                                                  userInfo:completionInfo];
                 cyanide_upload_log_if_enabled();
             });
         }

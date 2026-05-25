@@ -58,6 +58,8 @@ extern NSString * const kSettingsExperimentalTweaksEnabled;
 extern NSString * const kSettingsLogUploadEnabled;
 
 extern NSString * const kSettingsActionsDidCompleteNotification;
+extern NSString * const kSettingsActionsDidCompleteSuccessKey;
+extern NSString * const kSettingsActionsDidCompleteMessageKey;
 
 // Returns YES if the tweak whose master enable lives at `key` was successfully
 // applied in this app session. Cleared on launch, on cleanup, and whenever the

@@ -22,7 +22,13 @@ typedef struct {
     bool iconServicesSeeded;
 } ThemerEntry;
 
+typedef struct {
+    uint64_t icon;
+    char bundle[128];
+} ThemerIconBundleEntry;
+
 static const int    kThemerMaxCache    = 128;
+static const int    kThemerMaxIconBundleCache = 256;
 static const size_t kThemerMaxPngBytes = 1 << 18;   // 256 KB hard cap per icon
 static const uint32_t kThemerApplySettleUS = 0;
 static const bool kThemerDetailedIconLogs = false;
@@ -34,6 +40,8 @@ static const char *kThemerFocusBundle = "";
 
 static ThemerEntry gThemerCache[kThemerMaxCache];
 static int         gThemerCacheCount = 0;
+static ThemerIconBundleEntry gThemerIconBundleCache[kThemerMaxIconBundleCache];
+static int         gThemerIconBundleCacheCount = 0;
 static int         gThemerLogBudget  = 48;
 static bool        gThemerModelProbeLogged = false;
 static bool        gThemerIconServicesProbeLogged = false;
@@ -91,6 +99,45 @@ static void themer_cache_image(const char *bundle, uint64_t image)
     e->image = image;
     e->dataSource = 0;
     e->iconServicesSeeded = false;
+}
+
+static void themer_cache_icon_bundle(uint64_t icon, const char *bundle)
+{
+    if (!r_is_objc_ptr(icon) || !bundle || !bundle[0]) return;
+    for (int i = 0; i < gThemerIconBundleCacheCount; i++) {
+        if (gThemerIconBundleCache[i].icon == icon) {
+            snprintf(gThemerIconBundleCache[i].bundle,
+                     sizeof(gThemerIconBundleCache[i].bundle),
+                     "%s", bundle);
+            return;
+        }
+    }
+    if (gThemerIconBundleCacheCount >= kThemerMaxIconBundleCache) return;
+    ThemerIconBundleEntry *e = &gThemerIconBundleCache[gThemerIconBundleCacheCount++];
+    e->icon = icon;
+    snprintf(e->bundle, sizeof(e->bundle), "%s", bundle);
+}
+
+static bool themer_lookup_icon_bundle(uint64_t icon, char *out, size_t outLen)
+{
+    if (!r_is_objc_ptr(icon) || !out || outLen == 0) return false;
+    for (int i = 0; i < gThemerIconBundleCacheCount; i++) {
+        if (gThemerIconBundleCache[i].icon == icon &&
+            gThemerIconBundleCache[i].bundle[0]) {
+            snprintf(out, outLen, "%s", gThemerIconBundleCache[i].bundle);
+            return out[0] != '\0';
+        }
+    }
+    return false;
+}
+
+static void themer_reset_icon_bundle_cache(void)
+{
+    for (int i = 0; i < kThemerMaxIconBundleCache; i++) {
+        gThemerIconBundleCache[i].icon = 0;
+        gThemerIconBundleCache[i].bundle[0] = '\0';
+    }
+    gThemerIconBundleCacheCount = 0;
 }
 
 // Read a remote ObjC object's class name into a local C buffer.
@@ -582,14 +629,39 @@ static uint64_t themer_icon_image_view_for_iconview(uint64_t iconView)
     return r_is_objc_ptr(iiv) ? iiv : 0;
 }
 
+static bool themer_icon_is_application_icon(uint64_t icon)
+{
+    if (!r_is_objc_ptr(icon)) return false;
+    char cls[96] = {0};
+    themer_read_class_name(icon, cls, sizeof(cls));
+    return strstr(cls, "ApplicationIcon") != NULL &&
+           strstr(cls, "WidgetIcon") == NULL &&
+           strstr(cls, "FolderIcon") == NULL;
+}
+
+static uint64_t themer_application_icon_for_iconview(uint64_t iconView)
+{
+    if (!r_is_objc_ptr(iconView) || !r_responds_main(iconView, "icon")) return 0;
+    uint64_t icon = r_msg2_main(iconView, "icon", 0, 0, 0, 0);
+    return themer_icon_is_application_icon(icon) ? icon : 0;
+}
+
 static bool themer_should_pin_dynamic_overlay(const char *bundle, uint64_t iconView)
 {
-    if (bundle &&
-        (strcmp(bundle, "com.apple.mobiletimer") == 0 ||
-         strcmp(bundle, "com.apple.mobilecal") == 0)) {
-        return true;
+    int major = themer_host_ios_major();
+    if (major > 0 && major < 26) return false;
+
+    if (!r_is_objc_ptr(themer_application_icon_for_iconview(iconView))) return false;
+
+    if (!bundle ||
+        (strcmp(bundle, "com.apple.mobiletimer") != 0 &&
+         strcmp(bundle, "com.apple.mobilecal") != 0)) {
+        return false;
     }
 
+    // Clock/Calendar use live renderers; only pin over their real app icon.
+    // Widget icons can share nearby image-view classes and must never receive
+    // these overlays.
     uint64_t iiv = themer_icon_image_view_for_iconview(iconView);
     char cls[128] = {0};
     themer_read_class_name(iiv, cls, sizeof(cls));
@@ -1086,8 +1158,19 @@ static bool themer_read_bundle_for_icon(uint64_t icon,
     if (r_is_objc_ptr(appObj) && r_responds(appObj, "bundleIdentifier")) {
         uint64_t bid = r_msg2(appObj, "bundleIdentifier", 0, 0, 0, 0);
         if (r_is_objc_ptr(bid) && r_read_nsstring(bid, out, outLen) && out[0]) {
+            themer_cache_icon_bundle(icon, out);
             return true;
         }
+    }
+
+    if (themer_lookup_icon_bundle(icon, out, outLen)) {
+        static int fallbackLogs = 0;
+        if (fallbackLogs < 8) {
+            printf("[THEMER] model bundle fallback icon=0x%llx bundle=%s\n",
+                   (unsigned long long)icon, out);
+            fallbackLogs++;
+        }
+        return true;
     }
 
     // First-iconView verbose probe: keep this to the known-stable application
@@ -1122,8 +1205,7 @@ static bool themer_read_bundle_for_iconview(uint64_t iconView,
 {
     if (!r_is_objc_ptr(iconView) || !out || outLen == 0) return false;
 
-    uint64_t icon = r_responds(iconView, "icon")
-        ? r_msg2(iconView, "icon", 0, 0, 0, 0) : 0;
+    uint64_t icon = themer_application_icon_for_iconview(iconView);
     return themer_read_bundle_for_icon(icon, iconView, out, outLen);
 }
 
@@ -1748,6 +1830,10 @@ static uint64_t themer_lookup_model_icon_for_bundle(const char *bundle)
                (unsigned long long)found);
     }
 
+    if (r_is_objc_ptr(found)) {
+        themer_cache_icon_bundle(found, bundle);
+    }
+
     return found;
 }
 
@@ -1928,6 +2014,7 @@ bool themer_apply_data_in_session(NSDictionary<NSString *, NSData *> *imageDataB
     // ObjC send just makes the initial icon flip visibly lag.
     uint64_t startUS = themer_now_us();
     uint32_t prevSettle = r_settle_us(kThemerApplySettleUS);
+    themer_reset_icon_bundle_cache();
 
     uint64_t listViewCls = r_class("SBIconListView");
     uint64_t iconViewCls = r_class("SBIconView");
@@ -2015,6 +2102,7 @@ bool themer_stop_in_session(void)
         gThemerCache[i].bundle[0] = '\0';
     }
     gThemerCacheCount = 0;
+    themer_reset_icon_bundle_cache();
     gThemerRung = -1;
     gThemerHasUpdateAfter = false;
     gThemerHasUpdateImageView = false;
@@ -2035,6 +2123,7 @@ void themer_forget_remote_state(void)
         gThemerCache[i].bundle[0] = '\0';
     }
     gThemerCacheCount = 0;
+    themer_reset_icon_bundle_cache();
     gThemerRung = -1;
     gThemerHasUpdateAfter = false;
     gThemerHasUpdateImageView = false;
