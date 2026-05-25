@@ -33,6 +33,10 @@ bool themer_repaint_cached_views_in_session(void);
 // Same cache-only repaint, but does not trust SBIconImageView.displayedImage
 // as proof that the visible layer is still intact.
 bool themer_force_repaint_cached_views_in_session(void);
+
+// Re-pin only dynamic icons (Clock/Calendar). This is intentionally narrower
+// than a cached repaint so wake/unlock repairs don't touch normal app icons.
+bool themer_repaint_dynamic_cached_views_in_session(void);
 #endif
 
 // Release the in-SB UIImage cache. SB will re-render native icons on its

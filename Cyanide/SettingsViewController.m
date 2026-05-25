@@ -262,11 +262,10 @@ static const useconds_t kTypeBannerLiveIntervalUS = 1000000;
 static const useconds_t kTypeBannerLiveBackgroundIntervalUS = 1000000;
 static const useconds_t kTypeBannerInitialDaemonSettleUS = 250000;
 static const NSUInteger kTypeBannerLiveMaxTicks = 28800;
-// Themer's model graft persists across recycled views, but app launch/resume
-// can clear the currently visible SBIconImageView contents without recycling
-// the view. Cached repaint is much cheaper than a full PNG/model apply.
-static const useconds_t kThemerLiveIntervalUS = 750000;
-static const useconds_t kThemerLiveBackgroundIntervalUS = 750000;
+// Only Clock/Calendar need periodic repair; normal icons persist through the
+// model graft and should not be repainted during SpringBoard animations.
+static const useconds_t kThemerLiveIntervalUS = 2000000;
+static const useconds_t kThemerLiveBackgroundIntervalUS = 10000000;
 static const NSUInteger kThemerLiveMaxTicks = 86400;
 static const useconds_t kThemerRepairInitialDelayUS = 900000;
 static const useconds_t kThemerRepairIntervalUS = 450000;
@@ -2475,16 +2474,10 @@ static void settings_start_themer_live_loop(void)
     if (![d boolForKey:kSettingsThemerEnabled]) return;
     if (!g_springboard_rc_ready) return;
 
-    // Continuous repaint fights SpringBoard's icon animations and visibly
-    // flashes icons. The model graft/IconServices paths do the persistence
-    // work; avoid background repaint traffic.
-    printf("[SETTINGS] Themer live loop skipped; model/cache persistence active\n");
-    return;
-
     if (__sync_lock_test_and_set(&g_themer_live_running, 1)) {
         static volatile int loggedAlready = 0;
         if (__sync_bool_compare_and_swap(&loggedAlready, 0, 1)) {
-            printf("[SETTINGS] Themer live loop already running\n");
+            printf("[SETTINGS] Themer dynamic live loop already running\n");
         }
         return;
     }
@@ -2499,7 +2492,7 @@ static void settings_start_themer_live_loop(void)
         NSUInteger tick = 0;
         NSUInteger failures = 0;
 
-        printf("[SETTINGS] Themer cached repaint loop started interval=%uus background=%uus max=%lu\n",
+        printf("[SETTINGS] Themer dynamic live loop started interval=%uus background=%uus max=%lu\n",
                kThemerLiveIntervalUS,
                kThemerLiveBackgroundIntervalUS,
                (unsigned long)kThemerLiveMaxTicks);
@@ -2522,7 +2515,7 @@ static void settings_start_themer_live_loop(void)
                 @synchronized (settings_rc_lock()) {
                     if (g_themer_live_stop_requested) break;
                     if (!g_springboard_rc_ready) {
-                        printf("[SETTINGS] Themer loop has no SpringBoard RemoteCall session\n");
+                        printf("[SETTINGS] Themer dynamic loop has no SpringBoard RemoteCall session\n");
                         failures++;
                         break;
                     }
@@ -2530,12 +2523,12 @@ static void settings_start_themer_live_loop(void)
                         // Wait for actions to finish before next tick.
                         ok = true;
                     } else {
-                        ok = themer_repaint_cached_views_in_session();
+                        ok = themer_repaint_dynamic_cached_views_in_session();
                     }
                 }
 
                 if (tick == 0) {
-                    printf("[SETTINGS] Themer cached repaint first tick result=%d\n", ok);
+                    printf("[SETTINGS] Themer dynamic live first tick result=%d\n", ok);
                 }
                 failures = ok ? 0 : failures + 1;
 
@@ -2550,7 +2543,7 @@ static void settings_start_themer_live_loop(void)
                                                        &g_themer_live_stop_requested);
             }
         } @finally {
-            printf("[SETTINGS] Themer cached repaint loop exited ticks=%lu enabled=%d failures=%lu stop=%d\n",
+            printf("[SETTINGS] Themer dynamic live loop exited ticks=%lu enabled=%d failures=%lu stop=%d\n",
                    (unsigned long)tick,
                    [d boolForKey:kSettingsThemerEnabled],
                    (unsigned long)failures,
@@ -2562,16 +2555,7 @@ static void settings_start_themer_live_loop(void)
 
 static void settings_schedule_themer_repair_burst_internal(const char *reason, BOOL force)
 {
-    // Repainting visible icon views during unlock/app transitions causes the
-    // user-visible native->themed flip. Keep this disabled now that the model
-    // graft and icon-cache seed paths carry normal persistence.
-    static volatile int loggedDisabled = 0;
-    if (__sync_bool_compare_and_swap(&loggedDisabled, 0, 1)) {
-        printf("[SETTINGS] Themer automatic repair bursts disabled%s%s force=%d\n",
-               reason ? ": " : "", reason ?: "", force);
-    }
-    return;
-
+    (void)force;
     if (!settings_device_supported()) return;
     if (settings_cleanup_in_progress()) return;
 
@@ -2587,8 +2571,7 @@ static void settings_schedule_themer_repair_burst_internal(const char *reason, B
         NSUInteger tick = 0;
         NSUInteger quietTicks = 0;
 
-        printf("[SETTINGS] Themer %srepair burst started%s%s\n",
-               force ? "" : "quiet ",
+        printf("[SETTINGS] Themer dynamic repair burst started%s%s\n",
                reason ? ": " : "", reason ?: "");
 
         @try {
@@ -2609,9 +2592,7 @@ static void settings_schedule_themer_repair_burst_internal(const char *reason, B
                         g_settings_actions_running) {
                         ok = true;
                     } else {
-                        ok = force
-                            ? themer_force_repaint_cached_views_in_session()
-                            : themer_repaint_cached_views_in_session();
+                        ok = themer_repaint_dynamic_cached_views_in_session();
                     }
                 }
 
@@ -2626,12 +2607,11 @@ static void settings_schedule_themer_repair_burst_internal(const char *reason, B
                 }
 
                 if (tick == 1) {
-                    printf("[SETTINGS] Themer repair burst first repaint=%d\n", ok);
+                    printf("[SETTINGS] Themer dynamic repair first repaint=%d\n", ok);
                 }
             }
         } @finally {
-            printf("[SETTINGS] Themer %srepair burst exited ticks=%lu\n",
-                   force ? "" : "quiet ",
+            printf("[SETTINGS] Themer dynamic repair burst exited ticks=%lu\n",
                    (unsigned long)tick);
             __sync_lock_release(&g_themer_repair_running);
         }
@@ -3091,11 +3071,6 @@ void settings_register_defaults(void)
     if (![defaults boolForKey:kSettingsExperimentalTweaksEnabled] &&
         [defaults boolForKey:kSettingsRSSIDisplayEnabled]) {
         [defaults setBool:NO forKey:kSettingsRSSIDisplayEnabled];
-        [defaults synchronize];
-    }
-    if (![defaults boolForKey:kSettingsExperimentalTweaksEnabled] &&
-        [defaults boolForKey:kSettingsThemerEnabled]) {
-        [defaults setBool:NO forKey:kSettingsThemerEnabled];
         [defaults synchronize];
     }
     if ([defaults boolForKey:kSettingsThemerEnabled] &&
@@ -4291,7 +4266,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         @{ @"title": @"Signal Display",     @"icon": @"antenna.radiowaves.left.and.right",   @"color": [UIColor systemBlueColor],   @"section": @(SectionRSSI), @"experimental": @YES },
         @{ @"title": @"Axon Lite",          @"icon": @"bell.badge.fill",                     @"color": [UIColor systemRedColor],    @"section": @(SectionAxonLite) },
         @{ @"title": @"TypeBanner",         @"icon": @"ellipsis.bubble.fill",                @"color": [UIColor systemTealColor],   @"section": @(SectionTypeBanner), @"experimental": @YES },
-        @{ @"title": @"Cyanide Themer",     @"icon": @"paintpalette.fill",                   @"color": [UIColor systemPinkColor],   @"section": @(SectionThemer), @"experimental": @YES },
+        @{ @"title": @"Cyanide Themer",     @"icon": @"paintpalette.fill",                   @"color": [UIColor systemPinkColor],   @"section": @(SectionThemer) },
         @{ @"title": @"Powercuff",          @"icon": @"bolt.slash.fill",                     @"color": [UIColor systemOrangeColor], @"section": @(SectionPowercuff) },
         @{ @"title": @"SpringBoard Tweaks", @"icon": @"apps.iphone",                         @"color": [UIColor systemIndigoColor], @"section": @(SectionDarkSwordTweaks) },
         @{ @"title": @"Home Layout Extras", @"icon": @"square.dashed.inset.filled",          @"color": [UIColor systemPurpleColor], @"section": @(SectionLayoutExtras) },
@@ -5007,13 +4982,6 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
         settings_notify_package_queue_changed_async();
         settings_schedule_live_apply_for_key(kSettingsRSSIDisplayEnabled);
     }
-    if ([d boolForKey:kSettingsThemerEnabled]) {
-        [d setBool:NO forKey:kSettingsThemerEnabled];
-        g_themer_live_stop_requested = 1;
-        settings_mark_tweak_applied(kSettingsThemerEnabled, NO);
-        settings_notify_package_queue_changed_async();
-    }
-
     [self reloadAfterExperimentalChange];
 }
 

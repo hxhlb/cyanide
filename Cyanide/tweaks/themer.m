@@ -72,18 +72,6 @@ static ThemerEntry *themer_lookup_entry(const char *bundle)
     return NULL;
 }
 
-// Membership test: is `image` one of the remote UIImage pointers we've already
-// installed? Used by the live loop to skip views that still show our override —
-// no bundle-read or msgSend storm needed for stable state.
-static bool themer_image_is_ours(uint64_t image)
-{
-    if (!image) return false;
-    for (int i = 0; i < gThemerCacheCount; i++) {
-        if (gThemerCache[i].image == image) return true;
-    }
-    return false;
-}
-
 static void themer_cache_image(const char *bundle, uint64_t image)
 {
     if (!bundle || !bundle[0] || !r_is_objc_ptr(image)) return;
@@ -534,7 +522,6 @@ static uint64_t themer_ensure_datasource_class(void)
     if (!r_is_objc_ptr(cls)) return 0;
 
     uint64_t getAssocImp = themer_remote_symbol_addr("objc_getAssociatedObject");
-    uint64_t nilImp = themer_method_imp(NSObject, "isProxy");
     bool ok = getAssocImp &&
         themer_add_method(cls, "icon:imageWithInfo:traitCollection:options:",
                           getAssocImp, "@@:@@@Q") &&
@@ -543,18 +530,14 @@ static uint64_t themer_ensure_datasource_class(void)
         themer_add_method(cls, "icon:displayNameForLocation:",
                           getAssocImp, "@@:@q") &&
         themer_add_method(cls, "icon:accessibilityLabelForLocation:",
-                          getAssocImp, "@@:@q") &&
-        nilImp &&
-        themer_add_method(cls, "icon:badgeNumberOrStringForLocation:",
-                          nilImp, "@@:@q");
+                          getAssocImp, "@@:@q");
 
     r_dlsym_call(R_TIMEOUT, "objc_registerClassPair",
                  cls, 0, 0, 0, 0, 0, 0, 0);
 
     if (!ok) {
-        printf("[THEMER] model graft: datasource class incomplete getAssoc=0x%llx nil=0x%llx\n",
-               (unsigned long long)getAssocImp,
-               (unsigned long long)nilImp);
+        printf("[THEMER] model graft: datasource class incomplete getAssoc=0x%llx\n",
+               (unsigned long long)getAssocImp);
         return 0;
     }
     return cls;
@@ -606,7 +589,11 @@ static bool themer_should_pin_dynamic_overlay(const char *bundle, uint64_t iconV
 
 static bool themer_prefers_view_level_overlay(const char *bundle)
 {
-    (void)bundle;
+    if (bundle &&
+        (strcmp(bundle, "com.apple.mobiletimer") == 0 ||
+         strcmp(bundle, "com.apple.mobilecal") == 0)) {
+        return true;
+    }
     return false;
 }
 
@@ -645,6 +632,32 @@ static bool themer_clear_dynamic_overlay(uint64_t iconView)
     uint64_t iiv = themer_icon_image_view_for_iconview(iconView);
     cleared = themer_clear_overlay_on_object(iiv, key) || cleared;
     return cleared;
+}
+
+static bool themer_clear_visible_override(uint64_t iconView)
+{
+    if (!r_is_objc_ptr(iconView) ||
+        !r_responds_main(iconView, "setOverrideImage:")) {
+        return false;
+    }
+
+    uint64_t cur = r_responds_main(iconView, "overrideImage")
+        ? r_msg2_main(iconView, "overrideImage", 0, 0, 0, 0) : 0;
+    if (!r_is_objc_ptr(cur)) return false;
+
+    r_msg2_main(iconView, "setOverrideImage:", 0, 0, 0, 0);
+    if (r_responds_main(iconView, "setOverrideIconImageAppearance:")) {
+        r_msg2_main(iconView, "setOverrideIconImageAppearance:", 0, 0, 0, 0);
+    }
+    if (r_responds_main(iconView, "_updateIconImageViewAnimated:")) {
+        r_msg2_main(iconView, "_updateIconImageViewAnimated:", 0, 0, 0, 0);
+    } else if (r_responds_main(iconView,
+                               "_updateAfterManualIconImageInfoChangeInvalidatingLayout:")) {
+        r_msg2_main(iconView,
+                    "_updateAfterManualIconImageInfoChangeInvalidatingLayout:",
+                    0, 0, 0, 0);
+    }
+    return true;
 }
 
 static bool themer_pin_dynamic_overlay(uint64_t iconView, uint64_t image,
@@ -964,7 +977,7 @@ static uint64_t themer_ensure_model_class(uint64_t currentClass)
     if (!clsName[0]) return 0;
 
     char subName[192] = {0};
-    snprintf(subName, sizeof(subName), "CNDThemedV5_%s", clsName);
+    snprintf(subName, sizeof(subName), "CNDThemedV7_%s", clsName);
 
     uint64_t sub = themer_lookup_class(subName);
     if (r_is_objc_ptr(sub)) return sub;
@@ -1363,23 +1376,10 @@ static int themer_iter_iconviews(uint64_t listView,
         uint64_t v = ivs[i];
         if (!r_is_objc_ptr(v)) continue;
 
-        // Fast-skip: if this iconView is already displaying one of our remote
-        // UIImage pointers, assume it's still themed correctly and move on.
-        // 1 msgSend per view in the stable case, vs ~15-20 for a full
-        // bundle-read + apply. -[SBIconView prepareForReuse] clears
-        // overrideImage to nil on recycle, so a recycled view will fall
-        // through to the full path naturally.
-        bool hasOurOverride = false;
-        if (r_responds_main(v, "overrideImage")) {
-            uint64_t cur = r_msg2_main(v, "overrideImage", 0, 0, 0, 0);
-            if (themer_image_is_ours(cur)) {
-                hasOurOverride = true;
-            }
-        }
-
         char bundle[128] = {0};
         if (!themer_read_bundle_for_iconview(v, bundle, sizeof(bundle))) {
             themer_clear_dynamic_overlay(v);
+            themer_clear_visible_override(v);
             if (gThemerLogBudget > 0) {
                 char ivCls[96] = {0};
                 themer_read_class_name(v, ivCls, sizeof(ivCls));
@@ -1398,11 +1398,7 @@ static int themer_iter_iconviews(uint64_t listView,
         }
 
         bool dynamicOverlay = themer_should_pin_dynamic_overlay(bundle, v);
-        if (hasOurOverride && !dynamicOverlay) {
-            themer_clear_dynamic_overlay(v);
-            applied++;
-            continue;
-        }
+        if (!dynamicOverlay) themer_clear_visible_override(v);
 
         uint64_t image = themer_lookup_cached(bundle);
         if (!image) {
@@ -1410,6 +1406,7 @@ static int themer_iter_iconviews(uint64_t listView,
             NSData *pngBytes = key ? dataByBundle[key] : nil;
             if (!pngBytes) {
                 themer_clear_dynamic_overlay(v);
+                themer_clear_visible_override(v);
                 if (misses) (*misses)++;
                 if (gThemerLogBudget > 0) {
                     printf("[THEMER] miss bundle=%s (no override in theme)\n", bundle);
@@ -1421,6 +1418,7 @@ static int themer_iter_iconviews(uint64_t listView,
             image = themer_build_remote_uiimage_from_data(uploadBytes ?: pngBytes, bundle);
             if (!image) {
                 themer_clear_dynamic_overlay(v);
+                themer_clear_visible_override(v);
                 if (misses) (*misses)++;
                 continue;
             }
@@ -1512,6 +1510,7 @@ static int themer_repaint_cached_iconviews(uint64_t listView,
         char bundle[128] = {0};
         if (!themer_read_bundle_for_iconview(v, bundle, sizeof(bundle))) {
             themer_clear_dynamic_overlay(v);
+            themer_clear_visible_override(v);
             if (misses) (*misses)++;
             continue;
         }
@@ -1519,6 +1518,7 @@ static int themer_repaint_cached_iconviews(uint64_t listView,
         uint64_t image = themer_lookup_cached(bundle);
         if (!r_is_objc_ptr(image)) {
             themer_clear_dynamic_overlay(v);
+            themer_clear_visible_override(v);
             if (misses) (*misses)++;
             continue;
         }
@@ -1533,6 +1533,7 @@ static int themer_repaint_cached_iconviews(uint64_t listView,
                                   r_responds_main(iiv, "displayedImage"))
             ? r_msg2_main(iiv, "displayedImage", 0, 0, 0, 0) : 0;
         bool dynamicOverlay = themer_should_pin_dynamic_overlay(bundle, v);
+        if (!dynamicOverlay) themer_clear_visible_override(v);
         if (!force && !dynamicOverlay &&
             overrideRead == image && displayedRead == image) {
             themer_clear_dynamic_overlay(v);
@@ -1556,6 +1557,47 @@ static int themer_repaint_cached_iconviews(uint64_t listView,
         if (rung > 0) {
             applied++;
             if (rungHits && rung >= 1 && rung <= 4) rungHits[rung - 1]++;
+        } else if (misses) {
+            (*misses)++;
+        }
+    }
+
+    return applied;
+}
+
+static int themer_repaint_dynamic_iconviews(uint64_t listView,
+                                            uint64_t iconViewCls,
+                                            int *rungHits,
+                                            int *misses)
+{
+    if (!r_is_objc_ptr(listView) || !r_is_objc_ptr(iconViewCls)) return 0;
+
+    enum { IV_CAP = 64 };
+    uint64_t ivs[IV_CAP];
+    int n = sb_collect_views(listView, iconViewCls, ivs, IV_CAP);
+    int applied = 0;
+
+    for (int i = 0; i < n; i++) {
+        uint64_t v = ivs[i];
+        if (!r_is_objc_ptr(v)) continue;
+
+        char bundle[128] = {0};
+        if (!themer_read_bundle_for_iconview(v, bundle, sizeof(bundle))) {
+            if (misses) (*misses)++;
+            continue;
+        }
+        if (!themer_should_pin_dynamic_overlay(bundle, v)) continue;
+
+        uint64_t image = themer_lookup_cached(bundle);
+        if (!r_is_objc_ptr(image)) {
+            if (misses) (*misses)++;
+            continue;
+        }
+
+        int rung = themer_pin_dynamic_overlay(v, image, bundle) ? 1 : 0;
+        if (rung > 0) {
+            applied++;
+            if (rungHits) rungHits[0]++;
         } else if (misses) {
             (*misses)++;
         }
@@ -1794,6 +1836,51 @@ bool themer_repaint_cached_views_in_session(void)
 bool themer_force_repaint_cached_views_in_session(void)
 {
     return themer_repaint_cached_views_internal(true);
+}
+
+bool themer_repaint_dynamic_cached_views_in_session(void)
+{
+    if (gThemerCacheCount <= 0) {
+        printf("[THEMER] dynamic repaint skipped; cache empty\n");
+        return false;
+    }
+
+    uint64_t startUS = themer_now_us();
+    uint32_t prevSettle = r_settle_us(kThemerApplySettleUS);
+
+    uint64_t listViewCls = r_class("SBIconListView");
+    uint64_t iconViewCls = r_class("SBIconView");
+    if (!r_is_objc_ptr(listViewCls) || !r_is_objc_ptr(iconViewCls)) {
+        r_settle_us(prevSettle);
+        return false;
+    }
+
+    enum { LV_CAP = 64 };
+    uint64_t lvs[LV_CAP];
+    int nlv = sb_collect_views_in_windows(listViewCls, lvs, LV_CAP);
+    if (nlv == 0) {
+        r_settle_us(prevSettle);
+        printf("[THEMER] dynamic repaint: no visible SBIconListView\n");
+        return false;
+    }
+
+    int rungHits[4] = {0};
+    int misses = 0;
+    int applied = 0;
+    for (int i = 0; i < nlv; i++) {
+        applied += themer_repaint_dynamic_iconviews(lvs[i], iconViewCls,
+                                                    rungHits, &misses);
+    }
+
+    uint64_t elapsed = (themer_now_us() - startUS) / 1000ULL;
+    r_settle_us(prevSettle);
+    printf("[THEMER] dynamic repaint lists=%d applied=%d misses=%d "
+           "rungs={1:%d,2:%d,3:%d,4:%d} cache=%d elapsed=%llums\n",
+           nlv, applied, misses,
+           rungHits[0], rungHits[1], rungHits[2], rungHits[3],
+           gThemerCacheCount,
+           (unsigned long long)elapsed);
+    return applied > 0;
 }
 
 bool themer_apply_data_in_session(NSDictionary<NSString *, NSData *> *imageDataByBundle)

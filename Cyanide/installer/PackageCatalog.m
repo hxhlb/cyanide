@@ -128,14 +128,14 @@ static const NSInteger kSecThemer       = 13;
                                 longDescription:@"Replaces stock app icons by walking SpringBoard's SBIconView hierarchy and swapping each icon's image with a PNG matched on the app's bundle identifier.\n\nPick a theme in Settings > Cyanide Themer. Cyanide ships with iOS 6 Theme, using icons from zagnut531/iOS-6-Icons: https://github.com/zagnut531/iOS-6-Icons. You can also import a custom folder of <bundleID>.png files or a binary plist mapping bundle IDs to PNG data.\n\nApplied at Run; not persisted across respring. The current build also seeds SpringBoard's icon cache and rounds imported PNGs before upload so icons survive common home-screen relayouts more cleanly."
                                         version:version
                                          author:@"zeroxjf"
-                                       category:@"Experimental"
+                                       category:@"Beta"
                                      symbolName:@"paintpalette.fill"
                                           kind:PackageInstallKindToggle
                                      enabledKey:kSettingsThemerEnabled
                                           isNew:YES];
-        themer.experimental = YES;
+        themer.experimental = NO;
         themer.settingsSection = kSecThemer;
-        themer.unstableWarning = @"⚠️ Experimental: icon theming is still in development. Pick a theme in Settings > Cyanide Themer; RemoteCall-backed changes may need re-applying after a respring or SpringBoard restart.";
+        themer.unstableWarning = @"⚠️ Beta: icon theming works but RemoteCall-backed changes may need re-applying after a respring or SpringBoard restart. Pick a theme in Settings > Cyanide Themer before running.";
 
         Package *layoutExtras = [[Package alloc] initWithIdentifier:@"com.darksword.layoutextras"
                                            name:@"Home Layout Extras"
