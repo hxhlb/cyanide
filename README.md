@@ -27,7 +27,7 @@ Open this page on your iPhone/iPad and tap one of the buttons below.
 
 ## Tweaks
 
-These tweaks have only been tested on iOS 18.x. Expect version drift in
+These tweaks have been tested on iOS 18.x and 26.x. Expect version drift in
 SpringBoard and related daemons to break things on other releases.
 
 ### Status Bar
@@ -39,6 +39,8 @@ SpringBoard and related daemons to break things on other releases.
 
 - **SBCustomizer**: dock icon count, home-screen columns/rows, and hidden icon
   labels. Native port of the lightsaber sbcustomizer payload.
+- **Home Layout Extras**: extra padding around the home grid and dock, plus
+  per-icon scale for home and dock icons. Stacks on top of SBCustomizer.
 
 ### Performance
 
@@ -63,12 +65,27 @@ Ported from [`kolbicz/DarkSword-Tweaks`](https://github.com/kolbicz/DarkSword-Tw
 
 ### Beta
 
-> ⚠︎ Work in progress — these may be unstable or change between builds.
+> ⚠︎ Work in progress — these work but may change or need re-applying between builds.
+
+- **Axon Lite**: groups Notification Center requests by app with a SpringBoard
+  overlay and dedups duplicates while the RemoteCall session is alive.
+- **Cyanide Themer**: per-bundle icon theme engine. Walks SpringBoard's
+  SBIconView hierarchy and swaps each icon's image with a PNG matched on bundle
+  ID. Ships with iOS 6 Theme; also accepts a custom folder of `<bundleID>.png`
+  files or a binary plist. Pick a theme in Settings before running.
+- **Watch Pairing Override**: edits the watchOS pairing range stored on the
+  iPhone so you can pair a newer Apple Watch or revive an older one. Persists
+  across reboots; respring before pairing.
+
+### Experimental
+
+> ⚠︎ Unstable or in-development — require Experimental Tweaks to be enabled in Settings.
 
 - **Signal Readouts**: replaces the signal-strength glyphs with live numeric
   readouts — RSRP dBm on cellular, bar count on WiFi.
-- **Axon Lite**: groups Notification Center requests by app with a SpringBoard
-  overlay and dedups duplicates while the RemoteCall session is alive.
+- **TypeBanner**: shows a pill banner below the Dynamic Island when the active
+  Messages conversation shows a typing indicator. Detection fires only while
+  Messages.app is running.
 
 ## Supported Targets
 
