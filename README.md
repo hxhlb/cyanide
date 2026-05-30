@@ -25,6 +25,10 @@ Open this page on your iPhone/iPad and tap one of the buttons below.
   </a>
 </p>
 
+## Patreon
+
+Early access to experimental tweaks (Dynamic Stage Lite, Signal Readouts, TypeBanner, and future work) is available to [Patreon supporters](https://www.patreon.com/zeroxjf) at the Member tier and above.
+
 ## Tweaks
 
 These tweaks have been tested on iOS 18.x and 26.x. Expect version drift in
@@ -80,7 +84,12 @@ Ported from [`kolbicz/DarkSword-Tweaks`](https://github.com/kolbicz/DarkSword-Tw
 ### Experimental
 
 > ⚠︎ Unstable or in-development — require Experimental Tweaks to be enabled in Settings.
+>
+> Experimental tweaks ship early to [Patreon supporters](https://www.patreon.com/zeroxjf) before public release.
 
+- **Dynamic Stage Lite**: brings Stage Manager-style split-view to iPhone over
+  RemoteCall — no jailbreak required. Hosts a second app's scene alongside
+  SpringBoard using the same scene-hosting design as [`tomt000`'s Dynamic Stage](https://havoc.app/package/dynamicstage).
 - **Signal Readouts**: replaces the signal-strength glyphs with live numeric
   readouts — RSRP dBm on cellular, bar count on WiFi.
 - **TypeBanner**: shows a pill banner below the Dynamic Island when the active
