@@ -50,6 +50,12 @@ extern NSString * const kSettingsTypeBannerEnabled;
 
 extern NSString * const kSettingsStageStripEnabled;
 
+extern NSString * const kSettingsLocationSimLatitude;
+extern NSString * const kSettingsLocationSimLongitude;
+extern NSString * const kSettingsLocationSimAltitude;
+extern NSString * const kSettingsLocationSimHorizontalAccuracy;
+extern NSString * const kSettingsLocationSimHostProcess;
+
 extern NSString * const kSettingsThemerEnabled;
 extern NSString * const kSettingsThemerThemeID;
 extern NSString * const kSettingsThemerCustomThemePath;
@@ -82,6 +88,7 @@ NSString *settings_themer_selected_theme_display_name(void);
 // compatibility override using the four numbers currently in NSUserDefaults
 // (kSettingsNanoMaxPairing, etc.). Returns YES on success.
 BOOL settings_apply_nano_registry_now(BOOL apply);
+BOOL settings_apply_call_recording_sound_disabled(BOOL disabled);
 
 void settings_run_actions(void);
 void settings_destroy_springboard_remote_call(void);

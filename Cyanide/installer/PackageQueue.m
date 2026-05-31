@@ -21,6 +21,7 @@ static BOOL PackageRequiresThemerTheme(Package *package)
 
 static BOOL PackageCanQueueInstall(Package *package)
 {
+    if (package.kind == PackageInstallKindDirectTool) return NO;
     if (!PackageRequiresThemerTheme(package)) return YES;
     return settings_themer_has_selected_theme();
 }
@@ -63,6 +64,7 @@ static BOOL PackageCanQueueInstall(Package *package)
 
 - (PackageQueueIntent)intentForPackage:(Package *)package
 {
+    if (package.kind == PackageInstallKindDirectTool) return PackageQueueIntentNone;
     if (!package.isInstalled && !PackageCanQueueInstall(package)) return PackageQueueIntentNone;
     if ([self packageInArray:self.installs matching:package])   return PackageQueueIntentInstall;
     if ([self packageInArray:self.uninstalls matching:package]) return PackageQueueIntentUninstall;

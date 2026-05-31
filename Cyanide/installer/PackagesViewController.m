@@ -533,9 +533,14 @@ static NSString * const kTipsExpandedDefault    = @"installer.tipsExpanded";
 - (UIView *)accessoryViewForPackage:(Package *)pkg
 {
     PackageQueueIntent intent = [[PackageQueue sharedQueue] intentForPackage:pkg];
+    if (pkg.kind == PackageInstallKindDirectTool) {
+        return [self pillWithText:@"MANUAL"
+                       background:[UIColor.secondaryLabelColor colorWithAlphaComponent:0.14]
+                        textColor:UIColor.secondaryLabelColor];
+    }
     if (pkg.kind == PackageInstallKindOTA) {
         if (intent != PackageQueueIntentNone) {
-            NSString *text = (intent == PackageQueueIntentInstall) ? @"DISABLE QUEUED" : @"ENABLE QUEUED";
+            NSString *text = (intent == PackageQueueIntentInstall) ? @"DISABLE PENDING" : @"ENABLE PENDING";
             UIColor *color = self.view.tintColor;
             return [self pillWithText:text
                            background:[color colorWithAlphaComponent:0.18]
@@ -547,7 +552,19 @@ static NSString * const kTipsExpandedDefault    = @"installer.tipsExpanded";
     }
     if (pkg.kind == PackageInstallKindNanoRegistry) {
         if (intent != PackageQueueIntentNone) {
-            NSString *text = (intent == PackageQueueIntentInstall) ? @"APPLY QUEUED" : @"REMOVE QUEUED";
+            NSString *text = (intent == PackageQueueIntentInstall) ? @"APPLY PENDING" : @"REMOVE PENDING";
+            UIColor *color = self.view.tintColor;
+            return [self pillWithText:text
+                           background:[color colorWithAlphaComponent:0.18]
+                            textColor:color];
+        }
+        return [self pillWithText:@"MANUAL"
+                       background:[UIColor.secondaryLabelColor colorWithAlphaComponent:0.14]
+                        textColor:UIColor.secondaryLabelColor];
+    }
+    if (pkg.kind == PackageInstallKindCallRecordingSound) {
+        if (intent != PackageQueueIntentNone) {
+            NSString *text = (intent == PackageQueueIntentInstall) ? @"SILENCE PENDING" : @"RESTORE PENDING";
             UIColor *color = self.view.tintColor;
             return [self pillWithText:text
                            background:[color colorWithAlphaComponent:0.18]
@@ -558,14 +575,14 @@ static NSString * const kTipsExpandedDefault    = @"installer.tipsExpanded";
                         textColor:UIColor.secondaryLabelColor];
     }
     if (intent != PackageQueueIntentNone) {
-        NSString *text = (intent == PackageQueueIntentInstall) ? @"Queued" : @"Removing";
+        NSString *text = (intent == PackageQueueIntentInstall) ? @"WILL ACTIVATE" : @"WILL DEACTIVATE";
         UIColor *color = self.view.tintColor;
         return [self pillWithText:text
                        background:[color colorWithAlphaComponent:0.18]
                         textColor:color];
     }
     if (pkg.isInstalled) {
-        return [self pillWithText:@"Installed"
+        return [self pillWithText:@"ACTIVE"
                        background:[UIColor colorWithRed:0.16 green:0.55 blue:0.32 alpha:0.18]
                         textColor:[UIColor systemGreenColor]];
     }
@@ -573,6 +590,11 @@ static NSString * const kTipsExpandedDefault    = @"installer.tipsExpanded";
         return [self pillWithText:@"DISABLED"
                        background:[[UIColor systemRedColor] colorWithAlphaComponent:0.16]
                         textColor:[UIColor systemRedColor]];
+    }
+    if (pkg.creatorOnly) {
+        return [self pillWithText:@"IN DEV"
+                       background:[[UIColor systemPurpleColor] colorWithAlphaComponent:0.16]
+                        textColor:[UIColor systemPurpleColor]];
     }
     if (pkg.experimental) {
         return [self pillWithText:@"EXPERIMENTAL"
@@ -628,6 +650,20 @@ static NSString * const kTipsExpandedDefault    = @"installer.tipsExpanded";
     Package *pkg = [self packageAtIndexPath:indexPath];
     PackageQueue *q = [PackageQueue sharedQueue];
     PackageQueueIntent intent = [q intentForPackage:pkg];
+    if (pkg.kind == PackageInstallKindDirectTool) {
+        UIContextualAction *open = [UIContextualAction
+            contextualActionWithStyle:UIContextualActionStyleNormal
+                                title:@"Open"
+                              handler:^(UIContextualAction *a, UIView *v, void (^done)(BOOL)) {
+            done(YES);
+            [self navigateToSettingsSectionForPackage:pkg];
+        }];
+        open.backgroundColor = self.view.tintColor;
+        open.image = [UIImage systemImageNamed:@"slider.horizontal.3"];
+        UISwipeActionsConfiguration *cfg = [UISwipeActionsConfiguration configurationWithActions:@[open]];
+        cfg.performsFirstActionWithFullSwipe = YES;
+        return cfg;
+    }
     if (pkg.isInstallDisabled && !pkg.isInstalled && intent == PackageQueueIntentNone) return nil;
 
     if (pkg.kind == PackageInstallKindOTA && intent == PackageQueueIntentNone) {
@@ -680,25 +716,54 @@ static NSString * const kTipsExpandedDefault    = @"installer.tipsExpanded";
         return cfg;
     }
 
+    if (pkg.kind == PackageInstallKindCallRecordingSound && intent == PackageQueueIntentNone) {
+        UIContextualAction *silence = [UIContextualAction
+            contextualActionWithStyle:UIContextualActionStyleDestructive
+                                title:@"Silence"
+                              handler:^(UIContextualAction *a, UIView *v, void (^done)(BOOL)) {
+            done(YES);
+            [PackageDetailViewController
+                presentCallRecordingDisclosureIfNeededFromViewController:self
+                                                          confirmHandler:^{
+                [q queueIntent:PackageQueueIntentInstall forPackage:pkg];
+            }];
+        }];
+        silence.image = [UIImage systemImageNamed:@"speaker.slash.fill"];
+
+        UIContextualAction *restore = [UIContextualAction
+            contextualActionWithStyle:UIContextualActionStyleNormal
+                                title:@"Restore"
+                              handler:^(UIContextualAction *a, UIView *v, void (^done)(BOOL)) {
+            [q queueIntent:PackageQueueIntentUninstall forPackage:pkg];
+            done(YES);
+        }];
+        restore.backgroundColor = UIColor.systemGreenColor;
+        restore.image = [UIImage systemImageNamed:@"speaker.wave.2.fill"];
+
+        UISwipeActionsConfiguration *cfg = [UISwipeActionsConfiguration configurationWithActions:@[silence, restore]];
+        cfg.performsFirstActionWithFullSwipe = NO;
+        return cfg;
+    }
+
     NSString *title;
     UIColor *color;
     NSString *symbol;
     if (intent != PackageQueueIntentNone) {
-        title  = @"Remove";
+        title  = @"Cancel";
         color  = [UIColor systemGrayColor];
         symbol = @"xmark.circle";
     } else if (pkg.isInstalled) {
-        title  = @"Uninstall";
+        title  = @"Deactivate";
         color  = [UIColor systemRedColor];
-        symbol = @"trash";
+        symbol = @"power";
     } else if ([self packageNeedsThemeBeforeInstall:pkg]) {
         title  = @"Select Theme";
         color  = self.view.tintColor;
         symbol = @"paintpalette";
     } else {
-        title  = @"Queue";
+        title  = @"Activate";
         color  = self.view.tintColor;
-        symbol = @"tray.and.arrow.down";
+        symbol = @"play.circle";
     }
 
     UIContextualAction *action = [UIContextualAction
@@ -730,7 +795,7 @@ static NSString * const kTipsExpandedDefault    = @"installer.tipsExpanded";
 - (void)presentThemeRequiredAlertForPackage:(Package *)pkg
 {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Select a Theme"
-                                                                   message:@"Cyanide Themer needs a selected theme before it can be queued. Choose iOS 6 Theme or import a custom theme first."
+                                                                   message:@"Cyanide Themer needs a selected theme before it can be activated. Choose iOS 6 Theme or import a custom theme first."
                                                             preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"Open Theme Settings"
                                              style:UIAlertActionStyleDefault
@@ -771,9 +836,9 @@ static NSString * const kTipsExpandedDefault    = @"installer.tipsExpanded";
 - (void)presentConfigureAlertForPackage:(Package *)pkg
 {
     NSString *msg = [NSString stringWithFormat:
-        @"%@ has configurable options. Set them up first so the tweak applies with your preferences on the first run.",
+        @"%@ has configurable options. Set them up first so the tweak applies with your preferences on the first activation.",
         pkg.name];
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Customize Before Installing?"
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Customize Before Activating?"
                                                                    message:msg
                                                             preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"Configure First"
@@ -782,7 +847,7 @@ static NSString * const kTipsExpandedDefault    = @"installer.tipsExpanded";
         PackageDetailViewController *detail = [[PackageDetailViewController alloc] initWithPackage:pkg];
         [self.navigationController pushViewController:detail animated:YES];
     }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Install Anyway"
+    [alert addAction:[UIAlertAction actionWithTitle:@"Activate Anyway"
                                              style:UIAlertActionStyleDefault
                                            handler:^(UIAlertAction *_) {
         [[PackageQueue sharedQueue] toggleForPackage:pkg];

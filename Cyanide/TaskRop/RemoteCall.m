@@ -624,8 +624,7 @@ uint64_t do_remote_call_temp(int timeout, const char *name,
         printf("[%s:%d] %s func's retValue = 0x%llx(%llu)\n", __FUNCTION__, __LINE__, name, retValue, retValue);
     if(strcmp(name, "getpid") == 0 && retValue == 0) {
         printf("[%s:%d] getpid failed\n", __FUNCTION__, __LINE__);
-        printf("[%s:%d] spinning here...\n", __FUNCTION__, __LINE__);
-        while(1) {};
+        g_RC_success = false;
     }
     return retValue;
 }

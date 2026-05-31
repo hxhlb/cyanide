@@ -27,6 +27,9 @@ BOOL cyanide_patreon_is_linked(void);
 // cyanide_patreon_refresh() to revalidate against the Patreon API.
 BOOL cyanide_is_patron(void);
 
+// YES iff the linked account is the campaign creator (tier == "Creator").
+BOOL cyanide_is_creator(void);
+
 // Display name from /identity (e.g. "Johnny F"), nil if not linked.
 NSString * _Nullable cyanide_patreon_display_name(void);
 

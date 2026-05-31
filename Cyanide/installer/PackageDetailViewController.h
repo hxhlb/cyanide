@@ -12,6 +12,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface PackageDetailViewController : UITableViewController
 
++ (void)presentCallRecordingDisclosureIfNeededFromViewController:(UIViewController *)presenter
+                                                  confirmHandler:(dispatch_block_t)confirmHandler;
+
 - (instancetype)initWithPackage:(Package *)package NS_DESIGNATED_INITIALIZER;
 - (instancetype)initWithStyle:(UITableViewStyle)style NS_UNAVAILABLE;
 - (instancetype)initWithCoder:(NSCoder *)coder NS_UNAVAILABLE;

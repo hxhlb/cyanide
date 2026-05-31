@@ -19,6 +19,7 @@ static const NSInteger kSecPowercuff    = 9;
 static const NSInteger kSecLayoutExtras = 11;
 static const NSInteger kSecNanoRegistry = 12;
 static const NSInteger kSecThemer       = 13;
+static const NSInteger kSecLocationSim  = 14;
 
 + (NSArray<Package *> *)allPackages
 {
@@ -26,11 +27,12 @@ static const NSInteger kSecThemer       = 13;
     BOOL experimentalOn = [[NSUserDefaults standardUserDefaults]
                             boolForKey:kSettingsExperimentalTweaksEnabled]
                             && cyanide_is_patron();
-    if (experimentalOn) return full;
+    BOOL creator = cyanide_is_creator();
 
     NSMutableArray<Package *> *out = [NSMutableArray arrayWithCapacity:full.count];
     for (Package *p in full) {
-        if (p.experimental) continue;
+        if (p.creatorOnly && !creator) continue;
+        if (p.experimental && !experimentalOn) continue;
         [out addObject:p];
     }
     return out;
@@ -59,17 +61,18 @@ static const NSInteger kSecThemer       = 13;
         Package *signal = [[Package alloc] initWithIdentifier:@"com.darksword.rssidisplay"
                                            name:@"Signal Readouts"
                                shortDescription:@"RSRP dBm on cellular, bar count on WiFi"
-                                longDescription:@"Replaces the signal-strength glyphs in the status bar with live numeric readouts: RSRP in dBm for cellular, and the active bar count for WiFi. Updates roughly once per second.\n\nToggle WiFi-only or cellular-only in the Settings tab.\n\nIn development: the live RemoteCall refresh interferes with other SpringBoard tweaks and the readouts may not even render reliably. Only available while Experimental Tweaks is enabled in Settings."
+                                longDescription:@"Replaces the signal-strength glyphs in the status bar with live numeric readouts: RSRP in dBm for cellular, and the active bar count for WiFi. Updates roughly once per second.\n\nToggle WiFi-only or cellular-only in the Settings tab."
                                         version:version
                                          author:@"zeroxjf"
-                                       category:@"Experimental"
+                                       category:@"In Development"
                                      symbolName:@"antenna.radiowaves.left.and.right"
                                            kind:PackageInstallKindToggle
                                      enabledKey:kSettingsRSSIDisplayEnabled
                                           isNew:NO];
         signal.settingsSection = kSecRSSI;
         signal.experimental = YES;
-        signal.unstableWarning = @"⚠️ Experimental: in-development and may not work at all. The live status-bar refresh interferes with other SpringBoard tweaks and can drop readouts entirely. Turning this on adds risk with no guaranteed feature in return.";
+        signal.creatorOnly = YES;
+        signal.unstableWarning = @"⚠️ In development — may not work at all. The live status-bar refresh interferes with other SpringBoard tweaks and can drop readouts entirely.";
 
         Package *sbc = [[Package alloc] initWithIdentifier:@"com.darksword.sbcustomizer"
                                            name:@"SBCustomizer"
@@ -113,16 +116,17 @@ static const NSInteger kSecThemer       = 13;
         Package *typeBanner = [[Package alloc] initWithIdentifier:@"com.darksword.typebanner"
                                            name:@"TypeBanner"
                                shortDescription:@"iMessage typing banner under the Dynamic Island"
-                                longDescription:@"Port of TypeMillennium. Shows a pill banner just below the Dynamic Island whenever the active Messages conversation list shows a typing indicator.\n\nv1 limitation: detection runs against the Messages app's own view hierarchy via RemoteCall, so it only fires while Messages.app is running. The original tweak's system-wide imagent hook requires code injection, which is not available in this sandboxed environment without a code-signing bypass.\n\nNo extra configuration."
+                                longDescription:@"Port of TypeMillennium. Shows a pill banner just below the Dynamic Island whenever the active Messages conversation list shows a typing indicator.\n\nv1 limitation: detection runs against the Messages app's own view hierarchy via RemoteCall, so it only fires while Messages.app is running.\n\nNo extra configuration."
                                         version:version
                                          author:@"zeroxjf"
-                                       category:@"Experimental"
+                                       category:@"In Development"
                                      symbolName:@"ellipsis.bubble.fill"
                                            kind:PackageInstallKindToggle
                                      enabledKey:kSettingsTypeBannerEnabled
                                           isNew:YES];
         typeBanner.experimental = YES;
-        typeBanner.unstableWarning = @"⚠️ Experimental: extremely unstable and risky. Polls MobileSMS over RemoteCall every ~1.5s, opens SpringBoard sessions on state change, and is known to crash SpringBoard. Detection only fires while Messages.app is running. Battery cost is non-trivial.";
+        typeBanner.creatorOnly = YES;
+        typeBanner.unstableWarning = @"⚠️ In development — extremely unstable. Polls MobileSMS over RemoteCall every ~1.5s and is known to crash SpringBoard. Detection only fires while Messages.app is running.";
 
         Package *stageStrip = [[Package alloc] initWithIdentifier:@"com.darksword.stagestrip"
                                            name:@"Dynamic Stage Lite"
@@ -150,6 +154,21 @@ static const NSInteger kSecThemer       = 13;
                                           isNew:YES];
         stageStrip.experimental = YES;
         stageStrip.unstableWarning = @"⚠️ Early development. First Run takes 1-2 minutes because the picker enumerates every installed app and builds a tile per app. Re-Runs are fast. Touch routing into hosted windows isn't wired yet, so scrolling/typing inside a floating window may not work.";
+
+        Package *locationSim = [[Package alloc] initWithIdentifier:@"com.darksword.locationsim"
+                                           name:@"Location Simulator"
+                               shortDescription:@"CoreLocation static point simulation"
+                                longDescription:@"Starts Apple's CoreLocation simulation path from a RemoteCall host process. The current experimental build launches Maps, creates a CLLocation for the configured target, and drives CLSimulationManager to start or stop the system simulation.\n\nThis is a manual tool, not an installable package. Open Controls, choose a target, then use Simulate Current Target or Restore Real Location. Each run opens the activity log and marks completion when the request returns. Reset may take a few minutes and may require a reboot plus extra wait time.\n\nSettings exposes the current target plus altitude and accuracy. v1 is static-point only; route playback and alternate daemon hosts are next.\n\nCredits: kolbicz provided the GPS spoofer RemoteCall/CLSimulationManager prototype this is based on. ezzuldinSt's LSpoof provided the app-side CLLocationManager spoofing, picker, bookmarks, and route-simulation reference.\n\nSystem-behavior warning: simulated locations can affect more than maps. Features tied to location, including time zone, date/time behavior, weather, automation, reminders, and service checks, may behave unexpectedly. Only use this if you know what you're doing.\n\nLegal and service-use note: simulated locations may violate app terms, platform rules, game rules, ride-share or delivery policies, or local law depending on how they are used. Use only where you have permission. You are responsible for your use and apply or restore this tweak at your own risk."
+                                        version:version
+                                         author:@"zeroxjf, kolbicz, ezzuldinSt"
+                                       category:@"Experimental"
+                                     symbolName:@"location.fill"
+                                           kind:PackageInstallKindDirectTool
+                                     enabledKey:nil
+                                          isNew:YES];
+        locationSim.settingsSection = kSecLocationSim;
+        locationSim.experimental = YES;
+        locationSim.unstableWarning = @"Experimental private tweak: changes CoreLocation's active simulation state. It may affect location-tied system behavior such as time zone/date/time handling and can have unintended consequences. Some apps and services prohibit or detect simulated locations. Only use this if you know what you're doing.";
 
         Package *themer = [[Package alloc] initWithIdentifier:@"com.darksword.themer"
                                            name:@"Cyanide Themer"
@@ -182,7 +201,7 @@ static const NSInteger kSecThemer       = 13;
         Package *nanoRegistry = [[Package alloc] initWithIdentifier:@"com.darksword.nanoregistry"
                                            name:@"Watch Pairing Override"
                                shortDescription:@"Pair a newer watch or revive an older one"
-                                longDescription:@"Changes the watchOS pairing range saved on this iPhone.\n\nMost people should use watchOS Range 99/23/10/6 in Settings, then apply the override. These are pairing protocol generations, not Apple Watch model numbers. 99 raises the watchOS pairing ceiling. 23 keeps the generation-23 setup protocol accepted. 10 and 6 leave the legacy chip and multi-watch floors at their normal values.\n\nApple Watch Ultra 3 cannot pair on iOS versions below 26 at this time.\n\nRespring or reboot after installing or removing the override before trying to pair."
+                                longDescription:@"Changes the watchOS pairing range saved on this iPhone.\n\nMost people should use watchOS Range 99/23/10/6 in Settings, then apply the override. These are pairing protocol generations, not Apple Watch model numbers. 99 raises the watchOS pairing ceiling. 23 keeps the generation-23 setup protocol accepted. 10 and 6 leave the legacy chip and multi-watch floors at their normal values.\n\nApple Watch Ultra 3 cannot pair on iOS versions below 26 at this time.\n\nSystem-file warning: this modifies the local NanoRegistry compatibility-index MobileAsset and saves a .cyanide.bak backup beside the original file. Pairing-asset edits can fail, partially apply, require a respring or reboot to settle, or leave pairing state inconsistent. You apply or remove this override at your own risk.\n\nRespring or reboot after installing or removing the override before trying to pair."
                                         version:version
                                          author:@"zeroxjf"
                                        category:@"Beta"
@@ -191,6 +210,34 @@ static const NSInteger kSecThemer       = 13;
                                      enabledKey:nil
                                           isNew:YES];
         nanoRegistry.settingsSection = kSecNanoRegistry;
+        nanoRegistry.unstableWarning = @"Warning: modifies a local NanoRegistry MobileAsset. Cyanide saves a .cyanide.bak backup beside the original, but system-file edits can fail or require a respring/reboot. Apply or remove this override at your own risk.";
+
+        Package *callRecordingSound = [[Package alloc] initWithIdentifier:@"com.darksword.callrecording-sound"
+                                           name:@"Call Recording Sound"
+                               shortDescription:@"Silence disclosure start/stop sounds"
+                                longDescription:@"Replaces the CallServices StartDisclosureWithTone and StopDisclosure audio files with Cyanide's bundled silent payloads.\n\nCredits: YangJiiii (@duongduong0908) for the EnsWilde and Disable Call Recording BookRestore reference tools. @Little_34306 is credited by the original projects for the Disable Call Recording concept. Cyanide port, KRW-backed implementation, and generated replacement silent audio assets by zeroxjf.\n\nSystem-file warning: this modifies files under /var/mobile/Library/CallServices/Greetings/default. Cyanide backs up the first originals into its app container, but system file replacement can fail, partially apply, or require a respring/reboot to settle.\n\nLegal note: call-recording disclosure sounds may exist to satisfy consent, notification, or privacy-law requirements in some places. You are responsible for understanding and following the laws that apply to you.\n\nThis port does not use the old Books/BookRestore/sparserestore path. Cyanide runs KRW, unlocks local /private/var write access, then writes directly to the CallServices files.\n\nUse Restore Original Sounds to write Cyanide's backups back when present. You apply or restore this tweak at your own risk."
+                                        version:version
+                                         author:@"YangJiiii (@duongduong0908) / zeroxjf"
+                                       category:@"Experimental"
+                                     symbolName:@"speaker.slash.fill"
+                                           kind:PackageInstallKindCallRecordingSound
+                                     enabledKey:nil
+                                          isNew:YES];
+        callRecordingSound.experimental = YES;
+        callRecordingSound.unstableWarning = @"⚠️ Experimental private tweak: persistent CallServices system-file replacement. Disclosure sounds may be legally required where you live; you are responsible for your use and apply this at your own risk. Use Restore Original Sounds before removing Cyanide if you want Cyanide's backups written back.";
+
+        Package *otaBlock = [[Package alloc] initWithIdentifier:@"com.darksword.ota-block"
+                                           name:@"OTA Updates"
+                               shortDescription:@"Enable or disable over-the-air system updates"
+                                longDescription:@"Disables or enables the launchd jobs responsible for over-the-air system updates by editing disabled.plist. State persists across reboots.\n\nSystem-file warning: this edits /private/var/db/com.apple.xpc.launchd/disabled.plist. Incorrect or partial writes can affect launchd job state across boot. You disable or re-enable OTA updates at your own risk.\n\nNo Run/Apply step required for this package. Use Disable to block OTA updates, or Enable to restore them."
+                                        version:version
+                                         author:@"kolbicz"
+                                       category:@"System Updates"
+                                     symbolName:@"icloud.slash.fill"
+                                          kind:PackageInstallKindOTA
+                                    enabledKey:nil
+                                         isNew:NO];
+        otaBlock.unstableWarning = @"Warning: persistent system-file edit. This package modifies launchd disabled.plist to change OTA job state across reboot. Disable or re-enable OTA updates at your own risk.";
 
         list = @[
             statBar,
@@ -258,17 +305,9 @@ static const NSInteger kSecThemer       = 13;
                                      enabledKey:kSettingsDSDoubleTapToLock
                                           isNew:NO],
 
-            [[Package alloc] initWithIdentifier:@"com.darksword.ota-block"
-                                           name:@"OTA Updates"
-                               shortDescription:@"Enable or disable over-the-air system updates"
-                                longDescription:@"Disables or enables the launchd jobs responsible for over-the-air system updates by editing disabled.plist. State persists across reboots.\n\nNo Run/Apply step required for this package. Use Disable to block OTA updates, or Enable to restore them."
-                                        version:version
-                                         author:@"kolbicz"
-                                       category:@"System Updates"
-                                     symbolName:@"icloud.slash.fill"
-                                           kind:PackageInstallKindOTA
-                                     enabledKey:nil
-                                          isNew:NO],
+            otaBlock,
+
+            callRecordingSound,
 
             // Beta last so the warning sits at the bottom of the Installer.
             signal,
@@ -276,6 +315,7 @@ static const NSInteger kSecThemer       = 13;
             nanoRegistry,
             typeBanner,
             stageStrip,
+            locationSim,
             themer,
         ];
     });
@@ -285,6 +325,7 @@ static const NSInteger kSecThemer       = 13;
 + (NSArray<NSString *> *)categoriesInOrder
 {
     NSArray<NSString *> *preferred = @[
+        @"In Development",
         @"Experimental",
         @"Beta",
         @"Status Bar",

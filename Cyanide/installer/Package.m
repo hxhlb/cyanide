@@ -6,6 +6,7 @@
 #import "Package.h"
 #import "PackageQueue.h"
 #import "../SettingsViewController.h"
+#import "../PatreonAuth.h"
 #import "../LogTextView.h"
 
 @implementation Package
@@ -46,15 +47,18 @@
         case PackageInstallKindToggle:
             // "Installed" means live in the current RemoteCall session.
             // A persisted install intent that has not been re-applied yet is
-            // shown as queued instead.
+            // shown as activation-pending instead.
             if (!self.enabledKey) return NO;
             if (![d boolForKey:self.enabledKey]) return NO;
             return settings_tweak_is_applied(self.enabledKey);
         case PackageInstallKindOTA:
         case PackageInstallKindNanoRegistry:
+        case PackageInstallKindCallRecordingSound:
             // Manual-control packages: no persistent "installed" state from
             // the app's POV. The detail view shows an Apply/Remove menu and
             // each commit is a fresh one-shot run.
+            return NO;
+        case PackageInstallKindDirectTool:
             return NO;
     }
 }
@@ -69,7 +73,9 @@
 
 - (BOOL)isInstallDisabled
 {
-    return self.installDisabledReason.length > 0;
+    if (self.installDisabledReason.length > 0) return YES;
+    if (self.creatorOnly && !cyanide_is_creator()) return YES;
+    return NO;
 }
 
 - (void)install   { [[PackageQueue sharedQueue] toggleForPackage:self]; }
@@ -103,6 +109,17 @@
                 log_user("[INSTALLER] Watch pairing override %s failed; state was not changed.\n",
                          installed ? "apply" : "remove");
             }
+            return;
+        case PackageInstallKindCallRecordingSound:
+            if (settings_apply_call_recording_sound_disabled(installed)) {
+                log_user("[INSTALLER] Call recording disclosure sound %s.\n",
+                         installed ? "silenced" : "restored");
+            } else {
+                log_user("[INSTALLER] Call recording disclosure sound %s failed.\n",
+                         installed ? "silence" : "restore");
+            }
+            return;
+        case PackageInstallKindDirectTool:
             return;
     }
 }

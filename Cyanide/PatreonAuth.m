@@ -195,6 +195,12 @@ BOOL cyanide_is_patron(void)
     return [v isKindOfClass:[NSNumber class]] && [v boolValue];
 }
 
+BOOL cyanide_is_creator(void)
+{
+    NSString *tier = cyanide_patreon_tier_title();
+    return [tier isEqualToString:@"Creator"];
+}
+
 NSString *cyanide_patreon_display_name(void)
 {
     NSString *s = [[NSUserDefaults standardUserDefaults] stringForKey:kDefaultsDisplayName];

@@ -95,6 +95,17 @@ Ported from [`kolbicz/DarkSword-Tweaks`](https://github.com/kolbicz/DarkSword-Tw
 - **TypeBanner**: shows a pill banner below the Dynamic Island when the active
   Messages conversation shows a typing indicator. Detection fires only while
   Messages.app is running.
+- **Location Simulator**: drives Apple's CoreLocation simulation path from a
+  RemoteCall host process and sets a static target coordinate. Simulated
+  locations may violate app terms, platform rules, game rules, ride-share or
+  delivery policies, or local law depending on how they are used. Use only where
+  you have permission; you are responsible for your use and apply or restore it
+  at your own risk. It may also affect location-tied system behavior such as
+  time zone/date/time handling and can have unintended consequences; only use it
+  if you know what you're doing. Credits: `kolbicz` provided the
+  RemoteCall/CLSimulationManager GPS spoofer prototype, and `ezzuldinSt`'s
+  LSpoof provided the app-side spoofing, picker, bookmarks, and route-simulation
+  reference.
 
 ## Supported Targets
 
@@ -130,7 +141,12 @@ iOS/iPadOS 18.7.2 and 26.1. Later builds are outside this kernel exploit window.
 - [`wh1te4ever`](https://github.com/wh1te4ever): [`kfun` / `darksword-kexploit-fun`](https://github.com/wh1te4ever/darksword-kexploit-fun) — the RemoteCall implementation that lets a sideloaded app apply tweaks inside SpringBoard. Cyanide is a fork of this project.
 - [`rooootdev`](https://github.com/rooootdev): working kexploit behavior used to stabilize this fork.
 - [`neonmodder123`](https://github.com/neonmodder123): Web Respring method.
-- [`kolbicz`](https://github.com/kolbicz): OTA Disabler and SpringBoard tweaks.
+- [`kolbicz`](https://github.com/kolbicz): OTA Disabler, SpringBoard tweaks, and
+  the RemoteCall/CLSimulationManager GPS spoofer prototype used as the starting
+  point for Location Simulator.
+- `ezzuldinSt`: LSpoof app-side `CLLocationManager` spoofing, picker,
+  bookmarks, and route-simulation reference used while shaping Location
+  Simulator.
 - [`rpetrich`](https://github.com/rpetrich): Powercuff.
 - [`tomt000`](https://github.com/tomt000): [Dynamic Stage](https://havoc.app/package/dynamicstage) — the original Stage Manager-for-iPhone tweak whose split-view + scene-hosting design Dynamic Stage Lite re-implements over RemoteCall.
 
@@ -172,7 +188,7 @@ See `LICENSE`.
 
 The `Cyanide/tweaks/private/` submodule points at a separate private
 repository containing the closed-source experimental tweak
-implementations (Signal Readouts, TypeBanner). Those files are
+implementations. Those files are
 **All Rights Reserved**, distributed in compiled form only inside
 official Cyanide releases, and gated to active Patreon supporters at the
 Member tier or above. Public clones won't be able to fetch the

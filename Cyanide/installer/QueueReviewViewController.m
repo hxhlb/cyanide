@@ -185,18 +185,39 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
 {
     NSArray<Package *> *list = [self packagesForSection:section];
     if (list.count == 0) return nil;
-    BOOL allOTA = YES;
+    PackageInstallKind commonKind = list.firstObject.kind;
+    BOOL allSameKind = YES;
     for (Package *pkg in list) {
-        if (pkg.kind != PackageInstallKindOTA) {
-            allOTA = NO;
+        if (pkg.kind != commonKind) {
+            allSameKind = NO;
             break;
         }
     }
     NSString *label;
     switch ((QueueReviewSection)section) {
-        case QueueReviewSectionInstall:   label = allOTA ? @"Disable" : @"Install";    break;
-        case QueueReviewSectionUninstall: label = allOTA ? @"Enable" : @"Uninstall";   break;
-        case QueueReviewSectionReApply:   label = @"Will Re-Apply";    break;
+        case QueueReviewSectionInstall:
+            if (allSameKind && commonKind == PackageInstallKindOTA) {
+                label = @"Disable";
+            } else if (allSameKind && commonKind == PackageInstallKindNanoRegistry) {
+                label = @"Apply";
+            } else if (allSameKind && commonKind == PackageInstallKindCallRecordingSound) {
+                label = @"Silence";
+            } else {
+                label = @"Activate";
+            }
+            break;
+        case QueueReviewSectionUninstall:
+            if (allSameKind && commonKind == PackageInstallKindOTA) {
+                label = @"Enable";
+            } else if (allSameKind && commonKind == PackageInstallKindNanoRegistry) {
+                label = @"Remove";
+            } else if (allSameKind && commonKind == PackageInstallKindCallRecordingSound) {
+                label = @"Restore";
+            } else {
+                label = @"Deactivate";
+            }
+            break;
+        case QueueReviewSectionReApply:   label = @"Already Active";   break;
         default:                          return nil;
     }
     return [NSString stringWithFormat:@"%@  ·  %ld", label, (long)list.count];
@@ -206,7 +227,7 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
 {
     if ((QueueReviewSection)section != QueueReviewSectionReApply) return nil;
     if ([self reApplyPackages].count == 0) return nil;
-    return @"These are already installed, not newly queued changes. Confirming re-runs the chain so installed RemoteCall-backed tweaks come back after a force-quit. To stop one from running, uninstall it from the Installer tab, or use Reset All Packages in Settings → Quick Actions.";
+    return @"These are already active, not new pending changes. Confirming re-runs the chain so RemoteCall-backed tweaks come back after a force-quit. To stop one from running, deactivate it from the Installer tab, or use Reset All Packages in Settings → Quick Actions.";
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
@@ -231,8 +252,12 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
                     cell.detailTextLabel.text = @"Pending override apply";
                     cell.detailTextLabel.textColor = self.view.tintColor;
                     break;
+                case PackageInstallKindCallRecordingSound:
+                    cell.detailTextLabel.text = @"Pending sound silence";
+                    cell.detailTextLabel.textColor = UIColor.systemOrangeColor;
+                    break;
                 default:
-                    cell.detailTextLabel.text = @"Pending install";
+                    cell.detailTextLabel.text = @"Activation pending";
                     cell.detailTextLabel.textColor = UIColor.systemGreenColor;
                     break;
             }
@@ -247,14 +272,18 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
                     cell.detailTextLabel.text = @"Pending override remove";
                     cell.detailTextLabel.textColor = UIColor.systemRedColor;
                     break;
+                case PackageInstallKindCallRecordingSound:
+                    cell.detailTextLabel.text = @"Pending sound restore";
+                    cell.detailTextLabel.textColor = UIColor.systemGreenColor;
+                    break;
                 default:
-                    cell.detailTextLabel.text = @"Pending removal";
+                    cell.detailTextLabel.text = @"Deactivation pending";
                     cell.detailTextLabel.textColor = UIColor.systemRedColor;
                     break;
             }
             break;
         case QueueReviewSectionReApply:
-            cell.detailTextLabel.text = @"Installed; will re-apply";
+            cell.detailTextLabel.text = @"Active; will refresh";
             cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
             break;
         default:
@@ -302,7 +331,7 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
     nav.modalPresentationStyle = UIModalPresentationAutomatic;
     [self presentViewController:nav animated:YES completion:^{
-        log_user("[INSTALLER] ── Applying %ld queued change(s) ──\n", (long)count);
+        log_user("[INSTALLER] ── Applying %ld pending change(s) ──\n", (long)count);
         [[PackageQueue sharedQueue] commit];
     }];
 }
@@ -310,8 +339,8 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
 - (void)didTapClear
 {
     if ([PackageQueue sharedQueue].pendingCount == 0) return;
-    UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Clear Queue?"
-                                                                message:@"Discard all pending install / uninstall changes."
+        UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Clear Queue?"
+                                                                message:@"Discard all pending activation / deactivation changes."
                                                          preferredStyle:UIAlertControllerStyleAlert];
     [ac addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     [ac addAction:[UIAlertAction actionWithTitle:@"Clear" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_) {

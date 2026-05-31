@@ -25,6 +25,16 @@ typedef NS_ENUM(NSInteger, PackageInstallKind) {
     // compatibility keys from the Settings bundle; uninstalling clears them.
     // No live RC loop, doesn't run settings_run_actions.
     PackageInstallKindNanoRegistry = 2,
+
+    // One-shot CallServices audio replacement gated by kexploit + sandbox
+    // patch. Installing writes bundled silent disclosure sounds and stores
+    // the first originals in Cyanide's app container; uninstalling restores
+    // those backups when present.
+    PackageInstallKindCallRecordingSound = 3,
+
+    // Direct settings tool. It has a Settings bundle but no install queue,
+    // active state, or PackageQueue commit step.
+    PackageInstallKindDirectTool = 4,
 };
 
 @interface Package : NSObject
@@ -61,6 +71,10 @@ typedef NS_ENUM(NSInteger, PackageInstallKind) {
 // filters experimental packages out entirely so they don't appear in the
 // Installer list or the Settings tweak-bundle list.
 @property (nonatomic, assign) BOOL experimental;
+
+// YES means the package is only installable by the campaign creator.
+// Non-creators see the package but cannot queue it.
+@property (nonatomic, assign) BOOL creatorOnly;
 
 @property (nonatomic, readonly, assign) BOOL isInstalled;
 @property (nonatomic, readonly, assign) BOOL isQueuedForApply;

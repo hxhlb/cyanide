@@ -15,9 +15,11 @@
 #import "tweaks/darksword_ota.h"
 #import "tweaks/darksword_layout.h"
 #import "tweaks/nano_registry.h"
+#import "tweaks/private/call_recording_sound.h"
 #import "tweaks/killallapps.h"
-#import "tweaks/stagestrip.h"
+#import "tweaks/private/stagestrip.h"
 #import "tweaks/themer.h"
+#import "tweaks/private/location_sim.h"
 
 #import <objc/runtime.h>
 #import "DSKeepAlive.h"
@@ -35,6 +37,7 @@
 #import <MessageUI/MessageUI.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <notify.h>
+#import <math.h>
 #import <sys/utsname.h>
 #import <time.h>
 #import <unistd.h>
@@ -168,6 +171,14 @@ NSString * const kSettingsTypeBannerEnabled = @"TypeBannerEnabled";
 
 NSString * const kSettingsStageStripEnabled = @"StageStripEnabled";
 
+NSString * const kSettingsLocationSimEnabled = @"LocationSimEnabled";
+NSString * const kSettingsLocationSimLatitude = @"LocationSimLatitude";
+NSString * const kSettingsLocationSimLongitude = @"LocationSimLongitude";
+NSString * const kSettingsLocationSimAltitude = @"LocationSimAltitude";
+NSString * const kSettingsLocationSimHorizontalAccuracy = @"LocationSimHorizontalAccuracy";
+NSString * const kSettingsLocationSimHostProcess = @"LocationSimHostProcess";
+static NSString * const kSettingsLocationSimStarted = @"LocationSimStarted";
+
 NSString * const kSettingsThemerEnabled = @"ThemerEnabled";
 NSString * const kSettingsThemerThemeID = @"ThemerThemeID";
 NSString * const kSettingsThemerCustomThemePath = @"ThemerCustomThemePath";
@@ -249,6 +260,10 @@ static const NSInteger kNanoPresetNewerMaxPairing       = 99;
 static const NSInteger kNanoPresetNewerMinPairing       = 23;
 static const NSInteger kNanoPresetNewerMinPairingChipID = 10;
 static const NSInteger kNanoPresetNewerMinQuickSwitch   = 6;
+static const double kLocationSimDefaultLatitude = 40.55162017033417;
+static const double kLocationSimDefaultLongitude = -73.93282297058470;
+static const NSInteger kLocationSimDefaultAltitude = 0;
+static const NSInteger kLocationSimDefaultAccuracy = 5;
 static const NSInteger kNanoUIRowMin = 1;
 static const NSInteger kNanoUIRowMax = 999;
 static const useconds_t kStatBarLiveIntervalUS = 1000000;
@@ -290,6 +305,21 @@ static void settings_notify_cleanup_state_changed(void)
                           object:nil];
     });
 }
+
+static void settings_post_actions_complete_async(BOOL success, NSString *message)
+{
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSDictionary *info = @{
+            kSettingsActionsDidCompleteSuccessKey: @(success),
+            kSettingsActionsDidCompleteMessageKey: message ?: @""
+        };
+        [[NSNotificationCenter defaultCenter]
+            postNotificationName:kSettingsActionsDidCompleteNotification
+                          object:nil
+                        userInfo:info];
+    });
+}
+
 static NSArray<NSString *> * const kPowercuffLevels = nil;
 
 // Session-scoped record of which tweaks were actually applied since launch.
@@ -443,6 +473,13 @@ static NSUInteger settings_live_failure_limit(NSUInteger foregroundLimit)
 }
 
 static BOOL settings_rssi_install_allowed(void)
+{
+    if (!cyanide_is_patron()) return NO;
+    return [[NSUserDefaults standardUserDefaults]
+            boolForKey:kSettingsExperimentalTweaksEnabled];
+}
+
+static BOOL settings_location_sim_install_allowed(void)
 {
     if (!cyanide_is_patron()) return NO;
     return [[NSUserDefaults standardUserDefaults]
@@ -1779,6 +1816,15 @@ BOOL settings_apply_nano_registry_now(BOOL apply)
     return ok ? YES : NO;
 }
 
+BOOL settings_apply_call_recording_sound_disabled(BOOL disabled)
+{
+    if (!settings_ensure_kexploit()) {
+        log_user("[CALLREC] Failed: kernel primitives were not acquired.\n");
+        return NO;
+    }
+    return call_recording_sound_set_disabled(disabled) ? YES : NO;
+}
+
 static void settings_run_nano_apply_action(void)
 {
     dispatch_async(dispatch_get_global_queue(0, 0), ^{
@@ -2835,6 +2881,142 @@ static BOOL settings_key_is_typebanner(NSString *key)
     return [key isEqualToString:kSettingsTypeBannerEnabled];
 }
 
+static BOOL settings_key_is_location_sim(NSString *key)
+{
+    return [key isEqualToString:kSettingsLocationSimEnabled] ||
+           [key isEqualToString:kSettingsLocationSimLatitude] ||
+           [key isEqualToString:kSettingsLocationSimLongitude] ||
+           [key isEqualToString:kSettingsLocationSimAltitude] ||
+           [key isEqualToString:kSettingsLocationSimHorizontalAccuracy] ||
+           [key isEqualToString:kSettingsLocationSimHostProcess];
+}
+
+static NSString *settings_location_sim_host_process(NSUserDefaults *d)
+{
+    NSString *host = [d stringForKey:kSettingsLocationSimHostProcess];
+    return host.length > 0 ? host : @"Maps";
+}
+
+static BOOL settings_location_sim_parse_double(NSString *text, double *outValue)
+{
+    if (!outValue) return NO;
+    NSScanner *scanner = [NSScanner scannerWithString:text ?: @""];
+    scanner.charactersToBeSkipped = NSCharacterSet.whitespaceAndNewlineCharacterSet;
+    double value = 0.0;
+    if (![scanner scanDouble:&value]) return NO;
+    [scanner scanCharactersFromSet:NSCharacterSet.whitespaceAndNewlineCharacterSet
+                        intoString:nil];
+    if (!scanner.isAtEnd) return NO;
+    if (!isfinite(value)) return NO;
+    *outValue = value;
+    return YES;
+}
+
+static BOOL settings_location_sim_coordinates_valid(double latitude, double longitude)
+{
+    return isfinite(latitude) && isfinite(longitude) &&
+           latitude >= -90.0 && latitude <= 90.0 &&
+           longitude >= -180.0 && longitude <= 180.0;
+}
+
+static BOOL settings_location_sim_is_active(NSUserDefaults *d)
+{
+    return [d boolForKey:kSettingsLocationSimStarted];
+}
+
+static void settings_location_sim_set_target(NSUserDefaults *d,
+                                             double latitude,
+                                             double longitude)
+{
+    [d setDouble:latitude forKey:kSettingsLocationSimLatitude];
+    [d setDouble:longitude forKey:kSettingsLocationSimLongitude];
+    [d setObject:@"Maps" forKey:kSettingsLocationSimHostProcess];
+    [d synchronize];
+}
+
+static void settings_location_sim_set_rockaway_defaults(NSUserDefaults *d)
+{
+    settings_location_sim_set_target(d, kLocationSimDefaultLatitude, kLocationSimDefaultLongitude);
+    [d setInteger:kLocationSimDefaultAltitude forKey:kSettingsLocationSimAltitude];
+    [d setInteger:kLocationSimDefaultAccuracy forKey:kSettingsLocationSimHorizontalAccuracy];
+    [d synchronize];
+}
+
+static NSString *settings_location_sim_target_summary(NSUserDefaults *d)
+{
+    double lat = [d doubleForKey:kSettingsLocationSimLatitude];
+    double lon = [d doubleForKey:kSettingsLocationSimLongitude];
+    NSInteger altitude = [d integerForKey:kSettingsLocationSimAltitude];
+    NSInteger accuracy = [d integerForKey:kSettingsLocationSimHorizontalAccuracy];
+    if (accuracy <= 0) accuracy = kLocationSimDefaultAccuracy;
+    return [NSString stringWithFormat:@"%.7f, %.7f via %@ (%ldm alt, %ldm acc)",
+            lat,
+            lon,
+            settings_location_sim_host_process(d),
+            (long)altitude,
+            (long)accuracy];
+}
+
+static NSString *settings_location_sim_mode_summary(NSUserDefaults *d)
+{
+    BOOL simulationStarted = [d boolForKey:kSettingsLocationSimStarted];
+    NSString *simulation = simulationStarted
+        ? @"Mode: Target simulation started"
+        : @"Mode: Real location requested";
+    NSString *note = simulationStarted ? @"\nUse Restore Real Location to stop it." : @"";
+    return [NSString stringWithFormat:@"%@%@\nTarget: %@", simulation, note,
+            settings_location_sim_target_summary(d)];
+}
+
+static BOOL settings_apply_location_sim_from_defaults_locked(NSUserDefaults *d)
+{
+    NSInteger accuracy = [d integerForKey:kSettingsLocationSimHorizontalAccuracy];
+    if (accuracy <= 0) accuracy = kLocationSimDefaultAccuracy;
+
+    NSString *host = settings_location_sim_host_process(d);
+    LocationSimConfig config = {
+        .latitude = [d doubleForKey:kSettingsLocationSimLatitude],
+        .longitude = [d doubleForKey:kSettingsLocationSimLongitude],
+        .altitude = (double)[d integerForKey:kSettingsLocationSimAltitude],
+        .horizontalAccuracy = (double)accuracy,
+        .verticalAccuracy = (double)accuracy,
+        .hostProcess = host.UTF8String,
+        .launchHost = true,
+    };
+    return locationsim_apply_static(&config);
+}
+
+static BOOL settings_stop_location_sim_from_defaults_locked(NSUserDefaults *d)
+{
+    NSString *host = settings_location_sim_host_process(d);
+    return locationsim_stop(host.UTF8String, true);
+}
+
+static BOOL settings_prime_location_sim_uber_stealth_locked(NSUserDefaults *d,
+                                                            BOOL enable,
+                                                            BOOL *systemApplyOKOut)
+{
+    NSInteger accuracy = [d integerForKey:kSettingsLocationSimHorizontalAccuracy];
+    if (accuracy <= 0) accuracy = kLocationSimDefaultAccuracy;
+
+    NSString *host = settings_location_sim_host_process(d);
+    LocationSimConfig config = {
+        .latitude = [d doubleForKey:kSettingsLocationSimLatitude],
+        .longitude = [d doubleForKey:kSettingsLocationSimLongitude],
+        .altitude = (double)[d integerForKey:kSettingsLocationSimAltitude],
+        .horizontalAccuracy = (double)accuracy,
+        .verticalAccuracy = (double)accuracy,
+        .hostProcess = host.UTF8String,
+        .launchHost = true,
+    };
+
+    BOOL systemOK = enable
+        ? locationsim_apply_strict_hosts(&config)
+        : locationsim_stop_strict_hosts(host.UTF8String, true);
+    if (systemApplyOKOut) *systemApplyOKOut = systemOK;
+    return systemOK;
+}
+
 static BOOL settings_key_is_dark_tweak(NSString *key)
 {
     return [key isEqualToString:kSettingsDSDisableAppLibrary] ||
@@ -2870,6 +3052,57 @@ static void settings_schedule_live_apply_for_key(NSString *key)
     }
 
     NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+
+    if (settings_key_is_location_sim(key)) {
+        BOOL locsimStarted = [d boolForKey:kSettingsLocationSimStarted];
+        if ([key isEqualToString:kSettingsLocationSimEnabled]) {
+            [d setBool:NO forKey:kSettingsLocationSimEnabled];
+            [d synchronize];
+            settings_notify_package_queue_changed_async();
+            return;
+        }
+        if (!locsimStarted) {
+            settings_notify_package_queue_changed_async();
+            return;
+        }
+        if (!settings_location_sim_install_allowed()) {
+            log_user("[LOCSIM] Target refresh skipped: enable Experimental Tweaks first.\n");
+            settings_notify_package_queue_changed_async();
+            settings_post_actions_complete_async(NO, @"Location Simulator unavailable. Enable Experimental Tweaks first.");
+            return;
+        }
+        if (!g_kexploit_done) {
+            printf("[LOCSIM] live apply deferred until kexploit has run\n");
+            settings_notify_package_queue_changed_async();
+            settings_post_actions_complete_async(NO, @"Location refresh deferred. Run kexploit first.");
+            return;
+        }
+        if (g_statbar_live_running || g_rssi_live_running ||
+            g_axonlite_live_running || g_typebanner_live_running ||
+            g_themer_live_running || g_themer_repair_running) {
+            log_user("[LOCSIM] Location update deferred: a live SpringBoard tweak is running. Hit Apply Tweaks to serialize the process switch.\n");
+            settings_notify_package_queue_changed_async();
+            settings_post_actions_complete_async(NO, @"Location refresh deferred while another live tweak is running.");
+            return;
+        }
+        dispatch_async(dispatch_get_global_queue(0, 0), ^{
+            @synchronized (settings_rc_lock()) {
+                settings_destroy_springboard_remote_call_locked_internal("switching to Location Simulator", NO);
+                bool ok = settings_apply_location_sim_from_defaults_locked(d);
+                if (ok) {
+                    [d setBool:YES forKey:kSettingsLocationSimStarted];
+                    [d synchronize];
+                }
+                log_user("%s Location Simulator %s.\n",
+                         ok ? "[OK]" : "[WARN]",
+                         ok ? "target refreshed" : "did not apply cleanly");
+                settings_post_actions_complete_async(ok,
+                    ok ? @"Location target refreshed." : @"Location refresh failed. Check the log.");
+            }
+            settings_notify_package_queue_changed_async();
+        });
+        return;
+    }
 
     if (settings_key_is_typebanner(key)) {
         // TypeBanner owns its own daemon + SpringBoard sessions, but its
@@ -3118,6 +3351,14 @@ void settings_register_defaults(void)
 
         kSettingsStageStripEnabled: @NO,
 
+        kSettingsLocationSimEnabled: @NO,
+        kSettingsLocationSimLatitude: @(kLocationSimDefaultLatitude),
+        kSettingsLocationSimLongitude: @(kLocationSimDefaultLongitude),
+        kSettingsLocationSimAltitude: @(kLocationSimDefaultAltitude),
+        kSettingsLocationSimHorizontalAccuracy: @(kLocationSimDefaultAccuracy),
+        kSettingsLocationSimHostProcess: @"Maps",
+        kSettingsLocationSimStarted: @NO,
+
         kSettingsThemerEnabled: @NO,
         kSettingsThemerThemeID: kThemerThemeNone,
         kSettingsThemerCustomThemePath: @"",
@@ -3140,11 +3381,21 @@ void settings_register_defaults(void)
         if ([defaults boolForKey:kSettingsTypeBannerEnabled]) {
             [defaults setBool:NO forKey:kSettingsTypeBannerEnabled];
         }
+        if ([defaults boolForKey:kSettingsLocationSimEnabled]) {
+            [defaults setBool:NO forKey:kSettingsLocationSimEnabled];
+        }
         [defaults synchronize];
-    } else if (![defaults boolForKey:kSettingsExperimentalTweaksEnabled] &&
-               [defaults boolForKey:kSettingsRSSIDisplayEnabled]) {
-        [defaults setBool:NO forKey:kSettingsRSSIDisplayEnabled];
-        [defaults synchronize];
+    } else if (![defaults boolForKey:kSettingsExperimentalTweaksEnabled]) {
+        BOOL changed = NO;
+        if ([defaults boolForKey:kSettingsRSSIDisplayEnabled]) {
+            [defaults setBool:NO forKey:kSettingsRSSIDisplayEnabled];
+            changed = YES;
+        }
+        if ([defaults boolForKey:kSettingsLocationSimEnabled]) {
+            [defaults setBool:NO forKey:kSettingsLocationSimEnabled];
+            changed = YES;
+        }
+        if (changed) [defaults synchronize];
     }
     if ([defaults boolForKey:kSettingsThemerEnabled] &&
         !settings_themer_has_selected_theme()) {
@@ -3584,6 +3835,7 @@ typedef NS_ENUM(NSInteger, SettingsSection) {
     SectionLayoutExtras,
     SectionNanoRegistry,
     SectionThemer,
+    SectionLocationSim,
     SectionCount,
 };
 
@@ -3593,6 +3845,7 @@ typedef NS_ENUM(NSInteger, RootSection) {
     RootSectionExperimental,
     RootSectionActions,
     RootSectionTweakBundles,
+    RootSectionInDev,
     RootSectionSystemBundles,
     RootSectionAppIcon,
     RootSectionDocs,
@@ -4166,7 +4419,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     [icon setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
 
     UILabel *label = [[UILabel alloc] init];
-    label.text = @"Cyanide is a limited tweak environment — tweaks apply this session only and reset on reboot. Live tweaks like StatBar and Axon Lite stop if you force-quit Cyanide from the App Switcher. A progress log opens automatically while changes are applying; tap Hide to dismiss.";
+    label.text = @"Cyanide is a limited tweak environment. Session tweaks reset on reboot, while a few packages intentionally modify local system files and may persist until restored. Backups are best-effort only. Use these tools only where you have permission, understand the legal and service-rule impact, and accept the risk. Live tweaks like StatBar and Axon Lite stop if you force-quit Cyanide. A progress log opens while changes apply; tap Hide to dismiss.";
     label.textColor = UIColor.labelColor;
     label.font = [UIFont systemFontOfSize:13 weight:UIFontWeightRegular];
     label.numberOfLines = 0;
@@ -4342,6 +4595,56 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     ];
 }
 
+- (NSArray<NSDictionary *> *)locationSimRows
+{
+    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    return @[
+        @{ @"kind": @"info",
+           @"title": @"Mode",
+           @"subtitle": settings_location_sim_mode_summary(d) },
+
+        @{ @"kind": @"button",
+           @"title": @"Set Exact Coordinates…",
+           @"action": @"locsim-set-exact" },
+
+        @{ @"kind": @"button",
+           @"title": @"Major Cities…",
+           @"action": @"locsim-major-cities" },
+
+        @{ @"kind": @"button",
+           @"title": @"Simulate Rockaway Test Point",
+           @"action": @"locsim-preset-rockaway" },
+
+        @{ @"kind": @"slider",
+           @"key": kSettingsLocationSimAltitude,
+           @"title": @"Altitude",
+           @"min": @(-100),
+           @"max": @1000,
+           @"step": @1,
+           @"unit": @"m",
+           @"default": @(kLocationSimDefaultAltitude) },
+
+        @{ @"kind": @"slider",
+           @"key": kSettingsLocationSimHorizontalAccuracy,
+           @"title": @"Accuracy",
+           @"min": @1,
+           @"max": @100,
+           @"step": @1,
+           @"unit": @"m",
+           @"default": @(kLocationSimDefaultAccuracy) },
+
+        @{ @"kind": @"button",
+           @"title": @"Simulate Current Target",
+           @"action": @"locsim-apply" },
+
+        @{ @"kind": @"button",
+           @"title": @"Restore Real Location",
+           @"subtitle": @"Reset can take a few minutes. If location still looks simulated, reboot and wait a little longer.",
+           @"action": @"locsim-stop",
+           @"destructive": @YES },
+    ];
+}
+
 - (NSArray<NSDictionary *> *)themerRows
 {
     BOOL hasSelection = settings_themer_has_selected_theme();
@@ -4410,6 +4713,8 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         [out addObject:@{@"title": @"Multi-watch switch", @"value": [@([d integerForKey:kSettingsNanoMinQuickSwitch])   stringValue]}];
     } else if (section == SectionThemer) {
         [out addObject:@{@"title": @"Theme", @"value": settings_themer_selected_theme_display_name()}];
+    } else if (section == SectionLocationSim) {
+        [out addObject:@{@"title": @"Target", @"value": settings_location_sim_target_summary(d)}];
     }
     return out;
 }
@@ -4429,6 +4734,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         case SectionRSSI:      return self.rssiRows;
         case SectionAxonLite:  return self.axonLiteRows;
         case SectionTypeBanner: return self.typebannerRows;
+        case SectionLocationSim: return self.locationSimRows;
         default: return @[];
     }
 }
@@ -4445,9 +4751,10 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         @{ @"title": @"Launch Options",     @"icon": @"bolt.fill",                          @"color": [UIColor systemRedColor],    @"section": @(SectionLaunch) },
         @{ @"title": @"SBCustomizer",       @"icon": @"square.grid.3x3.fill",                @"color": [UIColor systemBlueColor],   @"section": @(SectionSBC) },
         @{ @"title": @"StatBar",            @"icon": @"thermometer.medium",                  @"color": [UIColor systemRedColor],    @"section": @(SectionStatBar) },
-        @{ @"title": @"Signal Display",     @"icon": @"antenna.radiowaves.left.and.right",   @"color": [UIColor systemBlueColor],   @"section": @(SectionRSSI), @"experimental": @YES },
+        @{ @"title": @"Signal Display",     @"icon": @"antenna.radiowaves.left.and.right",   @"color": [UIColor systemBlueColor],   @"section": @(SectionRSSI), @"indev": @YES },
         @{ @"title": @"Axon Lite",          @"icon": @"bell.badge.fill",                     @"color": [UIColor systemRedColor],    @"section": @(SectionAxonLite) },
-        @{ @"title": @"TypeBanner",         @"icon": @"ellipsis.bubble.fill",                @"color": [UIColor systemTealColor],   @"section": @(SectionTypeBanner), @"experimental": @YES },
+        @{ @"title": @"TypeBanner",         @"icon": @"ellipsis.bubble.fill",                @"color": [UIColor systemTealColor],   @"section": @(SectionTypeBanner), @"indev": @YES },
+        @{ @"title": @"Location Simulator", @"icon": @"location.fill",                       @"color": [UIColor systemGreenColor],  @"section": @(SectionLocationSim), @"experimental": @YES },
         @{ @"title": @"Cyanide Themer",     @"icon": @"paintpalette.fill",                   @"color": [UIColor systemPinkColor],   @"section": @(SectionThemer) },
         @{ @"title": @"Powercuff",          @"icon": @"bolt.slash.fill",                     @"color": [UIColor systemOrangeColor], @"section": @(SectionPowercuff) },
         @{ @"title": @"SpringBoard Tweaks", @"icon": @"apps.iphone",                         @"color": [UIColor systemIndigoColor], @"section": @(SectionDarkSwordTweaks) },
@@ -4470,7 +4777,25 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
                             && cyanide_is_patron();
     NSMutableArray<NSDictionary *> *out = [NSMutableArray array];
     for (NSDictionary *bundle in bundles) {
+        if ([bundle[@"indev"] boolValue]) continue;
         if ([bundle[@"experimental"] boolValue] && !experimentalOn) continue;
+        NSInteger sec = [bundle[@"section"] integerValue];
+        if ([self rowsForSection:sec].count > 0) {
+            [out addObject:bundle];
+        }
+    }
+    return out;
+}
+
+- (NSArray<NSDictionary *> *)inDevBundleRows
+{
+    BOOL experimentalOn = [[NSUserDefaults standardUserDefaults]
+                            boolForKey:kSettingsExperimentalTweaksEnabled]
+                            && cyanide_is_patron();
+    if (!experimentalOn) return @[];
+    NSMutableArray<NSDictionary *> *out = [NSMutableArray array];
+    for (NSDictionary *bundle in [self allTweakBundleRows]) {
+        if (![bundle[@"indev"] boolValue]) continue;
         NSInteger sec = [bundle[@"section"] integerValue];
         if ([self rowsForSection:sec].count > 0) {
             [out addObject:bundle];
@@ -4492,6 +4817,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 - (NSArray<NSDictionary *> *)bundleRowsForRootSection:(RootSection)section
 {
     if (section == RootSectionTweakBundles)  return self.tweakBundleRows;
+    if (section == RootSectionInDev)        return self.inDevBundleRows;
     if (section == RootSectionSystemBundles) return self.systemBundleRows;
     return @[];
 }
@@ -4517,6 +4843,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         }
         case RootSectionActions:        return 5;
         case RootSectionTweakBundles:   return (NSInteger)self.tweakBundleRows.count;
+        case RootSectionInDev:         return (NSInteger)self.inDevBundleRows.count;
         case RootSectionSystemBundles:  return (NSInteger)self.systemBundleRows.count;
         case RootSectionAppIcon:        return 2;
         case RootSectionDocs:           return 1;
@@ -4546,6 +4873,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         case RootSectionChangelog:      return settings_changelog_entries().count > 0 ? @"What's New" : nil;
         case RootSectionActions:        return @"Quick Actions";
         case RootSectionTweakBundles:   return self.tweakBundleRows.count   > 0 ? @"Tweaks" : nil;
+        case RootSectionInDev:         return self.inDevBundleRows.count   > 0 ? @"In Development" : nil;
         case RootSectionSystemBundles:  return self.systemBundleRows.count  > 0 ? @"System" : nil;
         case RootSectionAppIcon:        return @"App Icon";
         case RootSectionDocs:           return @"Docs";
@@ -4559,6 +4887,10 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section
 {
     if (!self.detailMode) {
+        if ((RootSection)section == RootSectionInDev && self.inDevBundleRows.count > 0) {
+            return @"These tweaks are still in development and "
+                   @"can't be enabled yet.";
+        }
         if ((RootSection)section == RootSectionExperimental) {
             if (!cyanide_is_patron()) {
                 if (cyanide_patreon_is_linked()) {
@@ -4666,6 +4998,9 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     if (s == SectionTypeBanner) {
         return @"Partial TypeMillennium port. Detection runs against imagent using original-thread RemoteCall probes, while SpringBoard renders a prewarmed banner window.";
     }
+    if (s == SectionLocationSim) {
+        return @"Experimental CoreLocation simulation. This is a manual tool, not an installable package. The current build uses Maps as the RemoteCall host and CLSimulationManager as the system simulation client. Use Simulate Current Target to start; use Restore Real Location to stop simulation and return CoreLocation to the device's real providers. Each run opens the activity log and marks completion when the request returns.\n\nCredits: kolbicz for the RemoteCall/CLSimulationManager GPS spoofer prototype, and ezzuldinSt's LSpoof for picker/route references.\n\nWarning: this can affect more than maps. Location-tied system behavior, including time zone and date/time handling, may behave unexpectedly. Only use this if you know what you're doing.";
+    }
     if (s == SectionThemer) {
         return @"Note: Cyanide Themer is still rough around the edges and may be glitchy. It will be iteratively improved to be more stable over time.\n\n"
                @"Pick a theme before running Cyanide Themer.\n\n"
@@ -4680,6 +5015,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         if ((RootSection)section == RootSectionWarning) return 18.0; // breathing room above the disclaimer
         if ((RootSection)section == RootSectionChangelog     && settings_changelog_entries().count == 0) return CGFLOAT_MIN;
         if ((RootSection)section == RootSectionTweakBundles  && self.tweakBundleRows.count  == 0) return CGFLOAT_MIN;
+        if ((RootSection)section == RootSectionInDev        && self.inDevBundleRows.count  == 0) return CGFLOAT_MIN;
         if ((RootSection)section == RootSectionSystemBundles && self.systemBundleRows.count == 0) return CGFLOAT_MIN;
     }
     return UITableViewAutomaticDimension;
@@ -4729,6 +5065,25 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     cell.textLabel.textColor = UIColor.labelColor;
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+    return cell;
+}
+
+- (UITableViewCell *)buildInDevCellWithRow:(NSDictionary *)row tableView:(UITableView *)tableView
+{
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"indev"];
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"indev"];
+    }
+    cell.imageView.image = [SettingsViewController iconBadgeWithSymbol:row[@"icon"] color:[UIColor systemGrayColor] size:29.0];
+    cell.textLabel.text = row[@"title"];
+    cell.textLabel.font = [UIFont systemFontOfSize:17.0];
+    cell.textLabel.textColor = UIColor.tertiaryLabelColor;
+    cell.detailTextLabel.text = @"In Development";
+    cell.detailTextLabel.font = [UIFont systemFontOfSize:13.0];
+    cell.detailTextLabel.textColor = UIColor.tertiaryLabelColor;
+    cell.accessoryType = UITableViewCellAccessoryNone;
+    cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    cell.userInteractionEnabled = NO;
     return cell;
 }
 
@@ -4879,7 +5234,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         g_themer_live_stop_requested = 1;
     }
     [d synchronize];
-    log_user("[THEMER] Cleared selected theme; Cyanide Themer is no longer queued.\n");
+    log_user("[THEMER] Cleared selected theme; Cyanide Themer is no longer pending activation.\n");
     [self reloadThemerSectionAndQueue];
 }
 
@@ -5179,10 +5534,10 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
     cell.detailTextLabel.text = on
         ? @"Active — in-development tweaks unlocked. These probably don't "
           @"work yet; installing only adds risk, no benefit. Currently "
-          @"gates: Signal Readouts, TypeBanner."
+          @"gates: Signal Readouts, TypeBanner, Location Simulator."
         : @"In-development only. These tweaks likely don't work yet and "
           @"may never ship — turning this on only adds risk with no real "
-          @"benefit. Currently gates: Signal Readouts, TypeBanner.";
+          @"benefit. Currently gates: Signal Readouts, TypeBanner, Location Simulator.";
     cell.detailTextLabel.font = [UIFont systemFontOfSize:13.0];
     cell.detailTextLabel.textColor = on
         ? [UIColor.systemRedColor colorWithAlphaComponent:0.9]
@@ -5230,11 +5585,11 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
     }
 
     [d setBool:NO forKey:kSettingsExperimentalTweaksEnabled];
-    printf("[SETTINGS] experimental tweaks disabled; tearing down gated tweaks\n");
+    printf("[SETTINGS] experimental tweaks disabled; disabling gated package states\n");
 
-    // Force-disable every experimental-gated tweak so the user's setup doesn't
-    // silently keep running with the master switch off. Add new gated tweaks
-    // here as they're introduced.
+    // Force-disable every experimental-gated package. Location Simulator keeps
+    // restore as an explicit action because package deactivation is not the
+    // same thing as returning CoreLocation to real providers.
     if ([d boolForKey:kSettingsTypeBannerEnabled]) {
         [d setBool:NO forKey:kSettingsTypeBannerEnabled];
         settings_mark_tweak_applied(kSettingsTypeBannerEnabled, NO);
@@ -5246,6 +5601,11 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
         settings_mark_tweak_applied(kSettingsRSSIDisplayEnabled, NO);
         settings_notify_package_queue_changed_async();
         settings_schedule_live_apply_for_key(kSettingsRSSIDisplayEnabled);
+    }
+    if ([d boolForKey:kSettingsLocationSimEnabled]) {
+        [d setBool:NO forKey:kSettingsLocationSimEnabled];
+        settings_notify_package_queue_changed_async();
+        settings_schedule_live_apply_for_key(kSettingsLocationSimEnabled);
     }
     [self reloadAfterExperimentalChange];
 }
@@ -5261,9 +5621,8 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
 
 #pragma mark - Patreon
 
-// Drops any experimental-gated state if the user is no longer a patron, so
-// turning Experimental off via revoked pledge mirrors the manual switch-off
-// teardown (TypeBanner / RSSIDisplay disabled + live tear-down scheduled).
+// Drops any experimental-gated package state if the user is no longer a patron.
+// Location Simulator's restore path remains explicit.
 - (void)teardownExperimentalIfNoLongerPatron
 {
     if (cyanide_is_patron()) return;
@@ -5283,6 +5642,11 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
         settings_mark_tweak_applied(kSettingsRSSIDisplayEnabled, NO);
         settings_notify_package_queue_changed_async();
         settings_schedule_live_apply_for_key(kSettingsRSSIDisplayEnabled);
+    }
+    if ([d boolForKey:kSettingsLocationSimEnabled]) {
+        [d setBool:NO forKey:kSettingsLocationSimEnabled];
+        settings_notify_package_queue_changed_async();
+        settings_schedule_live_apply_for_key(kSettingsLocationSimEnabled);
     }
 }
 
@@ -5829,6 +6193,8 @@ void cyanide_present_contact(UIViewController *host)
                 break;
             case RootSectionTweakBundles:
                 return [self buildBundleCellWithRow:self.tweakBundleRows[indexPath.row] tableView:tableView];
+            case RootSectionInDev:
+                return [self buildInDevCellWithRow:self.inDevBundleRows[indexPath.row] tableView:tableView];
             case RootSectionSystemBundles:
                 return [self buildBundleCellWithRow:self.systemBundleRows[indexPath.row] tableView:tableView];
             case RootSectionAppIcon:
@@ -5947,8 +6313,8 @@ void cyanide_present_contact(UIViewController *host)
             detailColor = supported ? UIColor.secondaryLabelColor : UIColor.tertiaryLabelColor;
         } else if (indexPath.row == 2) {
             detailText = anyInstalledOrQueued
-                ? @"Uninstall every package and clear the pending queue. SpringBoard patches already applied this session stay until respring/reboot."
-                : @"Nothing installed or queued.";
+                ? @"Deactivate every package and clear pending changes. SpringBoard patches already applied this session stay until respring/reboot."
+                : @"Nothing active or pending.";
             detailColor = anyInstalledOrQueued ? UIColor.secondaryLabelColor : UIColor.tertiaryLabelColor;
         } else if (indexPath.row == 3) {
             detailText  = @"Pings GitHub for the latest release. Run this if the launch prompt didn't appear.";
@@ -6197,10 +6563,33 @@ void cyanide_present_contact(UIViewController *host)
     // RemoteCall until the user runs the chain, so there's nothing to watch.
     if (!g_springboard_rc_ready) return;
 
+    [self presentActivityLog];
+}
+
+- (void)presentActivityLog
+{
+    [self presentActivityLogWithCompletion:nil];
+}
+
+- (void)presentActivityLogWithCompletion:(dispatch_block_t)completion
+{
+    if (self.presentedViewController) {
+        if ([self.presentedViewController isKindOfClass:UIAlertController.class]) {
+            __weak typeof(self) weakSelf = self;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(250 * NSEC_PER_MSEC)),
+                           dispatch_get_main_queue(), ^{
+                [weakSelf presentActivityLogWithCompletion:completion];
+            });
+            return;
+        }
+        if (completion) completion();
+        return;
+    }
+
     InstallProgressViewController *vc = [[InstallProgressViewController alloc] init];
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
     nav.modalPresentationStyle = UIModalPresentationAutomatic;
-    [self presentViewController:nav animated:YES completion:nil];
+    [self presentViewController:nav animated:YES completion:completion];
 }
 
 - (void)toggleChanged:(UISwitch *)sender
@@ -6250,10 +6639,313 @@ void cyanide_present_contact(UIViewController *host)
     NSInteger step = [row[@"step"] integerValue]; if (step <= 0) step = 1;
     NSInteger value = (NSInteger)llround((double)sender.value / (double)step) * step;
     sender.value = (float)value;  // snap thumb to the step grid
-    [[NSUserDefaults standardUserDefaults] setInteger:value forKey:key];
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    BOOL showLocationLog = settings_key_is_location_sim(key) && settings_location_sim_is_active(d);
+    [d setInteger:value forKey:key];
     printf("[SETTINGS] slider %s=%ld\n", key.UTF8String, (long)value);
-    settings_schedule_live_apply_for_key(key);
-    [self presentApplyLogIfRunning];
+    if (showLocationLog) {
+        [self presentActivityLogWithCompletion:^{
+            settings_schedule_live_apply_for_key(key);
+        }];
+    } else {
+        settings_schedule_live_apply_for_key(key);
+        [self presentApplyLogIfRunning];
+    }
+    if (settings_key_is_location_sim(key)) {
+        [self.tableView reloadData];
+    }
+}
+
+- (void)reloadLocationSimUI
+{
+    [self.tableView reloadData];
+    [[NSNotificationCenter defaultCenter] postNotificationName:PackageQueueDidChangeNotification
+                                                        object:[PackageQueue sharedQueue]];
+}
+
+- (void)runLocationSimApply:(BOOL)apply
+{
+    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    if (apply && !settings_location_sim_install_allowed()) {
+        log_user("[LOCSIM] Enable Experimental Tweaks first.\n");
+        return;
+    }
+
+    static volatile int sLocSimButtonInFlight = 0;
+    if (__sync_lock_test_and_set(&sLocSimButtonInFlight, 1)) {
+        log_user("[LOCSIM] A Location Simulator action is already running.\n");
+        return;
+    }
+
+    __weak typeof(self) weakSelf = self;
+    dispatch_block_t startAction = ^{
+        log_user("[LOCSIM] %s %s.\n",
+                 apply ? "Simulating" : "Restoring",
+                 apply ? settings_location_sim_target_summary(d).UTF8String : "real location");
+        dispatch_async(dispatch_get_global_queue(0, 0), ^{
+            BOOL actionOK = NO;
+            NSString *completionMessage = apply
+                ? @"Location Simulator applied."
+                : @"Restore request sent. Real location may take a few minutes.";
+            @try {
+                if (g_settings_actions_running) {
+                    log_user("[LOCSIM] Action aborted: Apply Tweaks is still running.\n");
+                    completionMessage = @"Location Simulator blocked: Apply Tweaks is still running.";
+                    return;
+                }
+                if (!settings_ensure_kexploit()) {
+                    log_user("[LOCSIM] Failed: kernel primitives not acquired.\n");
+                    completionMessage = @"Location Simulator failed: kernel primitives were not acquired.";
+                    return;
+                }
+
+                bool ok = false;
+                @synchronized (settings_rc_lock()) {
+                    settings_destroy_springboard_remote_call_locked_internal("switching to Location Simulator", NO);
+                    ok = apply
+                        ? settings_apply_location_sim_from_defaults_locked(d)
+                        : settings_stop_location_sim_from_defaults_locked(d);
+                    if (ok) {
+                        if (apply) {
+                            [d setBool:YES forKey:kSettingsLocationSimStarted];
+                        } else {
+                            [d setBool:NO forKey:kSettingsLocationSimStarted];
+                        }
+                        [d synchronize];
+                    }
+                }
+                actionOK = ok;
+                completionMessage = apply
+                    ? (ok ? @"Location Simulator applied." : @"Location Simulator failed. Check the log.")
+                    : (ok ? @"Restore request sent. Real location may take a few minutes." : @"Restore failed. Check the log.");
+                log_user("%s Location Simulator %s.\n",
+                         ok ? "[OK]" : "[WARN]",
+                         apply ? (ok ? "applied" : "did not apply cleanly")
+                               : (ok ? "stopped; real location should resume" : "did not stop cleanly"));
+            } @finally {
+                __sync_lock_release(&sLocSimButtonInFlight);
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    __strong typeof(weakSelf) strongSelf = weakSelf;
+                    [strongSelf reloadLocationSimUI];
+                    NSDictionary *info = @{
+                        kSettingsActionsDidCompleteSuccessKey: @(actionOK),
+                        kSettingsActionsDidCompleteMessageKey: completionMessage ?: @""
+                    };
+                    [[NSNotificationCenter defaultCenter]
+                        postNotificationName:kSettingsActionsDidCompleteNotification
+                                      object:nil
+                                    userInfo:info];
+                });
+            }
+        });
+    };
+    [self presentActivityLogWithCompletion:startAction];
+}
+
+- (void)runLocationSimUberStealth:(BOOL)enable
+{
+    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    if (enable && !settings_location_sim_install_allowed()) {
+        log_user("[LOCSIM] Enable Experimental Tweaks first.\n");
+        return;
+    }
+
+    static volatile int sLocSimUberStealthInFlight = 0;
+    if (__sync_lock_test_and_set(&sLocSimUberStealthInFlight, 1)) {
+        log_user("[LOCSIM] A Strict App Mode action is already running.\n");
+        return;
+    }
+
+    __weak typeof(self) weakSelf = self;
+    dispatch_block_t startAction = ^{
+        log_user("[LOCSIM] %s Strict App Mode for %s.\n",
+                 enable ? "Priming" : "Disabling",
+                 enable ? settings_location_sim_target_summary(d).UTF8String : "the running process");
+        dispatch_async(dispatch_get_global_queue(0, 0), ^{
+            BOOL actionOK = NO;
+            NSString *completionMessage = enable
+                ? @"Strict App Mode failed. Check the log."
+                : @"Strict App Mode disable failed. Check the log.";
+            @try {
+                if (g_settings_actions_running) {
+                    log_user("[LOCSIM] Strict App Mode aborted: Apply Tweaks is still running.\n");
+                    completionMessage = @"Strict App Mode blocked: Apply Tweaks is still running.";
+                    return;
+                }
+                if (!settings_ensure_kexploit()) {
+                    log_user("[LOCSIM] Strict App Mode failed: kernel primitives not acquired.\n");
+                    completionMessage = @"Strict App Mode failed: kernel primitives were not acquired.";
+                    return;
+                }
+
+                BOOL systemOK = NO;
+                BOOL stealthOK = NO;
+                @synchronized (settings_rc_lock()) {
+                    settings_destroy_springboard_remote_call_locked_internal("switching to Location Simulator strict app mode", NO);
+                    stealthOK = settings_prime_location_sim_uber_stealth_locked(d, enable, &systemOK);
+                    if (enable && systemOK) {
+                        [d setBool:YES forKey:kSettingsLocationSimStarted];
+                        [d synchronize];
+                    }
+                }
+
+                actionOK = stealthOK;
+                if (enable) {
+                    completionMessage = stealthOK
+                        ? @"Strict mode host sweep finished. Force quit and reopen strict apps before testing."
+                        : @"Strict App Mode failed. Check the log.";
+                } else {
+                    completionMessage = stealthOK
+                        ? @"Strict mode simulation stop request sent."
+                        : @"Strict App Mode disable failed. Check the log.";
+                }
+
+                log_user("%s Strict App Mode %s (hosts=%s).\n",
+                         stealthOK ? "[OK]" : "[WARN]",
+                         enable ? "prime finished" : "disable finished",
+                         systemOK ? "ok" : "failed");
+            } @finally {
+                __sync_lock_release(&sLocSimUberStealthInFlight);
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    __strong typeof(weakSelf) strongSelf = weakSelf;
+                    [strongSelf reloadLocationSimUI];
+                    NSDictionary *info = @{
+                        kSettingsActionsDidCompleteSuccessKey: @(actionOK),
+                        kSettingsActionsDidCompleteMessageKey: completionMessage ?: @""
+                    };
+                    [[NSNotificationCenter defaultCenter]
+                        postNotificationName:kSettingsActionsDidCompleteNotification
+                                      object:nil
+                                    userInfo:info];
+                });
+            }
+        });
+    };
+    [self presentActivityLogWithCompletion:startAction];
+}
+
+- (void)setLocationSimTargetLatitude:(double)latitude
+                            longitude:(double)longitude
+                                 name:(NSString *)name
+                        applyIfActive:(BOOL)applyIfActive
+{
+    if (!settings_location_sim_coordinates_valid(latitude, longitude)) {
+        log_user("[LOCSIM] Invalid coordinates: lat=%f lon=%f\n", latitude, longitude);
+        return;
+    }
+
+    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    BOOL wasActive = settings_location_sim_is_active(d);
+    settings_location_sim_set_target(d, latitude, longitude);
+    log_user("[LOCSIM] Target set to %s: %s\n",
+             (name.length > 0 ? name : @"custom").UTF8String,
+             settings_location_sim_target_summary(d).UTF8String);
+    [self reloadLocationSimUI];
+    if (applyIfActive && wasActive) {
+        [self runLocationSimApply:YES];
+    }
+}
+
+- (void)presentLocationSimInvalidCoordinateAlert
+{
+    UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Invalid Coordinates"
+                                                                message:@"Latitude must be between -90 and 90. Longitude must be between -180 and 180."
+                                                         preferredStyle:UIAlertControllerStyleAlert];
+    [ac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    settings_present_controller(ac, self);
+}
+
+- (void)presentLocationSimExactCoordinatePrompt
+{
+    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Exact Coordinates"
+                                                                message:@"Enter decimal degrees."
+                                                         preferredStyle:UIAlertControllerStyleAlert];
+    [ac addTextFieldWithConfigurationHandler:^(UITextField *field) {
+        field.placeholder = @"Latitude";
+        field.text = [NSString stringWithFormat:@"%.8f", [d doubleForKey:kSettingsLocationSimLatitude]];
+        field.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
+        field.clearButtonMode = UITextFieldViewModeWhileEditing;
+    }];
+    [ac addTextFieldWithConfigurationHandler:^(UITextField *field) {
+        field.placeholder = @"Longitude";
+        field.text = [NSString stringWithFormat:@"%.8f", [d doubleForKey:kSettingsLocationSimLongitude]];
+        field.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
+        field.clearButtonMode = UITextFieldViewModeWhileEditing;
+    }];
+
+    __weak typeof(self) weakSelf = self;
+    void (^commit)(BOOL) = ^(BOOL simulateNow) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        double latitude = 0.0;
+        double longitude = 0.0;
+        BOOL ok = settings_location_sim_parse_double(ac.textFields.firstObject.text, &latitude) &&
+                  settings_location_sim_parse_double(ac.textFields.lastObject.text, &longitude) &&
+                  settings_location_sim_coordinates_valid(latitude, longitude);
+        if (!ok) {
+            [strongSelf presentLocationSimInvalidCoordinateAlert];
+            return;
+        }
+        [strongSelf setLocationSimTargetLatitude:latitude
+                                       longitude:longitude
+                                            name:@"Exact coordinates"
+                                   applyIfActive:!simulateNow];
+        if (simulateNow) {
+            [strongSelf runLocationSimApply:YES];
+        }
+    };
+
+    [ac addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [ac addAction:[UIAlertAction actionWithTitle:@"Set Target"
+                                           style:UIAlertActionStyleDefault
+                                         handler:^(__unused UIAlertAction *action) {
+        commit(NO);
+    }]];
+    [ac addAction:[UIAlertAction actionWithTitle:@"Set & Simulate"
+                                           style:UIAlertActionStyleDefault
+                                         handler:^(__unused UIAlertAction *action) {
+        commit(YES);
+    }]];
+    settings_present_controller(ac, self);
+}
+
+- (void)presentLocationSimCityPicker
+{
+    NSArray<NSDictionary *> *cities = @[
+        @{ @"name": @"New York City", @"lat": @40.7128, @"lon": @(-74.0060) },
+        @{ @"name": @"Los Angeles", @"lat": @34.0522, @"lon": @(-118.2437) },
+        @{ @"name": @"Chicago", @"lat": @41.8781, @"lon": @(-87.6298) },
+        @{ @"name": @"Miami", @"lat": @25.7617, @"lon": @(-80.1918) },
+        @{ @"name": @"London", @"lat": @51.5074, @"lon": @(-0.1278) },
+        @{ @"name": @"Paris", @"lat": @48.8566, @"lon": @2.3522 },
+        @{ @"name": @"Tokyo", @"lat": @35.6762, @"lon": @139.6503 },
+        @{ @"name": @"Sydney", @"lat": @(-33.8688), @"lon": @151.2093 },
+        @{ @"name": @"Dubai", @"lat": @25.2048, @"lon": @55.2708 },
+        @{ @"name": @"Singapore", @"lat": @1.3521, @"lon": @103.8198 },
+    ];
+
+    UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Major Cities"
+                                                                message:nil
+                                                         preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak typeof(self) weakSelf = self;
+    for (NSDictionary *city in cities) {
+        NSString *name = city[@"name"];
+        [ac addAction:[UIAlertAction actionWithTitle:name
+                                               style:UIAlertActionStyleDefault
+                                             handler:^(__unused UIAlertAction *action) {
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            [strongSelf setLocationSimTargetLatitude:[city[@"lat"] doubleValue]
+                                           longitude:[city[@"lon"] doubleValue]
+                                                name:name
+                                       applyIfActive:NO];
+            [strongSelf runLocationSimApply:YES];
+        }]];
+    }
+    [ac addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    ac.popoverPresentationController.sourceView = self.view;
+    ac.popoverPresentationController.sourceRect = self.view.bounds;
+    settings_present_controller(ac, self);
 }
 
 - (void)stepperChanged:(UIStepper *)sender
@@ -6326,6 +7018,8 @@ void cyanide_present_contact(UIViewController *host)
             case RootSectionActions:
                 indexPath = [NSIndexPath indexPathForRow:indexPath.row inSection:SectionActions];
                 break;
+            case RootSectionInDev:
+                return;
             case RootSectionTweakBundles:
             case RootSectionSystemBundles: {
                 NSArray<NSDictionary *> *bundles = (RootSection)indexPath.section == RootSectionTweakBundles
@@ -6472,7 +7166,7 @@ void cyanide_present_contact(UIViewController *host)
         } else if (indexPath.row == 2) {
             UIAlertController *ac = [UIAlertController
                 alertControllerWithTitle:@"Reset All Packages?"
-                                 message:@"This uninstalls every package and clears the pending queue. The next chain run will start fresh from a clean slate. SpringBoard patches already live in this session stay until you respring or reboot.\n\nThis does not touch your Run options, Powercuff level, SBCustomizer grid, or other per-tweak settings — only install state."
+                                 message:@"This deactivates every package and clears pending changes. The next chain run will start fresh from a clean slate. SpringBoard patches already live in this session stay until you respring or reboot.\n\nThis does not touch your Run options, Powercuff level, SBCustomizer grid, or other per-tweak settings — only activation state."
                           preferredStyle:UIAlertControllerStyleAlert];
             [ac addAction:[UIAlertAction actionWithTitle:@"Cancel"
                                                    style:UIAlertActionStyleCancel
@@ -6489,7 +7183,7 @@ void cyanide_present_contact(UIViewController *host)
                 }
                 NSInteger cleared = [[PackageQueue sharedQueue] pendingCount];
                 [[PackageQueue sharedQueue] clear];
-                log_user("[INSTALLER] Reset: uninstalled %lu package(s), cleared %ld queued change(s).\n",
+                log_user("[INSTALLER] Reset: deactivated %lu package(s), cleared %ld pending change(s).\n",
                          (unsigned long)uninstalled, (long)cleared);
                 [self.tableView reloadData];
             }]];
@@ -6607,6 +7301,41 @@ void cyanide_present_contact(UIViewController *host)
             }]];
             settings_present_controller(ac, self);
         }
+        return;
+    }
+
+    if (indexPath.section == SectionLocationSim) {
+        NSDictionary *row = [self rowsForSection:indexPath.section][indexPath.row];
+        if (![row[@"kind"] isEqualToString:@"button"]) return;
+        NSString *action = row[@"action"];
+        NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+
+        if ([action isEqualToString:@"locsim-preset-rockaway"]) {
+            settings_location_sim_set_rockaway_defaults(d);
+            log_user("[LOCSIM] Loaded Rockaway test point: %s\n",
+                     settings_location_sim_target_summary(d).UTF8String);
+            [self reloadLocationSimUI];
+            [self runLocationSimApply:YES];
+            return;
+        }
+
+        if ([action isEqualToString:@"locsim-set-exact"]) {
+            [self presentLocationSimExactCoordinatePrompt];
+            return;
+        }
+
+        if ([action isEqualToString:@"locsim-major-cities"]) {
+            [self presentLocationSimCityPicker];
+            return;
+        }
+
+        if ([action isEqualToString:@"locsim-apply"] ||
+            [action isEqualToString:@"locsim-stop"]) {
+            BOOL apply = [action isEqualToString:@"locsim-apply"];
+            [self runLocationSimApply:apply];
+            return;
+        }
+
         return;
     }
 
