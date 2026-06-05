@@ -29,7 +29,7 @@ Open this page on your iPhone/iPad and tap one of the buttons below.
 
 - [Report a bug](https://github.com/zeroxjf/cyanide/issues/new?template=bug_report.yml)
 - [Request a feature](https://github.com/zeroxjf/cyanide/issues/new?template=feature_request.yml)
-- [Join the Signal group](https://t.co/afPR3U04G1) for setup help, support,
+- [Join the Signal group](https://signal.group/#CjQKIP0pxjc9V52ddCNk--04DosuoQl-vVOsznJfQ4GwlrlxEhCveFhBS8YdNcILpUFt7IqC) for setup help, support,
   test notes, and rough ideas before they become issues.
 
 ## Patreon

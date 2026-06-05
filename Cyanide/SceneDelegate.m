@@ -69,14 +69,14 @@
 
     UIViewController *root = self.window.rootViewController;
     if (!root) return;
-    NSString *msg = @"I'm creating a Signal group as the main place for Cyanide feedback and support.\n\nUse it to report bugs, request features, share test results, ask setup questions, and get notes about new builds.";
+    NSString *msg = @"Created a Signal group as the main place for Cyanide feedback and support.\n\nUse it to report bugs, request features, share test results, ask setup questions, and get notes about new builds.";
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Join the Cyanide Signal Group"
                                                                    message:msg
                                                             preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"Join Signal" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         [ud setBool:YES forKey:noticeKey];
         [ud synchronize];
-        NSURL *url = [NSURL URLWithString:@"https://t.co/afPR3U04G1"];
+        NSURL *url = [NSURL URLWithString:@"https://signal.group/#CjQKIP0pxjc9V52ddCNk--04DosuoQl-vVOsznJfQ4GwlrlxEhCveFhBS8YdNcILpUFt7IqC"];
         if (url) {
             [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
         }

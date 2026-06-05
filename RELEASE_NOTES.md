@@ -19,6 +19,10 @@ Avoid vague bullets like "Update settings", "Change project files", or
 
 ## Released
 
+### v1.2.10 - 2026-06-05
+
+- [x] Updated the Cyanide Signal group invite link.
+
 ### v1.2.9 - 2026-06-05
 
 - [x] Fixed NiceBar Lite weather slots by restoring the location-based weather picker, cache, and live refresh flow.
