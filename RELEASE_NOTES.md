@@ -27,6 +27,11 @@ safe to describe as a public user-facing behavior change, omit it.
 
 ## Released
 
+### v1.2.16 - 2026-06-09
+
+- [x] Prevented overlapping tweak actions from interfering with Apply Tweaks and direct controls.
+- [x] Fixed Dynamic Stage Lite sidebar interference with the main tweak UI.
+
 ### v1.2.15 - 2026-06-09
 
 - [x] Fixed Double Tap to Lock triggering while entering a Lock Screen passcode.

@@ -12,6 +12,8 @@
 #   BUMP=none  ./scripts/release.sh "..."               # leave MARKETING_VERSION as-is
 #   VERSION=1.5.3 ./scripts/release.sh "..."            # set an explicit version
 #   TAG=v1.2.3 ./scripts/release.sh "..."               # override tag (defaults to v${VERSION})
+#   SIGNAL_RELEASE_NOTIFY=0 ./scripts/release.sh "..."  # skip Signal group post
+#   SIGNAL_BOT_DIR=/path/to/signal-bot ./scripts/release.sh "..."  # override bot config path
 #
 # The release script owns versioning end-to-end: it edits MARKETING_VERSION and
 # CURRENT_PROJECT_VERSION in the xcodeproj, commits the bump (along with any
@@ -28,6 +30,104 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+
+notify_signal_release() {
+    local version="$1"
+    local tag="$2"
+    local download_url="$3"
+    local notes="$4"
+    local signal_bot_dir="${SIGNAL_BOT_DIR:-/Users/johnnyfranks/Downloads/signal-bot}"
+    local signal_env="${SIGNAL_BOT_ENV:-$signal_bot_dir/.env}"
+
+    if [ "${SIGNAL_RELEASE_NOTIFY:-1}" = "0" ]; then
+        echo "==> Signal release notification disabled"
+        return 0
+    fi
+
+    if [ ! -f "$signal_env" ]; then
+        echo "warning: Signal notify skipped: $signal_env not found" >&2
+        return 0
+    fi
+
+    SIGNAL_BOT_ENV="$signal_env" \
+    CYANIDE_VERSION="$version" \
+    CYANIDE_TAG="$tag" \
+    CYANIDE_DOWNLOAD_URL="$download_url" \
+    CYANIDE_RELEASE_NOTES="$notes" \
+    python3 - <<'PY'
+import base64
+import json
+import os
+import re
+import sys
+import urllib.error
+import urllib.request
+
+
+def parse_env(path):
+    result = {}
+    with open(path, encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            result[key.strip()] = value.strip().strip('"').strip("'")
+    return result
+
+
+def compact_notes(notes):
+    bullets = []
+    for line in notes.splitlines():
+        item = re.sub(r"^\s*[-*]\s+", "", line).strip()
+        if item:
+            bullets.append(item)
+        if len(bullets) >= 3:
+            break
+    if not bullets and notes.strip():
+        bullets.append(" ".join(notes.split())[:180])
+    if not bullets:
+        return ""
+    return "\n" + "\n".join(f"• {item[:120]}" for item in bullets)
+
+
+env = parse_env(os.environ["SIGNAL_BOT_ENV"])
+signal_number = env.get("SIGNAL_NUMBER", "")
+group_id = next((item.strip() for item in env.get("TARGET_GROUP_IDS", "").split(",") if item.strip()), "")
+api_url = env.get("SIGNAL_API_URL", "http://localhost:8080").rstrip("/")
+if not signal_number or not group_id:
+    print("warning: Signal notify skipped: missing SIGNAL_NUMBER or TARGET_GROUP_IDS", file=sys.stderr)
+    raise SystemExit(0)
+
+recipient = "group." + base64.b64encode(group_id.encode()).decode()
+version = os.environ["CYANIDE_VERSION"]
+tag = os.environ["CYANIDE_TAG"]
+download_url = os.environ["CYANIDE_DOWNLOAD_URL"]
+notes = compact_notes(os.environ.get("CYANIDE_RELEASE_NOTES", ""))
+message = f"Cyanide {version} is out\n{download_url}{notes}"
+
+body = {
+    "number": signal_number,
+    "recipients": [recipient],
+    "message": message,
+    "text_mode": "normal",
+}
+request = urllib.request.Request(
+    f"{api_url}/v2/send",
+    data=json.dumps(body).encode(),
+    headers={"Content-Type": "application/json"},
+    method="POST",
+)
+try:
+    with urllib.request.urlopen(request, timeout=20) as response:
+        response.read()
+except urllib.error.URLError as exc:
+    print(f"warning: Signal release notification failed: {exc}", file=sys.stderr)
+    raise SystemExit(0)
+
+print(f"==> posted Signal release notification for {tag}")
+PY
+}
 
 if ! command -v gh >/dev/null; then
     echo "error: gh CLI not installed (brew install gh)" >&2
@@ -599,6 +699,9 @@ else
         --title "$RELEASE_TITLE" \
         --notes "$NOTES"
 fi
+
+RELEASE_DOWNLOAD_URL="${DOWNLOAD_URL:-https://github.com/${REPO_SLUG}/releases/download/${TAG}/Cyanide-${VERSION}.ipa}"
+notify_signal_release "$VERSION" "$TAG" "$RELEASE_DOWNLOAD_URL" "$NOTES"
 
 echo "==> done"
 gh release view "$TAG" --repo "$REPO_SLUG" | head -10

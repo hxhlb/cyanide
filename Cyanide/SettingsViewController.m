@@ -1512,6 +1512,22 @@ static void settings_progress(NSUInteger *step, NSUInteger total, const char *me
              message);
 }
 
+static BOOL settings_try_claim_actions_lock(const char *owner, const char *busyMessage)
+{
+    if (__sync_lock_test_and_set(&g_settings_actions_running, 1)) {
+        printf("[SETTINGS] %s blocked: actions already running\n",
+               owner ?: "action");
+        if (busyMessage) log_user("%s\n", busyMessage);
+        return NO;
+    }
+    return YES;
+}
+
+static void settings_release_actions_lock(void)
+{
+    __sync_lock_release(&g_settings_actions_running);
+}
+
 static NSString *settings_bundle_string(NSString *key, NSString *fallback)
 {
     id value = [NSBundle mainBundle].infoDictionary[key];
@@ -2659,58 +2675,76 @@ static void settings_nano_load_from_plist_into_defaults(BOOL logResult)
 // the InstallProgressViewController shows real lines during the apply.
 BOOL settings_apply_nano_registry_now(BOOL apply)
 {
-    if (!settings_ensure_kexploit()) {
-        log_user("[NANO] Failed: kernel primitives were not acquired. Please try running chain again.\n");
+    if (!settings_try_claim_actions_lock("NanoRegistry apply",
+                                         "[NANO] Another action is already running.")) {
         return NO;
     }
 
-    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
-    bool ok;
-    nano_registry_values values = {
-        .max_pairing         = (int)[d integerForKey:kSettingsNanoMaxPairing],
-        .min_pairing         = (int)[d integerForKey:kSettingsNanoMinPairing],
-        .min_pairing_chip_id = (int)[d integerForKey:kSettingsNanoMinPairingChipID],
-        .min_quick_switch    = (int)[d integerForKey:kSettingsNanoMinQuickSwitch],
-    };
-    if (apply) {
-        log_user("[NANO] Applying pairing override max=%d min=%d minChip=%d minQuick=%d.\n",
-                 values.max_pairing, values.min_pairing,
-                 values.min_pairing_chip_id, values.min_quick_switch);
-        ok = nano_registry_apply(&values);
-        if (!ok) {
-            log_user("[FAIL] NanoRegistry override write failed — see log for [NANO] lines.\n");
+    @try {
+        if (!settings_ensure_kexploit()) {
+            log_user("[NANO] Failed: kernel primitives were not acquired. Please try running chain again.\n");
+            return NO;
         }
-    } else {
-        log_user("[NANO] Removing pairing override keys.\n");
-        ok = nano_registry_clear();
-        if (!ok) {
-            log_user("[FAIL] NanoRegistry override clear failed — see log for [NANO] lines.\n");
-        }
-    }
 
-    // The file write above is necessary but not sufficient — cfprefsd owns
-    // the in-memory cache that every CFPreferencesCopyValue call serves
-    // from, and it will overwrite our plist with its stale cache the next
-    // time any process writes to com.apple.NanoRegistry via the API. Push
-    // the same values into cfprefsd's cache so the cache *has* our
-    // override and future serializations preserve it.
-    if (ok) {
-        bool pushed = nano_registry_push_to_cfprefsd(&values, apply ? true : false);
-        if (!pushed) {
-            log_user("[NANO] cfprefsd push failed; on-disk override may be overwritten by cfprefsd's stale cache.\n");
+        NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+        bool ok;
+        nano_registry_values values = {
+            .max_pairing         = (int)[d integerForKey:kSettingsNanoMaxPairing],
+            .min_pairing         = (int)[d integerForKey:kSettingsNanoMinPairing],
+            .min_pairing_chip_id = (int)[d integerForKey:kSettingsNanoMinPairingChipID],
+            .min_quick_switch    = (int)[d integerForKey:kSettingsNanoMinQuickSwitch],
+        };
+        if (apply) {
+            log_user("[NANO] Applying pairing override max=%d min=%d minChip=%d minQuick=%d.\n",
+                     values.max_pairing, values.min_pairing,
+                     values.min_pairing_chip_id, values.min_quick_switch);
+            ok = nano_registry_apply(&values);
+            if (!ok) {
+                log_user("[FAIL] NanoRegistry override write failed — see log for [NANO] lines.\n");
+            }
+        } else {
+            log_user("[NANO] Removing pairing override keys.\n");
+            ok = nano_registry_clear();
+            if (!ok) {
+                log_user("[FAIL] NanoRegistry override clear failed — see log for [NANO] lines.\n");
+            }
         }
-    }
 
-    return ok ? YES : NO;
+        // The file write above is necessary but not sufficient — cfprefsd owns
+        // the in-memory cache that every CFPreferencesCopyValue call serves
+        // from, and it will overwrite our plist with its stale cache the next
+        // time any process writes to com.apple.NanoRegistry via the API. Push
+        // the same values into cfprefsd's cache so the cache *has* our
+        // override and future serializations preserve it.
+        if (ok) {
+            bool pushed = nano_registry_push_to_cfprefsd(&values, apply ? true : false);
+            if (!pushed) {
+                log_user("[NANO] cfprefsd push failed; on-disk override may be overwritten by cfprefsd's stale cache.\n");
+            }
+        }
+
+        return ok ? YES : NO;
+    } @finally {
+        settings_release_actions_lock();
+    }
 }
 
 BOOL settings_apply_call_recording_sound_disabled(BOOL disabled)
 {
-    if (!settings_ensure_kexploit()) {
-        log_user("[CALLREC] Failed: kernel primitives were not acquired. Please try running chain again.\n");
+    if (!settings_try_claim_actions_lock("CallRec sound apply",
+                                         "[CALLREC] Another action is already running.")) {
         return NO;
     }
-    return call_recording_sound_set_disabled(disabled) ? YES : NO;
+
+    @try {
+        if (!settings_ensure_kexploit()) {
+            log_user("[CALLREC] Failed: kernel primitives were not acquired. Please try running chain again.\n");
+            return NO;
+        }
+        return call_recording_sound_set_disabled(disabled) ? YES : NO;
+    } @finally {
+        settings_release_actions_lock();
+    }
 }
 
 static void settings_run_nano_apply_action(void)
@@ -2740,10 +2774,23 @@ static void settings_run_nano_clear_action(void)
 static void settings_run_nano_probe_action(void)
 {
     dispatch_async(dispatch_get_global_queue(0, 0), ^{
-        if (!settings_ensure_kexploit()) {
-            log_user("[NANO-PROBE] Failed: kernel primitives were not acquired. Please try running chain again.\n");
-        } else {
-            (void)nano_registry_probe_pairing_assets();
+        if (!settings_try_claim_actions_lock("NanoRegistry probe",
+                                             "[NANO-PROBE] Another action is already running.")) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [[NSNotificationCenter defaultCenter]
+                    postNotificationName:kSettingsActionsDidCompleteNotification
+                                  object:nil];
+            });
+            return;
+        }
+        @try {
+            if (!settings_ensure_kexploit()) {
+                log_user("[NANO-PROBE] Failed: kernel primitives were not acquired. Please try running chain again.\n");
+            } else {
+                (void)nano_registry_probe_pairing_assets();
+            }
+        } @finally {
+            settings_release_actions_lock();
         }
         dispatch_async(dispatch_get_main_queue(), ^{
             [[NSNotificationCenter defaultCenter]
@@ -2756,10 +2803,23 @@ static void settings_run_nano_probe_action(void)
 static void settings_run_nano_steer_action(void)
 {
     dispatch_async(dispatch_get_global_queue(0, 0), ^{
-        if (!settings_ensure_kexploit()) {
-            log_user("[NANO-STEER] Failed: kernel primitives were not acquired. Please try running chain again.\n");
-        } else {
-            (void)nano_registry_steer_new_watch_product_alias();
+        if (!settings_try_claim_actions_lock("NanoRegistry steer",
+                                             "[NANO-STEER] Another action is already running.")) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [[NSNotificationCenter defaultCenter]
+                    postNotificationName:kSettingsActionsDidCompleteNotification
+                                  object:nil];
+            });
+            return;
+        }
+        @try {
+            if (!settings_ensure_kexploit()) {
+                log_user("[NANO-STEER] Failed: kernel primitives were not acquired. Please try running chain again.\n");
+            } else {
+                (void)nano_registry_steer_new_watch_product_alias();
+            }
+        } @finally {
+            settings_release_actions_lock();
         }
         dispatch_async(dispatch_get_main_queue(), ^{
             [[NSNotificationCenter defaultCenter]
@@ -2772,20 +2832,33 @@ static void settings_run_nano_steer_action(void)
 static void settings_run_nano_seed_action(void)
 {
     dispatch_async(dispatch_get_global_queue(0, 0), ^{
-        if (!settings_ensure_kexploit()) {
-            log_user("[NANO-SEED] Failed: kernel primitives were not acquired. Please try running chain again.\n");
-        } else {
-            NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
-            nano_registry_values values = {
-                .max_pairing         = (int)[d integerForKey:kSettingsNanoMaxPairing],
-                .min_pairing         = (int)[d integerForKey:kSettingsNanoMinPairing],
-                .min_pairing_chip_id = (int)[d integerForKey:kSettingsNanoMinPairingChipID],
-                .min_quick_switch    = (int)[d integerForKey:kSettingsNanoMinQuickSwitch],
-            };
-            bool ok = nano_registry_seed_current_phone_compatibility_index(values.max_pairing);
-            if (ok) {
-                (void)nano_registry_push_to_cfprefsd(&values, true);
+        if (!settings_try_claim_actions_lock("NanoRegistry seed",
+                                             "[NANO-SEED] Another action is already running.")) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [[NSNotificationCenter defaultCenter]
+                    postNotificationName:kSettingsActionsDidCompleteNotification
+                                  object:nil];
+            });
+            return;
+        }
+        @try {
+            if (!settings_ensure_kexploit()) {
+                log_user("[NANO-SEED] Failed: kernel primitives were not acquired. Please try running chain again.\n");
+            } else {
+                NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+                nano_registry_values values = {
+                    .max_pairing         = (int)[d integerForKey:kSettingsNanoMaxPairing],
+                    .min_pairing         = (int)[d integerForKey:kSettingsNanoMinPairing],
+                    .min_pairing_chip_id = (int)[d integerForKey:kSettingsNanoMinPairingChipID],
+                    .min_quick_switch    = (int)[d integerForKey:kSettingsNanoMinQuickSwitch],
+                };
+                bool ok = nano_registry_seed_current_phone_compatibility_index(values.max_pairing);
+                if (ok) {
+                    (void)nano_registry_push_to_cfprefsd(&values, true);
+                }
             }
+        } @finally {
+            settings_release_actions_lock();
         }
         dispatch_async(dispatch_get_main_queue(), ^{
             [[NSNotificationCenter defaultCenter]
@@ -9786,12 +9859,14 @@ void cyanide_present_contact(UIViewController *host)
         dispatch_async(dispatch_get_global_queue(0, 0), ^{
             NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
             __block BOOL actionOK = NO;
+            BOOL actionLockAcquired = NO;
             NSString *completionMessage = restore
                 ? @"Gravity Lite restore failed. Check the log."
                 : @"Gravity Lite explosion failed. Check the log.";
             @try {
-                if (g_settings_actions_running) {
-                    log_user("[GRAVITY] Action aborted: Apply Tweaks is still running.\n");
+                actionLockAcquired = settings_try_claim_actions_lock("Gravity Lite action",
+                                                                     "[GRAVITY] Another action is already running.");
+                if (!actionLockAcquired) {
                     completionMessage = @"Gravity Lite blocked: Apply Tweaks is still running.";
                     return;
                 }
@@ -9843,6 +9918,7 @@ void cyanide_present_contact(UIViewController *host)
                              actionOK ? "sent" : "found no active state");
                 }
             } @finally {
+                if (actionLockAcquired) settings_release_actions_lock();
                 settings_notify_package_queue_changed_async();
                 settings_post_actions_complete_async(actionOK, completionMessage);
             }
@@ -9872,12 +9948,14 @@ void cyanide_present_contact(UIViewController *host)
                  apply ? settings_location_sim_target_summary(d).UTF8String : "real location");
         dispatch_async(dispatch_get_global_queue(0, 0), ^{
             BOOL actionOK = NO;
+            BOOL actionLockAcquired = NO;
             NSString *completionMessage = apply
                 ? @"Location Simulator applied."
                 : @"Restore request sent. Real location may take a few minutes.";
             @try {
-                if (g_settings_actions_running) {
-                    log_user("[LOCSIM] Action aborted: Apply Tweaks is still running.\n");
+                actionLockAcquired = settings_try_claim_actions_lock("Location Simulator action",
+                                                                     "[LOCSIM] Another action is already running.");
+                if (!actionLockAcquired) {
                     completionMessage = @"Location Simulator blocked: Apply Tweaks is still running.";
                     return;
                 }
@@ -9911,6 +9989,7 @@ void cyanide_present_contact(UIViewController *host)
                          apply ? (ok ? "applied" : "did not apply cleanly")
                                : (ok ? "stopped; real location should resume" : "did not stop cleanly"));
             } @finally {
+                if (actionLockAcquired) settings_release_actions_lock();
                 __sync_lock_release(&sLocSimButtonInFlight);
                 dispatch_async(dispatch_get_main_queue(), ^{
                     __strong typeof(weakSelf) strongSelf = weakSelf;
@@ -9951,12 +10030,14 @@ void cyanide_present_contact(UIViewController *host)
                  enable ? settings_location_sim_target_summary(d).UTF8String : "the running process");
         dispatch_async(dispatch_get_global_queue(0, 0), ^{
             BOOL actionOK = NO;
+            BOOL actionLockAcquired = NO;
             NSString *completionMessage = enable
                 ? @"Strict App Mode failed. Check the log."
                 : @"Strict App Mode disable failed. Check the log.";
             @try {
-                if (g_settings_actions_running) {
-                    log_user("[LOCSIM] Strict App Mode aborted: Apply Tweaks is still running.\n");
+                actionLockAcquired = settings_try_claim_actions_lock("Location Simulator strict mode",
+                                                                     "[LOCSIM] Another action is already running.");
+                if (!actionLockAcquired) {
                     completionMessage = @"Strict App Mode blocked: Apply Tweaks is still running.";
                     return;
                 }
@@ -9993,6 +10074,7 @@ void cyanide_present_contact(UIViewController *host)
                          enable ? "prime finished" : "disable finished",
                          systemOK ? "ok" : "failed");
             } @finally {
+                if (actionLockAcquired) settings_release_actions_lock();
                 __sync_lock_release(&sLocSimUberStealthInFlight);
                 dispatch_async(dispatch_get_main_queue(), ^{
                     __strong typeof(weakSelf) strongSelf = weakSelf;
@@ -10402,10 +10484,25 @@ void cyanide_present_contact(UIViewController *host)
                 return;
             }
             dispatch_async(dispatch_get_global_queue(0, 0), ^{
-                if (!settings_ensure_kexploit_recovery_only()) {
-                    log_user("[NANO] Failed: parked KRW recovery was not acquired.\n");
-                } else {
-                    settings_nano_load_from_plist_into_defaults(YES);
+                if (!settings_try_claim_actions_lock("NanoRegistry load",
+                                                     "[NANO] Another action is already running.")) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:0]
+                                      withRowAnimation:UITableViewRowAnimationNone];
+                        [[NSNotificationCenter defaultCenter]
+                            postNotificationName:kSettingsActionsDidCompleteNotification
+                                          object:nil];
+                    });
+                    return;
+                }
+                @try {
+                    if (!settings_ensure_kexploit_recovery_only()) {
+                        log_user("[NANO] Failed: parked KRW recovery was not acquired.\n");
+                    } else {
+                        settings_nano_load_from_plist_into_defaults(YES);
+                    }
+                } @finally {
+                    settings_release_actions_lock();
                 }
                 dispatch_async(dispatch_get_main_queue(), ^{
                     [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:0]
@@ -10519,9 +10616,11 @@ void cyanide_present_contact(UIViewController *host)
             }
             __weak typeof(self) weakSelf = self;
             dispatch_async(dispatch_get_global_queue(0, 0), ^{
+                BOOL actionLockAcquired = NO;
                 @try {
-                    if (g_settings_actions_running) {
-                        log_user("[TYPEBANNER] Test aborted: Apply Tweaks is still running.\n");
+                    actionLockAcquired = settings_try_claim_actions_lock("TypeBanner test",
+                                                                         "[TYPEBANNER] Another action is already running.");
+                    if (!actionLockAcquired) {
                         return;
                     }
                     if (!settings_ensure_kexploit()) {
@@ -10614,6 +10713,7 @@ void cyanide_present_contact(UIViewController *host)
                         settings_start_typebanner_live_loop();
                     }
                 } @finally {
+                    if (actionLockAcquired) settings_release_actions_lock();
                     __sync_lock_release(&sTbTestInFlight);
                     dispatch_async(dispatch_get_main_queue(), ^{
                         [weakSelf.tableView reloadSections:[NSIndexSet indexSetWithIndex:0]
@@ -10635,27 +10735,32 @@ void cyanide_present_contact(UIViewController *host)
                 return;
             }
             dispatch_async(dispatch_get_global_queue(0, 0), ^{
-                if (g_settings_actions_running) {
-                    log_user("[NISLAND] Sample aborted: Apply Tweaks is still running.\n");
+                BOOL actionLockAcquired = settings_try_claim_actions_lock("Notification Island sample",
+                                                                         "[NISLAND] Another action is already running.");
+                if (!actionLockAcquired) {
                     return;
                 }
-                if (!settings_ensure_kexploit()) {
-                    log_user("[NISLAND] Sample failed: kernel primitives not acquired. Please try running chain again.\n");
-                    return;
-                }
-                bool ok = false;
-                @synchronized (settings_rc_lock()) {
-                    if (!settings_ensure_springboard_remote_call_locked()) {
-                        log_user("[NISLAND] SpringBoard not reachable; cannot show sample.\n");
+                @try {
+                    if (!settings_ensure_kexploit()) {
+                        log_user("[NISLAND] Sample failed: kernel primitives not acquired. Please try running chain again.\n");
                         return;
                     }
-                    notificationisland_apply_in_session();
-                    ok = notificationisland_show_sample_in_session("Notification Island", "Sample banner route");
+                    bool ok = false;
+                    @synchronized (settings_rc_lock()) {
+                        if (!settings_ensure_springboard_remote_call_locked()) {
+                            log_user("[NISLAND] SpringBoard not reachable; cannot show sample.\n");
+                            return;
+                        }
+                        notificationisland_apply_in_session();
+                        ok = notificationisland_show_sample_in_session("Notification Island", "Sample banner route");
+                    }
+                    log_user("%s Notification Island sample %s.\n",
+                             ok ? "[OK]" : "[WARN]",
+                             ok ? "started" : "did not start");
+                    if (ok) settings_start_notificationisland_live_loop();
+                } @finally {
+                    settings_release_actions_lock();
                 }
-                log_user("%s Notification Island sample %s.\n",
-                         ok ? "[OK]" : "[WARN]",
-                         ok ? "started" : "did not start");
-                if (ok) settings_start_notificationisland_live_loop();
             });
         }
         return;
