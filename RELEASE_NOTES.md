@@ -30,6 +30,15 @@ activity, omit it.
 
 ## Released
 
+### v1.3.7 - 2026-07-01
+
+- [x] Added MilkyWay Lite app preselection with a searchable Settings list.
+- [x] Kept MilkyWay Lite install fast by showing only recent apps plus the preselected picker list in SpringBoard.
+- [x] Allowed MilkyWay Lite to include common system apps such as Safari, Phone, Messages, Settings, Photos, and Camera.
+- [x] Added a configurable MilkyWay Lite floating-window limit, with multiple windows supported up to the selected maximum.
+- [x] Added Simplified Chinese and Traditional Chinese localizations for the app UI.
+- [x] Refreshed installer, package, source, and log UI text for the localized build.
+
 ### v1.3.6 - 2026-06-27
 
 - [x] Removed Patreon integration and ungated all installable Cyanide tweaks, with stale account-linking state cleared so beta access is the same for everyone.
