@@ -14,6 +14,7 @@
 #import <math.h>
 #import <stdio.h>
 #import <string.h>
+#import <sys/stat.h>
 #import <sys/time.h>
 #import <unistd.h>
 
@@ -50,9 +51,9 @@ static const double   kStripTransitionShieldCloseHold = 0.28;
 static const double   kStripResizeSwapRevealDelay = 0.07;
 static const double   kStripResizeSwapRetireDelay = 0.18;
 static const double   kStripSlotCornerR  = 14.0;
-static const int      kStripMaxSlotsHard = 4;
+static const int      kStripMaxSlotsHard = 8;
 static const int      kStripRecentProbeLimit = 4;
-static const int      kStripPickerInitialMaxBids = 16;
+static const int      kStripPickerInitialMaxBids = 768;
 static const uint64_t kStripPickerEnumHardBudgetMS = 8000;
 static const uint64_t kStripPickerLibraryBuildDelayMS = 4000;
 static const uint64_t kStripPickerLibraryTileIntervalMS = 1200;
@@ -123,6 +124,7 @@ typedef enum {
 typedef struct {
     uint64_t window;
     uint64_t hostView;
+    uint64_t sceneHandle;
     uint64_t moveHandle;
     uint64_t resizeHandle;
     uint64_t movePan;
@@ -137,7 +139,7 @@ typedef struct {
     bool     cornerArcsVisible;               // tracked so we only flip when state changes
 } StripFloatSlot;
 
-#define kStripMaxFloatSlots 2
+#define kStripMaxFloatSlots 8
 static StripFloatSlot gStripFloatSlots[kStripMaxFloatSlots] = {{0}};
 
 #define gStripFloatWindow    (gStripFloatSlots[0].window)
@@ -160,11 +162,17 @@ static uint64_t gStripPickerBottomIcon = 0;     // Bottom slot UIImageView (icon
 static uint64_t gStripPickerTopChipCard = 0;    // The wrapping card around the top chip (for highlight tinting).
 static uint64_t gStripPickerBottomChipCard = 0; // Same for bottom.
 static uint64_t gStripPickerPendingBidLabel = 0;// Hidden label set by each tile tap; Cyanide reads on poll.
+static uint64_t gStripPickerSearchField = 0;
 static volatile int gStripPickerNextSlot = 0;   // 0 = next tap fills top, 1 = next tap fills bottom.
-static uint64_t gStripRows[2]        = {0};
-static uint64_t gStripLives[2]       = {0};
+static volatile int gStripRuntimeMaxSlots = 4;
+static volatile int gStripRuntimeMilkyWayLite = 0;
+static char     gStripRuntimePreselectedAppsPath[512] = {0};
+static volatile double gStripNextWindowLevel = kStripWindowLevel;
+static uint64_t gStripRows[kStripMaxFloatSlots]        = {0};
+static uint64_t gStripLives[kStripMaxFloatSlots]       = {0};
 static char     gStripPickerTopBid[128] = {0};
 static char     gStripPickerBottomBid[128] = {0};
+static char     gStripMWLiteSlotBids[kStripMaxFloatSlots][128] = {{0}};
 static volatile int gStripControlLoopRunning = 0;
 static volatile int gStripControlLoopStop = 0;
 static int gStripLockNotifyToken = NOTIFY_TOKEN_INVALID;
@@ -172,6 +180,16 @@ static int gStripBlankedNotifyToken = NOTIFY_TOKEN_INVALID;
 static int gStripDisplayStatusNotifyToken = NOTIFY_TOKEN_INVALID;
 static volatile int gStripPickerApplyBusy = 0;
 static volatile uint64_t gStripPickerCooldownUntilMS = 0;
+
+#define kStripPickerFilterMax 256
+static uint64_t gStripPickerFilterTiles[kStripPickerFilterMax] = {0};
+static char     gStripPickerFilterBids[kStripPickerFilterMax][128] = {{0}};
+static char     gStripPickerFilterNames[kStripPickerFilterMax][96] = {{0}};
+static int      gStripPickerFilterCount = 0;
+static char     gStripPickerLastSearch[96] = {0};
+static int      gStripPickerLastRecentsCount = 0;
+static time_t   gStripPreselectedAppsMtime = 0;
+static off_t    gStripPreselectedAppsSize = 0;
 
 // Picker command codes carried in -[gStripPickerPanel tag]. Cyanide polls the
 // tag every few ticks; non-zero triggers a dispatch and is then cleared back
@@ -248,6 +266,8 @@ static bool stagestrip_screen_inactive(void)
     return false;
 }
 static void stagestrip_resize_host_view_frame(uint64_t view, double w, double h);
+static StripRect stagestrip_clamped_rect(double x, double y, double w, double h,
+                                         double screenW, double screenH);
 static void stagestrip_raise_pan_handles_slot(StripFloatSlot *S);
 static bool stagestrip_send_double(uint64_t obj, const char *sel, double v);
 static uint64_t stagestrip_make_invocation(uint64_t target,
@@ -277,6 +297,19 @@ static uint64_t stagestrip_now_ms(void)
     struct timeval tv;
     gettimeofday(&tv, NULL);
     return (uint64_t)tv.tv_sec * 1000ULL + (uint64_t)tv.tv_usec / 1000ULL;
+}
+
+static const char *stagestrip_l10n_cstr(const char *key, char *buf, size_t len)
+{
+    if (!buf || len == 0) return key ? key : "";
+    buf[0] = '\0';
+    if (!key || !*key) return "";
+    NSString *nsKey = [NSString stringWithUTF8String:key];
+    NSString *value = nsKey ? NSLocalizedString(nsKey, nil) : nil;
+    const char *out = value.UTF8String ?: key;
+    strncpy(buf, out, len - 1);
+    buf[len - 1] = '\0';
+    return buf;
 }
 
 // ---------------------------------------------------------------------------
@@ -773,7 +806,16 @@ static StripSize stagestrip_stage_size_for_request(int maxSlots)
     double w  = sw - 16.0;          // ~full screen width with a small inset
     double h  = sh * 0.40;          // ~40% screen height per slot (two slots stack to 80%)
     if (h < 280.0) h = 280.0;
-    if (maxSlots <= 1) return (StripSize){ w, h * 1.7 };
+    if (maxSlots <= 1) {
+        double mw = sw * 0.50;
+        if (mw < 190.0) mw = 190.0;
+        if (mw > sw - 16.0) mw = sw - 16.0;
+        double aspect = sh / sw;
+        double mh = mw * aspect;
+        if (mh < 300.0) mh = 300.0;
+        if (mh > sh - 120.0) mh = sh - 120.0;
+        return (StripSize){ mw, mh };
+    }
     if (maxSlots == 2) return (StripSize){ w, h };
     if (maxSlots == 3) return (StripSize){ w, h * 1.2 };
     return (StripSize){ w, h * 1.5 };
@@ -1591,6 +1633,16 @@ static void stagestrip_update_foreground_attribution(StripScenePick *picks, int 
     if (!r_is_objc_ptr(set)) return;
 
     int added = 0;
+    if (gStripRuntimeMilkyWayLite) {
+        for (int s = 0; s < kStripMaxFloatSlots; s++) {
+            uint64_t handle = gStripFloatSlots[s].sceneHandle;
+            if (!r_is_objc_ptr(handle)) continue;
+            r_msg2_main(set, "addObject:", handle, 0, 0, 0);
+            added++;
+            if (r_is_objc_ptr(mgr) && r_responds(handle, "_setIdleTimerCoordinator:"))
+                r_msg2_main(handle, "_setIdleTimerCoordinator:", mgr, 0, 0, 0);
+        }
+    }
     for (int i = 0; i < count; i++) {
         if (!r_is_objc_ptr(picks[i].handle)) continue;
         r_msg2_main(set, "addObject:", picks[i].handle, 0, 0, 0);
@@ -2871,6 +2923,24 @@ static void stagestrip_set_background_white(uint64_t view, double white, double 
         r_msg2_main(view, "setBackgroundColor:", color, 0, 0, 0);
 }
 
+static void stagestrip_set_background_rgba(uint64_t view,
+                                           double red,
+                                           double green,
+                                           double blue,
+                                           double alpha)
+{
+    if (!r_is_objc_ptr(view)) return;
+    uint64_t UIColor = r_class("UIColor");
+    if (!r_is_objc_ptr(UIColor) || !r_responds(UIColor, "colorWithRed:green:blue:alpha:")) return;
+    uint64_t color = r_msg2_main_raw(UIColor, "colorWithRed:green:blue:alpha:",
+                                     &red,   sizeof(red),
+                                     &green, sizeof(green),
+                                     &blue,  sizeof(blue),
+                                     &alpha, sizeof(alpha));
+    if (r_is_objc_ptr(color))
+        r_msg2_main(view, "setBackgroundColor:", color, 0, 0, 0);
+}
+
 static void stagestrip_set_layer_border_white(uint64_t view,
                                               double white,
                                               double alpha,
@@ -3155,6 +3225,101 @@ static void stagestrip_refresh_host_view_geometry(uint64_t view, double w, doubl
         r_msg2_main(view, "layoutIfNeeded", 0, 0, 0, 0);
 }
 
+static bool stagestrip_get_screen_size(double *outW, double *outH)
+{
+    CGRect b = UIScreen.mainScreen.bounds;
+    double sw = isfinite(b.size.width)  && b.size.width  >= 200.0 ? b.size.width  : 390.0;
+    double sh = isfinite(b.size.height) && b.size.height >= 200.0 ? b.size.height : 844.0;
+    if (outW) *outW = sw;
+    if (outH) *outH = sh;
+    return true;
+}
+
+static double stagestrip_content_border_inset(void)
+{
+    return (gStripRuntimeMilkyWayLite) ? 0.0 : kStripBorderInset;
+}
+
+static double stagestrip_content_title_height(void)
+{
+    return (gStripRuntimeMilkyWayLite) ? 34.0 : 0.0;
+}
+
+static double stagestrip_mwlite_content_aspect(void)
+{
+    double sw = 390.0, sh = 844.0;
+    stagestrip_get_screen_size(&sw, &sh);
+    return (sh > 0.0) ? (sw / sh) : (390.0 / 844.0);
+}
+
+static StripRect stagestrip_mwlite_aspect_resize_rect(StripRect start,
+                                                       int corner,
+                                                       double tx,
+                                                       double ty,
+                                                       double screenW,
+                                                       double screenH)
+{
+    double titleH = stagestrip_content_title_height();
+    double minW = 120.0;
+    double minContentH = 180.0;
+    double aspect = stagestrip_mwlite_content_aspect();
+    if (!isfinite(aspect) || aspect <= 0.0) aspect = 390.0 / 844.0;
+
+    double dx = (corner == kStripCornerTL || corner == kStripCornerBL) ? -tx : tx;
+    double dy = (corner == kStripCornerTL || corner == kStripCornerTR) ? -ty : ty;
+    double proposedW = start.width + dx;
+    double proposedContentH = (start.height - titleH) + dy;
+    if (proposedW < minW) proposedW = minW;
+    if (proposedContentH < minContentH) proposedContentH = minContentH;
+
+    double byWidthContentH = proposedW / aspect;
+    double byHeightW = proposedContentH * aspect;
+    double nw = (fabs(dx) >= fabs(dy)) ? proposedW : byHeightW;
+    double nh = titleH + ((fabs(dx) >= fabs(dy)) ? byWidthContentH : proposedContentH);
+    if (nw < minW) {
+        nw = minW;
+        nh = titleH + nw / aspect;
+    }
+    if (nh < titleH + minContentH) {
+        nh = titleH + minContentH;
+        nw = minContentH * aspect;
+    }
+
+    double nx = start.x;
+    double ny = start.y;
+    if (corner == kStripCornerTL || corner == kStripCornerBL) nx = start.x + start.width - nw;
+    if (corner == kStripCornerTL || corner == kStripCornerTR) ny = start.y + start.height - nh;
+    return stagestrip_clamped_rect(nx, ny, nw, nh, screenW, screenH);
+}
+
+static void stagestrip_apply_mwlite_scaled_host_geometry(uint64_t view,
+                                                         double contentX,
+                                                         double contentY,
+                                                         double contentW,
+                                                         double contentH)
+{
+    if (!r_is_objc_ptr(view) || contentW <= 0.0 || contentH <= 0.0) return;
+
+    double sw = 390.0, sh = 844.0;
+    stagestrip_get_screen_size(&sw, &sh);
+    double scaleX = contentW / sw;
+    double scaleY = contentH / sh;
+    if (!isfinite(scaleX) || scaleX <= 0.0) scaleX = 1.0;
+    if (!isfinite(scaleY) || scaleY <= 0.0) scaleY = 1.0;
+
+    // MilkyWay keeps the hosted scene at full-screen logical size and scales
+    // the view down into the floating window. Shrinking the host bounds itself
+    // makes the app render at phone width and then get clipped horizontally.
+    stagestrip_set_bounds_thread(view, (StripRect){ 0.0, 0.0, sw, sh });
+    stagestrip_refresh_host_view_geometry(view, sw, sh);
+    stagestrip_set_transform_thread(view, CGAffineTransformMakeScale(scaleX, scaleY));
+    stagestrip_set_point_thread(view, "setCenter:",
+                                (StripPoint){ contentX + contentW * 0.5,
+                                              contentY + contentH * 0.5 });
+    printf("[STAGE] mwlite-scale: logical=%.0fx%.0f content=(%.0f,%.0f %.0fx%.0f) scale=(%.3f,%.3f)\n",
+           sw, sh, contentX, contentY, contentW, contentH, scaleX, scaleY);
+}
+
 // Capability flags for the host view class. Set on first call; -1 = unknown.
 static int8_t gHostViewHasAutoResizeMask  = -1;
 static int8_t gHostViewHasUpdateRefSize   = -1;
@@ -3164,13 +3329,19 @@ static int8_t gHostViewHasLayoutIfNeeded  = -1;
 static void stagestrip_resize_host_view_frame(uint64_t view, double w, double h)
 {
     if (!r_is_objc_ptr(view)) return;
-    double bi = kStripBorderInset;
+    double bi = stagestrip_content_border_inset();
+    double titleH = stagestrip_content_title_height();
     double iw = w - 2.0 * bi;
-    double ih = h - 2.0 * bi;
+    double ih = h - 2.0 * bi - titleH;
     if (iw < 80.0) iw = 80.0;
     if (ih < 80.0) ih = 80.0;
-    stagestrip_set_frame_thread(view, (StripRect){ bi, bi, iw, ih });
-    stagestrip_set_bounds_thread(view, (StripRect){ 0.0, 0.0, iw, ih });
+    if (gStripRuntimeMilkyWayLite) {
+        stagestrip_apply_mwlite_scaled_host_geometry(view, bi, bi + titleH, iw, ih);
+    } else {
+        stagestrip_set_transform_thread(view, CGAffineTransformIdentity);
+        stagestrip_set_frame_thread(view, (StripRect){ bi, bi + titleH, iw, ih });
+        stagestrip_set_bounds_thread(view, (StripRect){ 0.0, 0.0, iw, ih });
+    }
 }
 
 static uint64_t stagestrip_resize_host_view_commit_for_slot(int slot,
@@ -3181,12 +3352,17 @@ static uint64_t stagestrip_resize_host_view_commit_for_slot(int slot,
     stagestrip_resize_host_view_frame(view, w, h);
     if (!r_is_objc_ptr(view)) return view;
 
-    double bi = kStripBorderInset;
+    double bi = stagestrip_content_border_inset();
+    double titleH = stagestrip_content_title_height();
     double iw = w - 2.0 * bi;
-    double ih = h - 2.0 * bi;
+    double ih = h - 2.0 * bi - titleH;
     if (iw < 80.0) iw = 80.0;
     if (ih < 80.0) ih = 80.0;
-    stagestrip_refresh_host_view_geometry(view, iw, ih);
+    if (gStripRuntimeMilkyWayLite) {
+        stagestrip_apply_mwlite_scaled_host_geometry(view, bi, bi + titleH, iw, ih);
+    } else {
+        stagestrip_refresh_host_view_geometry(view, iw, ih);
+    }
 
     uint64_t sceneKey = r_sel("cyanideStageStripHostedScene");
     uint64_t scene = sceneKey
@@ -3207,18 +3383,30 @@ static uint64_t stagestrip_resize_host_view_commit_for_slot(int slot,
                      0, 0, 0, 0);
     }
 
-    uint64_t fresh = stagestrip_make_scene_layer_host_view(scene, "resize", iw, ih);
+    double hostBuildW = iw, hostBuildH = ih;
+    if (gStripRuntimeMilkyWayLite)
+        stagestrip_get_screen_size(&hostBuildW, &hostBuildH);
+    uint64_t fresh = stagestrip_make_scene_layer_host_view(scene, "resize", hostBuildW, hostBuildH);
     if (!r_is_objc_ptr(fresh) || fresh == view) return view;
 
-    stagestrip_set_frame_thread(fresh, (StripRect){ bi, bi, iw, ih });
-    stagestrip_set_bounds_thread(fresh, (StripRect){ 0.0, 0.0, iw, ih });
+    if (gStripRuntimeMilkyWayLite) {
+        stagestrip_apply_mwlite_scaled_host_geometry(fresh, bi, bi + titleH, iw, ih);
+    } else {
+        stagestrip_set_transform_thread(fresh, CGAffineTransformIdentity);
+        stagestrip_set_frame_thread(fresh, (StripRect){ bi, bi + titleH, iw, ih });
+        stagestrip_set_bounds_thread(fresh, (StripRect){ 0.0, 0.0, iw, ih });
+    }
     r_msg2_main(fresh, "setAutoresizingMask:", 2 | 16, 0, 0, 0);
     r_msg2_main(fresh, "setClipsToBounds:", 1, 0, 0, 0);
     r_msg2_main(fresh, "setUserInteractionEnabled:", 1, 0, 0, 0);
     uint64_t freshLayer = r_msg2_main(fresh, "layer", 0, 0, 0, 0);
     if (r_is_objc_ptr(freshLayer))
         stagestrip_send_double(freshLayer, "setCornerRadius:", kStripCornerRadius - bi);
-    stagestrip_refresh_host_view_geometry(fresh, iw, ih);
+    if (gStripRuntimeMilkyWayLite) {
+        stagestrip_apply_mwlite_scaled_host_geometry(fresh, bi, bi + titleH, iw, ih);
+    } else {
+        stagestrip_refresh_host_view_geometry(fresh, iw, ih);
+    }
 
     stagestrip_send_double(fresh, "setAlpha:", 0.0);
     r_msg2_main(superview, "addSubview:", fresh, 0, 0, 0);
@@ -4007,7 +4195,7 @@ static void stagestrip_install_pan_handles_slot(int slot,
                                                "move",
                                                (StripRect){ moveX, 0.0, moveW, 32.0 },
                                                1 | 2 | 4,
-                                               0.05);
+                                               (gStripRuntimeMilkyWayLite) ? 0.0 : 0.05);
     uint64_t movePan = 0;
     if (r_is_objc_ptr(move)) {
         uint64_t grs = r_msg2_main(move, "gestureRecognizers", 0, 0, 0, 0);
@@ -4029,7 +4217,15 @@ static void stagestrip_install_pan_handles_slot(int slot,
         }
         S->cornerPans[c] = cornerPan;
     }
-    S->cornerArcsVisible = true; // initial state matches the 0.92 opacity above
+    if (gStripRuntimeMilkyWayLite) {
+        for (int c = 0; c < kStripCornerCount; c++) {
+            if (r_is_objc_ptr(S->cornerArcs[c]))
+                stagestrip_send_double(S->cornerArcs[c], "setOpacity:", 0.0);
+        }
+        S->cornerArcsVisible = false;
+    } else {
+        S->cornerArcsVisible = true; // initial state matches the 0.92 opacity above
+    }
 
     // Legacy single-handle pointers alias to BR so older code paths still see
     // a valid resize handle.
@@ -4095,6 +4291,112 @@ static void stagestrip_install_stage_picker_swipe_slot(int slot)
            slot, S->window, swipeGR, panel);
 }
 
+static void stagestrip_install_mwlite_titlebar(uint64_t win, double w)
+{
+    if (!r_is_objc_ptr(win) || !gStripRuntimeMilkyWayLite) return;
+
+    uint64_t key = r_sel("cyanideMWLiteTitlebar");
+    uint64_t existing = key
+        ? r_dlsym_call(R_TIMEOUT, "objc_getAssociatedObject",
+                       win, key, 0, 0, 0, 0, 0, 0)
+        : 0;
+    if (r_is_objc_ptr(existing)) {
+        stagestrip_set_frame_fast(existing, (StripRect){ 0.0, 0.0, w, 34.0 });
+        r_msg2_main(win, "bringSubviewToFront:", existing, 0, 0, 0);
+        return;
+    }
+
+    uint64_t UIView = r_class("UIView");
+    uint64_t alloc = r_is_objc_ptr(UIView) ? r_msg2_main(UIView, "alloc", 0, 0, 0, 0) : 0;
+    uint64_t bar = r_is_objc_ptr(alloc) ? r_msg2_main(alloc, "init", 0, 0, 0, 0) : 0;
+    if (!r_is_objc_ptr(bar)) return;
+    stagestrip_set_frame_fast(bar, (StripRect){ 0.0, 0.0, w, 34.0 });
+    r_msg2_main(bar, "setUserInteractionEnabled:", 0, 0, 0, 0);
+    r_msg2_main(bar, "setAutoresizingMask:", 1 | 2 | 4, 0, 0, 0);
+    stagestrip_set_background_white(bar, 0.08, 0.68);
+
+    uint64_t UILabel = r_class("UILabel");
+    uint64_t labelAlloc = r_is_objc_ptr(UILabel) ? r_msg2_main(UILabel, "alloc", 0, 0, 0, 0) : 0;
+    uint64_t label = r_is_objc_ptr(labelAlloc) ? r_msg2_main(labelAlloc, "init", 0, 0, 0, 0) : 0;
+    if (r_is_objc_ptr(label)) {
+        stagestrip_set_frame_fast(label, (StripRect){ 38.0, 6.0, w - 76.0, 22.0 });
+        r_msg2_main(label, "setUserInteractionEnabled:", 0, 0, 0, 0);
+        if (r_responds(label, "setTextAlignment:"))
+            r_msg2_main(label, "setTextAlignment:", 1 /* center */, 0, 0, 0);
+        uint64_t text = r_nsstr_retained("MilkyWay Lite");
+        if (r_is_objc_ptr(text)) {
+            r_msg2_main(label, "setText:", text, 0, 0, 0);
+            r_msg2_main(text, "release", 0, 0, 0, 0);
+        }
+        uint64_t UIColor = r_class("UIColor");
+        uint64_t white = r_is_objc_ptr(UIColor) && r_responds(UIColor, "whiteColor")
+            ? r_msg2_main(UIColor, "whiteColor", 0, 0, 0, 0)
+            : 0;
+        if (r_is_objc_ptr(white))
+            r_msg2_main(label, "setTextColor:", white, 0, 0, 0);
+        if (r_responds(label, "setAlpha:"))
+            stagestrip_send_double(label, "setAlpha:", 0.88);
+        r_msg2_main(bar, "addSubview:", label, 0, 0, 0);
+    }
+
+    r_msg2_main(win, "addSubview:", bar, 0, 0, 0);
+    r_msg2_main(win, "bringSubviewToFront:", bar, 0, 0, 0);
+    if (key) {
+        r_dlsym_call(R_TIMEOUT, "objc_setAssociatedObject",
+                     win, key, bar, 1 /* RETAIN_NONATOMIC */, 0, 0, 0, 0);
+    }
+}
+
+static void stagestrip_layout_mwlite_chrome_slot(StripFloatSlot *S, double w, double h)
+{
+    if (!S || !gStripRuntimeMilkyWayLite || !r_is_objc_ptr(S->window)) return;
+
+    uint64_t key = r_sel("cyanideMWLiteTitlebar");
+    uint64_t bar = key
+        ? r_dlsym_call(R_TIMEOUT, "objc_getAssociatedObject",
+                       S->window, key, 0, 0, 0, 0, 0, 0)
+        : 0;
+    if (r_is_objc_ptr(bar)) {
+        stagestrip_set_frame_fast(bar, (StripRect){ 0.0, 0.0, w, stagestrip_content_title_height() });
+        r_msg2_main(S->window, "bringSubviewToFront:", bar, 0, 0, 0);
+    }
+
+    if (r_is_objc_ptr(S->closeButton)) {
+        double d = 14.0;
+        stagestrip_set_frame_fast(S->closeButton, (StripRect){ 12.0, 10.0, d, d });
+        stagestrip_set_transform_thread(S->closeButton, CGAffineTransformIdentity);
+        uint64_t layer = r_msg2_main(S->closeButton, "layer", 0, 0, 0, 0);
+        if (r_is_objc_ptr(layer)) {
+            stagestrip_send_double(layer, "setCornerRadius:", d / 2.0);
+            r_msg2_main(layer, "setMasksToBounds:", 1, 0, 0, 0);
+        }
+        r_msg2_main(S->window, "bringSubviewToFront:", S->closeButton, 0, 0, 0);
+    }
+
+    if (r_is_objc_ptr(S->moveHandle)) {
+        double moveW = w - 72.0;
+        if (moveW < 84.0) moveW = 84.0;
+        stagestrip_set_frame_fast(S->moveHandle, (StripRect){ (w - moveW) / 2.0, 0.0, moveW, 34.0 });
+        stagestrip_set_background_white(S->moveHandle, 0.0, 0.0);
+        r_msg2_main(S->window, "bringSubviewToFront:", S->moveHandle, 0, 0, 0);
+    }
+
+    double side = 72.0;
+    StripRect frames[kStripCornerCount] = {
+        { 0.0,      0.0,      side, side },
+        { w - side, 0.0,      side, side },
+        { 0.0,      h - side, side, side },
+        { w - side, h - side, side, side },
+    };
+    for (int c = 0; c < kStripCornerCount; c++) {
+        if (r_is_objc_ptr(S->cornerHandles[c]))
+            stagestrip_set_frame_fast(S->cornerHandles[c], frames[c]);
+        if (r_is_objc_ptr(S->cornerArcs[c]))
+            stagestrip_send_double(S->cornerArcs[c], "setOpacity:", 0.0);
+    }
+    S->cornerArcsVisible = false;
+}
+
 // Legacy single-slot wrapper for backward compat with any callsite that
 // hasn't moved to the slot API yet.
 static void stagestrip_install_pan_handles(uint64_t win,
@@ -4120,33 +4422,45 @@ static void stagestrip_install_slot_close_button(int slot,
     StripFloatSlot *S = &gStripFloatSlots[slot];
     if (r_is_objc_ptr(S->closeButton)) return; // already installed
 
-    double btnSize = 46.0;
-    double margin  = 3.0;
+    bool mwLiteChrome = gStripRuntimeMilkyWayLite;
+    double btnSize = mwLiteChrome ? 14.0 : 46.0;
+    double margin  = mwLiteChrome ? 12.0 : 3.0;
     double btnX    = margin;     // top-LEFT (was top-right)
-    double btnY    = margin;
+    double btnY    = mwLiteChrome ? 10.0 : margin;
     uint64_t btn = stagestrip_make_control_button("", btnX, btnY, btnSize, btnSize);
     if (!r_is_objc_ptr(btn)) return;
 
-    // No background — let the SF Symbol speak for itself.
-    stagestrip_set_background_white(btn, 0.0, 0.0);
+    if (mwLiteChrome) {
+        stagestrip_set_background_rgba(btn, 1.0, 0.25, 0.22, 0.95);
+        uint64_t layer = r_msg2_main(btn, "layer", 0, 0, 0, 0);
+        if (r_is_objc_ptr(layer)) {
+            stagestrip_send_double(layer, "setCornerRadius:", btnSize / 2.0);
+            r_msg2_main(layer, "setMasksToBounds:", 1, 0, 0, 0);
+        }
+    } else {
+        // No background — let the SF Symbol speak for itself.
+        stagestrip_set_background_white(btn, 0.0, 0.0);
+    }
     // Stick to top-LEFT when the window resizes (FlexibleRightMargin | FlexibleBottomMargin).
     r_msg2_main(btn, "setAutoresizingMask:", 2 | 4, 0, 0, 0);
 
-    // Glyph: try SF Symbol "xmark.circle.fill", fall back to unicode ✕.
-    uint64_t UIImage = r_class("UIImage");
-    uint64_t xName = r_nsstr_retained("xmark.circle.fill");
-    uint64_t xImg = (r_is_objc_ptr(UIImage) && r_is_objc_ptr(xName) &&
-                     r_responds(UIImage, "systemImageNamed:"))
-        ? r_msg2_main(UIImage, "systemImageNamed:", xName, 0, 0, 0)
-        : 0;
-    if (r_is_objc_ptr(xName)) r_msg2_main(xName, "release", 0, 0, 0, 0);
-    if (r_is_objc_ptr(xImg)) {
-        r_msg2_main(btn, "setImage:forState:", xImg, 0, 0, 0);
-    } else {
-        uint64_t fallback = r_nsstr_retained("✕"); // ✕
-        if (r_is_objc_ptr(fallback)) {
-            r_msg2_main(btn, "setTitle:forState:", fallback, 0, 0, 0);
-            r_msg2_main(fallback, "release", 0, 0, 0, 0);
+    if (!mwLiteChrome) {
+        // Glyph: try SF Symbol "xmark.circle.fill", fall back to unicode ✕.
+        uint64_t UIImage = r_class("UIImage");
+        uint64_t xName = r_nsstr_retained("xmark.circle.fill");
+        uint64_t xImg = (r_is_objc_ptr(UIImage) && r_is_objc_ptr(xName) &&
+                         r_responds(UIImage, "systemImageNamed:"))
+            ? r_msg2_main(UIImage, "systemImageNamed:", xName, 0, 0, 0)
+            : 0;
+        if (r_is_objc_ptr(xName)) r_msg2_main(xName, "release", 0, 0, 0, 0);
+        if (r_is_objc_ptr(xImg)) {
+            r_msg2_main(btn, "setImage:forState:", xImg, 0, 0, 0);
+        } else {
+            uint64_t fallback = r_nsstr_retained("✕"); // ✕
+            if (r_is_objc_ptr(fallback)) {
+                r_msg2_main(btn, "setTitle:forState:", fallback, 0, 0, 0);
+                r_msg2_main(fallback, "release", 0, 0, 0, 0);
+            }
         }
     }
 
@@ -4192,6 +4506,7 @@ static void stagestrip_teardown_slot(int slot)
     }
     S->window = 0;
     S->hostView = 0;
+    S->sceneHandle = 0;
     S->moveHandle = 0;
     S->resizeHandle = 0;
     S->movePan = 0;
@@ -4206,6 +4521,7 @@ static void stagestrip_teardown_slot(int slot)
         S->cornerArcs[c] = 0;
     }
     S->cornerArcsVisible = false;
+    gStripMWLiteSlotBids[slot][0] = '\0';
     stagestrip_hide_transition_shield_after(kStripTransitionShieldCloseHold);
 }
 
@@ -4235,7 +4551,7 @@ static void stagestrip_add_move_action(uint64_t button, uint64_t win, StripRect 
 // (Custom type so subview layout isn't overridden by system-button styling).
 // Single tap stores the bid in the pending hidden label and sets the panel
 // tag to kStripPickerCmdIconTap; Cyanide reads both on poll.
-static void stagestrip_install_picker_app_tile(uint64_t container,
+static uint64_t stagestrip_install_picker_app_tile(uint64_t container,
                                                uint64_t commandPanel,
                                                const char *bid,
                                                const char *displayNameOpt,
@@ -4246,7 +4562,7 @@ static void stagestrip_install_picker_app_tile(uint64_t container,
                                                double iconSize,
                                                uint64_t pendingBidLabel)
 {
-    if (!r_is_objc_ptr(container) || !bid || !*bid) return;
+    if (!r_is_objc_ptr(container) || !bid || !*bid) return 0;
     if (!r_is_objc_ptr(commandPanel)) commandPanel = container;
 
     char shortName[64] = {0};
@@ -4265,7 +4581,7 @@ static void stagestrip_install_picker_app_tile(uint64_t container,
     uint64_t tile = r_is_objc_ptr(gStripPickerBuildUIButton)
         ? r_msg2_main(gStripPickerBuildUIButton, "buttonWithType:", 0 /* Custom */, 0, 0, 0)
         : 0;
-    if (!r_is_objc_ptr(tile)) return;
+    if (!r_is_objc_ptr(tile)) return 0;
 
     stagestrip_set_frame_fast(tile, (StripRect){ tileX, tileY, tileW, tileH });
     stagestrip_set_background_white(tile, 1.0, 0.08);
@@ -4278,11 +4594,15 @@ static void stagestrip_install_picker_app_tile(uint64_t container,
         r_msg2_main(btnLayer, "setMasksToBounds:", 1, 0, 0, 0);
     }
 
-    // Icon — on the LEFT (StageDuo-style horizontal tile).
+    bool textOnly = (iconSize <= 1.0);
+
+    // Icon — on the LEFT (StageDuo-style horizontal tile). MilkyWay Lite's
+    // App Library uses text-only rows because icon fetches are the expensive
+    // per-app SpringBoard RemoteCall path.
     double iconX = 10.0;
     double iconY = (tileH - iconSize) / 2.0;
-    uint64_t iconImage = stagestrip_fetch_icon_image(bid);
-    if (r_is_objc_ptr(iconImage)) {
+    uint64_t iconImage = textOnly ? 0 : stagestrip_fetch_icon_image(bid);
+    if (!textOnly && r_is_objc_ptr(iconImage)) {
         if (!gStripPickerBuildUIImageView)
             gStripPickerBuildUIImageView = r_class("UIImageView");
         uint64_t ivAlloc = r_is_objc_ptr(gStripPickerBuildUIImageView)
@@ -4302,7 +4622,7 @@ static void stagestrip_install_picker_app_tile(uint64_t container,
             }
             r_msg2_main(tile, "addSubview:", iv, 0, 0, 0);
         }
-    } else {
+    } else if (!textOnly) {
         // Icon fetch failed → render a coloured letter placeholder so the
         // user still has a visual cue for which app this tile represents.
         uint64_t placeholder = stagestrip_make_letter_placeholder(bid, iconSize);
@@ -4314,7 +4634,7 @@ static void stagestrip_install_picker_app_tile(uint64_t container,
     }
 
     // Name label on the RIGHT, vertically centered.
-    double labelX = iconX + iconSize + 12.0;
+    double labelX = textOnly ? 12.0 : (iconX + iconSize + 12.0);
     double labelW = tileW - labelX - 8.0;
     if (labelW < 40.0) labelW = 40.0;
     uint64_t name = stagestrip_make_text_label(display,
@@ -4340,6 +4660,81 @@ static void stagestrip_install_picker_app_tile(uint64_t container,
     }
 
     r_msg2_main(container, "addSubview:", tile, 0, 0, 0);
+    return tile;
+}
+
+static void stagestrip_picker_filter_reset(void)
+{
+    memset(gStripPickerFilterTiles, 0, sizeof(gStripPickerFilterTiles));
+    memset(gStripPickerFilterBids, 0, sizeof(gStripPickerFilterBids));
+    memset(gStripPickerFilterNames, 0, sizeof(gStripPickerFilterNames));
+    gStripPickerFilterCount = 0;
+    gStripPickerLastSearch[0] = '\0';
+    gStripPickerLastRecentsCount = 0;
+}
+
+static void stagestrip_picker_filter_register_tile(uint64_t tile,
+                                                   const char *bid,
+                                                   const char *name)
+{
+    if (!r_is_objc_ptr(tile) || !bid || !*bid) return;
+    int i = gStripPickerFilterCount;
+    if (i < 0 || i >= kStripPickerFilterMax) return;
+    gStripPickerFilterTiles[i] = tile;
+    strncpy(gStripPickerFilterBids[i], bid, sizeof(gStripPickerFilterBids[i]) - 1);
+    strncpy(gStripPickerFilterNames[i], name && *name ? name : bid,
+            sizeof(gStripPickerFilterNames[i]) - 1);
+    gStripPickerFilterCount = i + 1;
+}
+
+static bool stagestrip_ascii_contains_ci(const char *haystack, const char *needle)
+{
+    if (!needle || !*needle) return true;
+    if (!haystack || !*haystack) return false;
+    size_t n = strlen(needle);
+    for (const char *p = haystack; *p; p++) {
+        size_t i = 0;
+        while (i < n && p[i] &&
+               tolower((unsigned char)p[i]) == tolower((unsigned char)needle[i])) {
+            i++;
+        }
+        if (i == n) return true;
+    }
+    return false;
+}
+
+static void stagestrip_raise_slot_window(int slot)
+{
+    if (slot < 0 || slot >= kStripMaxFloatSlots) return;
+    StripFloatSlot *S = &gStripFloatSlots[slot];
+    if (!r_is_objc_ptr(S->window)) return;
+    double nextLevel = gStripNextWindowLevel + 1.0;
+    if (nextLevel > kStripWindowLevel + 256.0) nextLevel = kStripWindowLevel + 1.0;
+    gStripNextWindowLevel = nextLevel;
+    stagestrip_send_double(S->window, "setWindowLevel:", nextLevel);
+}
+
+static void stagestrip_picker_apply_search_filter(void)
+{
+    if (!gStripRuntimeMilkyWayLite || !r_is_objc_ptr(gStripPickerSearchField)) return;
+    uint64_t textObj = r_msg2_main(gStripPickerSearchField, "text", 0, 0, 0, 0);
+    char query[96] = {0};
+    if (r_is_objc_ptr(textObj))
+        r_read_nsstring(textObj, query, sizeof(query));
+    if (strcmp(query, gStripPickerLastSearch) == 0) return;
+    strncpy(gStripPickerLastSearch, query, sizeof(gStripPickerLastSearch) - 1);
+
+    int visible = 0;
+    for (int i = 0; i < gStripPickerFilterCount; i++) {
+        uint64_t tile = gStripPickerFilterTiles[i];
+        if (!r_is_objc_ptr(tile)) continue;
+        bool show = stagestrip_ascii_contains_ci(gStripPickerFilterBids[i], query) ||
+                    stagestrip_ascii_contains_ci(gStripPickerFilterNames[i], query);
+        r_msg2_main(tile, "setHidden:", show ? 0 : 1, 0, 0, 0);
+        if (show) visible++;
+    }
+    printf("[STAGE] picker: search=\"%s\" visible=%d/%d\n",
+           query, visible, gStripPickerFilterCount);
 }
 
 // Build a single retained NSArray of "deny" appTag strings inside SpringBoard.
@@ -4561,7 +4956,7 @@ static bool stagestrip_lookup_app_localized_name(const char *bid,
 // within a single Cyanide session, so we cache it after the first build and
 // reuse it on every subsequent picker construction. Recents are still
 // re-fetched every time so the top section stays current.
-#define kStripPickerCacheMax 256
+#define kStripPickerCacheMax 768
 static char gStripPickerCacheLibBids[kStripPickerCacheMax][128];
 static char gStripPickerCacheLibNames[kStripPickerCacheMax][96];
 static int gStripPickerCacheLibCount = 0;
@@ -4571,6 +4966,147 @@ void stagestrip_invalidate_picker_cache(void)
 {
     gStripPickerCacheLibCount = 0;
     gStripPickerCacheLibBuiltAtMs = 0;
+}
+
+static int stagestrip_seed_picker_cache_from_local_bundle_scan(int maxOut)
+{
+    if (maxOut <= 0) return 0;
+    if (maxOut > kStripPickerCacheMax) maxOut = kStripPickerCacheMax;
+
+    uint64_t t0 = stagestrip_now_ms();
+    @autoreleasepool {
+        NSFileManager *fm = NSFileManager.defaultManager;
+        NSMutableDictionary<NSString *, NSString *> *namesByBundle = [NSMutableDictionary dictionary];
+        NSArray<NSString *> *roots = @[
+            @"/private/var/containers/Bundle/Application",
+            @"/var/containers/Bundle/Application",
+        ];
+
+        int dirsSeen = 0;
+        int appsSeen = 0;
+        for (NSString *root in roots) {
+            NSArray<NSString *> *dirs = [fm contentsOfDirectoryAtPath:root error:nil];
+            for (NSString *dir in dirs) {
+                if (namesByBundle.count >= (NSUInteger)maxOut) break;
+                NSString *bundleDir = [root stringByAppendingPathComponent:dir];
+                BOOL isDir = NO;
+                if (![fm fileExistsAtPath:bundleDir isDirectory:&isDir] || !isDir) continue;
+                dirsSeen++;
+
+                NSArray<NSString *> *children = [fm contentsOfDirectoryAtPath:bundleDir error:nil];
+                for (NSString *child in children) {
+                    if (namesByBundle.count >= (NSUInteger)maxOut) break;
+                    if (![child.pathExtension.lowercaseString isEqualToString:@"app"]) continue;
+                    NSString *appPath = [bundleDir stringByAppendingPathComponent:child];
+                    NSString *infoPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
+                    NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:infoPath];
+                    NSString *bid = [info[@"CFBundleIdentifier"] isKindOfClass:[NSString class]]
+                        ? info[@"CFBundleIdentifier"] : nil;
+                    if (bid.length == 0) continue;
+                    if (!stagestrip_bid_is_user_app(bid.UTF8String)) continue;
+
+                    NSString *name = nil;
+                    NSArray<NSString *> *nameKeys = @[
+                        @"CFBundleDisplayName",
+                        @"CFBundleName",
+                        @"CFBundleExecutable",
+                    ];
+                    for (NSString *key in nameKeys) {
+                        id value = info[key];
+                        if ([value isKindOfClass:[NSString class]] && [value length] > 0) {
+                            name = value;
+                            break;
+                        }
+                    }
+                    if (name.length == 0) name = bid;
+
+                    NSString *old = namesByBundle[bid];
+                    if (old.length == 0 || [old isEqualToString:bid]) {
+                        namesByBundle[bid] = name;
+                    }
+                    appsSeen++;
+                }
+            }
+        }
+
+        NSArray<NSString *> *sortedBids = [namesByBundle keysSortedByValueUsingComparator:^NSComparisonResult(NSString *a, NSString *b) {
+            return [a localizedCaseInsensitiveCompare:b];
+        }];
+
+        int count = 0;
+        memset(gStripPickerCacheLibBids, 0, sizeof(gStripPickerCacheLibBids));
+        memset(gStripPickerCacheLibNames, 0, sizeof(gStripPickerCacheLibNames));
+        for (NSString *bid in sortedBids) {
+            if (count >= maxOut) break;
+            NSString *name = namesByBundle[bid] ?: bid;
+            strncpy(gStripPickerCacheLibBids[count], bid.UTF8String ?: "", 127);
+            gStripPickerCacheLibBids[count][127] = '\0';
+            strncpy(gStripPickerCacheLibNames[count], name.UTF8String ?: "", sizeof(gStripPickerCacheLibNames[count]) - 1);
+            gStripPickerCacheLibNames[count][sizeof(gStripPickerCacheLibNames[count]) - 1] = '\0';
+            count++;
+        }
+
+        gStripPickerCacheLibCount = count;
+        gStripPickerCacheLibBuiltAtMs = stagestrip_now_ms();
+        printf("[STAGE] collect: local Lara-style scan dirs=%d apps=%d lib=%d in %llums\n",
+               dirsSeen, appsSeen, count, gStripPickerCacheLibBuiltAtMs - t0);
+        return count;
+    }
+}
+
+static int stagestrip_load_mwlite_preselected_apps(char bidOut[][128],
+                                                   char nameOut[][96],
+                                                   int start,
+                                                   int maxOut)
+{
+    if (!bidOut || !nameOut || start >= maxOut) return 0;
+    if (!gStripRuntimePreselectedAppsPath[0]) {
+        printf("[STAGE] mwlite: no preselected-app path\n");
+        return 0;
+    }
+
+    NSString *path = [NSString stringWithUTF8String:gStripRuntimePreselectedAppsPath];
+    struct stat st = {0};
+    if (stat(gStripRuntimePreselectedAppsPath, &st) == 0) {
+        gStripPreselectedAppsMtime = st.st_mtime;
+        gStripPreselectedAppsSize = st.st_size;
+    }
+    NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:path];
+    NSArray *apps = [plist[@"apps"] isKindOfClass:NSArray.class] ? plist[@"apps"] : nil;
+    if (apps.count == 0) {
+        printf("[STAGE] mwlite: preselected-app plist empty path=%s\n",
+               gStripRuntimePreselectedAppsPath);
+        return 0;
+    }
+
+    int written = 0;
+    for (id item in apps) {
+        if (start + written >= maxOut) break;
+        if (![item isKindOfClass:NSDictionary.class]) continue;
+        NSString *bundleID = [(NSDictionary *)item objectForKey:@"bundleID"];
+        if (![bundleID isKindOfClass:NSString.class] || bundleID.length == 0) continue;
+        const char *bid = bundleID.UTF8String;
+        if (!bid || !*bid) continue;
+
+        bool dup = false;
+        for (int k = 0; k < start + written; k++) {
+            if (strcmp(bidOut[k], bid) == 0) { dup = true; break; }
+        }
+        if (dup) continue;
+
+        NSString *name = [(NSDictionary *)item objectForKey:@"name"];
+        if (![name isKindOfClass:NSString.class] || name.length == 0) name = bundleID;
+
+        strncpy(bidOut[start + written], bid, 127);
+        bidOut[start + written][127] = '\0';
+        strncpy(nameOut[start + written], name.UTF8String ?: bid,
+                sizeof(nameOut[start + written]) - 1);
+        nameOut[start + written][sizeof(nameOut[start + written]) - 1] = '\0';
+        written++;
+    }
+    printf("[STAGE] mwlite: loaded preselected apps=%d from %s\n",
+           written, gStripRuntimePreselectedAppsPath);
+    return written;
 }
 
 static int stagestrip_collect_picker_bids(char bidOut[][128],
@@ -4613,12 +5149,24 @@ static int stagestrip_collect_picker_bids(char bidOut[][128],
            stagestrip_now_ms() - recentsNameT0);
 
     int recentsCount = written;
+    gStripPickerLastRecentsCount = recentsCount;
+
+    if (gStripRuntimeMilkyWayLite) {
+        int added = stagestrip_load_mwlite_preselected_apps(bidOut, nameOut, written, maxOut);
+        written += added;
+        printf("[STAGE] collect: mwlite recents=%d preselected=%d total=%d; no full app scan\n",
+               recentsCount, added, written);
+        return written;
+    }
 
     // Section 2: every home-screen-visible installed app. If the App Library
     // cache is populated, hydrate from it (filtered against the recents we
     // already wrote so we don't double-add). Otherwise walk LSApplicationWorkspace
     // and stash the result.
     int addedFromInstalled = 0;
+    if (gStripRuntimeMilkyWayLite && gStripPickerCacheLibCount == 0) {
+        stagestrip_seed_picker_cache_from_local_bundle_scan(maxOut);
+    }
     if (gStripPickerCacheLibCount > 0) {
         uint64_t hydT0 = stagestrip_now_ms();
         for (int i = 0; i < gStripPickerCacheLibCount && written < maxOut; i++) {
@@ -4730,8 +5278,8 @@ static int stagestrip_collect_picker_bids(char bidOut[][128],
 // slower during the build. Acceptable for first install / cache-cold case.
 typedef struct {
     uint64_t scrollView;
-    char     bids[256][128];
-    char     names[256][96];
+    char     bids[kStripPickerCacheMax][128];
+    char     names[kStripPickerCacheMax][96];
     int      count;
     int      index;            // next tile to install
     double   sideMargin;
@@ -4760,6 +5308,16 @@ void stagestrip_set_deferred_library_build_enabled(bool enabled)
            enabled ? "enabled" : "disabled");
 }
 
+void stagestrip_set_mwlite_preselected_apps_path(const char *path)
+{
+    memset(gStripRuntimePreselectedAppsPath, 0, sizeof(gStripRuntimePreselectedAppsPath));
+    if (path && *path) {
+        strncpy(gStripRuntimePreselectedAppsPath, path, sizeof(gStripRuntimePreselectedAppsPath) - 1);
+    }
+    printf("[STAGE] mwlite: preselected apps path=%s\n",
+           gStripRuntimePreselectedAppsPath[0] ? gStripRuntimePreselectedAppsPath : "<none>");
+}
+
 static void stagestrip_schedule_library_tile_build(uint64_t scrollView,
                                                     char (*libBids)[128],
                                                     char (*libNames)[96],
@@ -4780,7 +5338,7 @@ static void stagestrip_schedule_library_tile_build(uint64_t scrollView,
 
     StripLibraryBuildCtx *ctx = &gStripLibraryBuild;
     ctx->scrollView = scrollView;
-    int n = libCount < 256 ? libCount : 256;
+    int n = libCount < kStripPickerCacheMax ? libCount : kStripPickerCacheMax;
     for (int i = 0; i < n; i++) {
         strncpy(ctx->bids[i],  libBids[i],  127); ctx->bids[i][127]  = '\0';
         strncpy(ctx->names[i], libNames[i], 95);  ctx->names[i][95]  = '\0';
@@ -4795,12 +5353,22 @@ static void stagestrip_schedule_library_tile_build(uint64_t scrollView,
     ctx->pickerT0        = pickerT0;
     ctx->pendingBidLabel = gStripPickerPendingBidLabel;
     ctx->startedAtMs     = 0;
-    ctx->notBeforeMs     = stagestrip_now_ms() + kStripPickerLibraryBuildDelayMS;
+    ctx->notBeforeMs     = stagestrip_now_ms() +
+        ((gStripRuntimeMilkyWayLite) ? (24ULL * 60ULL * 60ULL * 1000ULL)
+                                      : kStripPickerLibraryBuildDelayMS);
     ctx->lastTileAtMs    = 0;
     __sync_synchronize();
     gStripLibraryBuildPending = 1;
     printf("[STAGE] picker: library build pending count=%d (control loop will install after %llums)\n",
-           n, kStripPickerLibraryBuildDelayMS);
+           n, ctx->notBeforeMs - stagestrip_now_ms());
+}
+
+static void stagestrip_kick_library_build_now(void)
+{
+    if (!gStripLibraryBuildPending) return;
+    gStripLibraryBuild.notBeforeMs = stagestrip_now_ms();
+    gStripLibraryBuild.lastTileAtMs = 0;
+    printf("[STAGE] picker: library build kicked by picker show\n");
 }
 
 // Called by the control loop each tick. Installs one tile per call, so the
@@ -4811,7 +5379,10 @@ static bool stagestrip_control_loop_progress_library_build(void)
     StripLibraryBuildCtx *c = &gStripLibraryBuild;
     uint64_t now = stagestrip_now_ms();
     if (now < c->notBeforeMs) return false;
-    if (c->lastTileAtMs && now - c->lastTileAtMs < kStripPickerLibraryTileIntervalMS) return false;
+    uint64_t tileInterval = (gStripRuntimeMilkyWayLite)
+        ? 80ULL
+        : kStripPickerLibraryTileIntervalMS;
+    if (c->lastTileAtMs && now - c->lastTileAtMs < tileInterval) return false;
     if (c->index >= c->count || !r_is_objc_ptr(c->scrollView)) {
         if (gStripLibraryBuildPending) {
             printf("[STAGE] picker: deferred library build done in %llums (installed=%d)\n",
@@ -4860,6 +5431,8 @@ static uint64_t stagestrip_install_picker_overlay(uint64_t app,
     uint64_t pickerT0 = stagestrip_now_ms();
     printf("[STAGE] picker: install begin sw=%.0f sh=%.0f t0=%llums\n", sw, sh, pickerT0);
     stagestrip_picker_build_cache_reset();
+    stagestrip_picker_filter_reset();
+    gStripPickerSearchField = 0;
 
     // Pull a previously-cached overlay window forward — if a respring left one
     // around, we don't want to stack a second one on top.
@@ -4935,8 +5508,19 @@ static uint64_t stagestrip_install_picker_overlay(uint64_t app,
     r_msg2_main(overlayWin, "addSubview:", panel, 0, 0, 0);
     gStripPickerPanel = panel;
 
+    bool singlePicker = (gStripRuntimeMilkyWayLite);
+    char searchPlaceholder[64] = {0};
+    char recentsTitle[64] = {0};
+    char selectedTitle[64] = {0};
+    char appLibraryTitle[64] = {0};
+    stagestrip_l10n_cstr("Search apps", searchPlaceholder, sizeof(searchPlaceholder));
+    stagestrip_l10n_cstr("Recently Opened", recentsTitle, sizeof(recentsTitle));
+    stagestrip_l10n_cstr("Selected Apps", selectedTitle, sizeof(selectedTitle));
+    stagestrip_l10n_cstr("App Library", appLibraryTitle, sizeof(appLibraryTitle));
+
     // --- Title row. Title on the left, gear + close on the right.
-    uint64_t title = stagestrip_make_text_label("Dynamic Stage Lite", 14.0, 12.0, panelW - 96.0, 28.0);
+    uint64_t title = stagestrip_make_text_label(singlePicker ? "MilkyWay Lite" : "Dynamic Stage Lite",
+                                                14.0, 12.0, panelW - 96.0, 28.0);
     if (r_is_objc_ptr(title)) {
         stagestrip_set_background_white(title, 0.0, 0.0);
         r_msg2_main(panel, "addSubview:", title, 0, 0, 0);
@@ -4980,6 +5564,38 @@ static uint64_t stagestrip_install_picker_overlay(uint64_t app,
         r_msg2_main(panel, "addSubview:", close, 0, 0, 0);
     }
 
+    double controlsBottomY = 52.0;
+    if (singlePicker) {
+        uint64_t UITextField = r_class("UITextField");
+        uint64_t tfAlloc = r_is_objc_ptr(UITextField)
+            ? r_msg2_main(UITextField, "alloc", 0, 0, 0, 0) : 0;
+        uint64_t tf = r_is_objc_ptr(tfAlloc)
+            ? r_msg2_main(tfAlloc, "init", 0, 0, 0, 0) : 0;
+        if (r_is_objc_ptr(tf)) {
+            stagestrip_set_frame_fast(tf, (StripRect){ 14.0, 52.0, panelW - 28.0, 36.0 });
+            stagestrip_set_background_white(tf, 1.0, 0.10);
+            r_msg2_main(tf, "setUserInteractionEnabled:", 1, 0, 0, 0);
+            if (r_responds(tf, "setBorderStyle:"))
+                r_msg2_main(tf, "setBorderStyle:", 1, 0, 0, 0);
+            if (r_responds(tf, "setClearButtonMode:"))
+                r_msg2_main(tf, "setClearButtonMode:", 1, 0, 0, 0);
+            uint64_t placeholder = r_nsstr_retained(searchPlaceholder);
+            if (r_is_objc_ptr(placeholder)) {
+                r_msg2_main(tf, "setPlaceholder:", placeholder, 0, 0, 0);
+                r_msg2_main(placeholder, "release", 0, 0, 0, 0);
+            }
+            uint64_t layer = r_msg2_main(tf, "layer", 0, 0, 0, 0);
+            if (r_is_objc_ptr(layer)) {
+                stagestrip_send_double(layer, "setCornerRadius:", 10.0);
+                stagestrip_picker_apply_continuous_curve(layer);
+                r_msg2_main(layer, "setMasksToBounds:", 1, 0, 0, 0);
+            }
+            r_msg2_main(panel, "addSubview:", tf, 0, 0, 0);
+            gStripPickerSearchField = tf;
+            controlsBottomY = 98.0;
+        }
+    }
+    if (!singlePicker) {
     // --- Slot cards (Top + Bottom). Each card is tappable: tapping it sets
     //     the "next slot" pointer in Cyanide so the user can control which
     //     half they're filling without per-row T/B buttons.
@@ -5097,8 +5713,24 @@ static uint64_t stagestrip_install_picker_overlay(uint64_t app,
             gStripPickerBottomChipCard = card;
         }
     }
+    // --- Swap button.
+    double swapY = slotY + slotH * 2.0 + 14.0;
+    uint64_t swap = stagestrip_make_control_button("Swap top / bottom",
+                                                   14.0, swapY,
+                                                   panelW - 28.0, 30.0);
+    if (r_is_objc_ptr(swap)) {
+        stagestrip_add_invocation_action(swap,
+            stagestrip_make_int_invocation(panel, "setTag:", kStripPickerCmdSwap));
+        r_msg2_main(panel, "addSubview:", swap, 0, 0, 0);
+    }
     // Default the "next slot" pointer to top on a fresh install.
     gStripPickerNextSlot = 0;
+    controlsBottomY = swapY + 42.0;
+    } else {
+        // MilkyWay Lite is a one-app launcher. Keep hidden storage labels for
+        // the shared command path, but do not show DSL's Top/Bottom selectors.
+        gStripPickerNextSlot = 0;
+    }
 
     // Hidden bid labels — bid storage for Apply.
     uint64_t topHidden = stagestrip_make_text_label(gStripPickerTopBid[0] ? gStripPickerTopBid : "",
@@ -5123,22 +5755,11 @@ static uint64_t stagestrip_install_picker_overlay(uint64_t app,
         gStripPickerPendingBidLabel = pendingHidden;
     }
 
-    // --- Swap button.
-    double swapY = slotY + slotH * 2.0 + 14.0;
-    uint64_t swap = stagestrip_make_control_button("Swap top / bottom",
-                                                   14.0, swapY,
-                                                   panelW - 28.0, 30.0);
-    if (r_is_objc_ptr(swap)) {
-        stagestrip_add_invocation_action(swap,
-            stagestrip_make_int_invocation(panel, "setTag:", kStripPickerCmdSwap));
-        r_msg2_main(panel, "addSubview:", swap, 0, 0, 0);
-    }
-
-    // Collect candidate apps. Recents are pinned at the top; every other
-    // installed app (via LSApplicationWorkspace.allApplications, sorted
-    // alphabetically) goes into the scrollable "App Library" section.
-    char bids[256][128];
-    char names[256][96];
+    // Collect candidate apps. Recents are pinned at the top. MilkyWay Lite
+    // seeds App Library from the local app bundle tree after sandbox escape;
+    // Dynamic Stage Lite keeps the original SpringBoard LS fallback path.
+    char bids[kStripPickerCacheMax][128];
+    char names[kStripPickerCacheMax][96];
     uint64_t collectT0 = stagestrip_now_ms();
     printf("[STAGE] picker: phase=collect-bids start (+%llums)\n", collectT0 - pickerT0);
     int totalBids = stagestrip_collect_picker_bids(bids, names, kStripPickerInitialMaxBids);
@@ -5152,8 +5773,8 @@ static uint64_t stagestrip_install_picker_overlay(uint64_t app,
     double rowGap = 8.0;
 
     // --- "Recently Opened" — 2-column grid of horizontal tiles.
-    double recentsStartY = swapY + 42.0;
-    uint64_t recentsHeader = stagestrip_make_text_label("Recently Opened",
+    double recentsStartY = controlsBottomY;
+    uint64_t recentsHeader = stagestrip_make_text_label(recentsTitle,
                                                         16.0, recentsStartY,
                                                         panelW - 32.0, 20.0);
     if (r_is_objc_ptr(recentsHeader)) {
@@ -5164,9 +5785,10 @@ static uint64_t stagestrip_install_picker_overlay(uint64_t app,
     double recentsY = recentsStartY + 24.0;
     int recentsCols = 2;
     int recentsRowsMax = 2;
-    int recentsCount = (totalBids < recentsCols * recentsRowsMax)
-        ? totalBids
-        : recentsCols * recentsRowsMax;
+    int recentsCount = gStripPickerLastRecentsCount;
+    if (recentsCount > totalBids) recentsCount = totalBids;
+    if (recentsCount > recentsCols * recentsRowsMax)
+        recentsCount = recentsCols * recentsRowsMax;
 
     double recentTileW = (panelW - sideMargin * 2.0 - colGap * (recentsCols - 1)) / (double)recentsCols;
     double recentTileH = 56.0;
@@ -5179,14 +5801,15 @@ static uint64_t stagestrip_install_picker_overlay(uint64_t app,
         int col = i % recentsCols;
         double x = sideMargin + col * (recentTileW + colGap);
         double y = recentsY + row * (recentTileH + rowGap);
-        stagestrip_install_picker_app_tile(panel,
-                                           panel,
-                                           bids[i],
-                                           names[i],
-                                           x, y,
-                                           recentTileW, recentTileH,
-                                           recentIconSize,
-                                           gStripPickerPendingBidLabel);
+        uint64_t tile = stagestrip_install_picker_app_tile(panel,
+                                                           panel,
+                                                           bids[i],
+                                                           names[i],
+                                                           x, y,
+                                                           recentTileW, recentTileH,
+                                                           recentIconSize,
+                                                           gStripPickerPendingBidLabel);
+        stagestrip_picker_filter_register_tile(tile, bids[i], names[i]);
     }
     printf("[STAGE] picker: phase=recents-tiles done in %llums (+%llums)\n",
            stagestrip_now_ms() - recentTilesT0,
@@ -5199,7 +5822,7 @@ static uint64_t stagestrip_install_picker_overlay(uint64_t app,
 
     // --- "App Library" — scrollable 1-column list of horizontal tiles.
     double libraryStartY = recentsBottom + 8.0;
-    uint64_t libHeader = stagestrip_make_text_label("App Library",
+    uint64_t libHeader = stagestrip_make_text_label(singlePicker ? selectedTitle : appLibraryTitle,
                                                     16.0, libraryStartY,
                                                     panelW - 32.0, 20.0);
     if (r_is_objc_ptr(libHeader)) {
@@ -5209,7 +5832,7 @@ static uint64_t stagestrip_install_picker_overlay(uint64_t app,
 
     double libraryY = libraryStartY + 24.0;
     double libTileW = panelW - sideMargin * 2.0;
-    double libTileH = 52.0;
+    double libTileH = singlePicker ? 52.0 : 52.0;
     double libIconSize = 36.0;
     double libAvailable = panelH - libraryY - 16.0;
     if (libAvailable < 0) libAvailable = 0;
@@ -5245,23 +5868,42 @@ static uint64_t stagestrip_install_picker_overlay(uint64_t app,
         }
         r_msg2_main(panel, "addSubview:", scrollView, 0, 0, 0);
 
-        // Schedule the library-tile build to run on a background queue AFTER
-        // this function returns. Each tile install is ~50 cross-process calls
-        // × ~30ms each, so 79 tiles synchronously blocks for ~140s — moving
-        // them off the install path means the user gets a working picker (with
-        // recents) immediately and the library section fills in over the next
-        // couple of minutes.
-        printf("[STAGE] picker: deferring %d library tiles to background queue\n",
-               libCount);
-        stagestrip_schedule_library_tile_build(scrollView,
-                                                bids + recentsCount,
-                                                names + recentsCount,
-                                                libCount,
-                                                sideMargin,
-                                                libTileW, libTileH,
-                                                libIconSize,
-                                                rowGap,
-                                                pickerT0);
+        if (singlePicker) {
+            printf("[STAGE] picker: building %d preselected library tiles synchronously\n",
+                   libCount);
+            for (int i = 0; i < libCount; i++) {
+                const char *libBid = bids[recentsCount + i];
+                const char *libName = names[recentsCount + i];
+                uint64_t tile = stagestrip_install_picker_app_tile(scrollView,
+                                                                   panel,
+                                                                   libBid,
+                                                                   libName,
+                                                                   sideMargin,
+                                                                   (double)i * (libTileH + rowGap),
+                                                                   libTileW, libTileH,
+                                                                   libIconSize,
+                                                                   gStripPickerPendingBidLabel);
+                stagestrip_picker_filter_register_tile(tile, libBid, libName);
+            }
+        } else {
+            // Schedule the library-tile build to run on a background queue AFTER
+            // this function returns. Each tile install is ~50 cross-process calls
+            // × ~30ms each, so 79 tiles synchronously blocks for ~140s — moving
+            // them off the install path means the user gets a working picker (with
+            // recents) immediately and the library section fills in over the next
+            // couple of minutes.
+            printf("[STAGE] picker: deferring %d library tiles to background queue\n",
+                   libCount);
+            stagestrip_schedule_library_tile_build(scrollView,
+                                                    bids + recentsCount,
+                                                    names + recentsCount,
+                                                    libCount,
+                                                    sideMargin,
+                                                    libTileW, libTileH,
+                                                    libIconSize,
+                                                    rowGap,
+                                                    pickerT0);
+        }
     } else {
         // Fallback (no scroll): inline up to ~10 tiles.
         int libMaxRows = (int)(libAvailable / (libTileH + rowGap));
@@ -5271,15 +5913,16 @@ static uint64_t stagestrip_install_picker_overlay(uint64_t app,
         for (int i = 0; i < libCount; i++) {
             const char *libBid = bids[recentsCount + i];
             const char *libName = names[recentsCount + i];
-            stagestrip_install_picker_app_tile(panel,
-                                               panel,
-                                               libBid,
-                                               libName,
-                                               sideMargin,
-                                               libraryY + i * (libTileH + rowGap),
-                                               libTileW, libTileH,
-                                               libIconSize,
-                                               gStripPickerPendingBidLabel);
+            uint64_t tile = stagestrip_install_picker_app_tile(panel,
+                                                               panel,
+                                                               libBid,
+                                                               libName,
+                                                               sideMargin,
+                                                               libraryY + i * (libTileH + rowGap),
+                                                               libTileW, libTileH,
+                                                               libIconSize,
+                                                               gStripPickerPendingBidLabel);
+            stagestrip_picker_filter_register_tile(tile, libBid, libName);
         }
     }
     int picker_count = recentsCount + libCount;
@@ -5422,6 +6065,45 @@ static void stagestrip_install_hot_corner_window(uint64_t app,
            hotWin, pickerOverlayWin);
 }
 
+static bool stagestrip_mwlite_preselected_apps_changed(void)
+{
+    if (!gStripRuntimeMilkyWayLite || !gStripRuntimePreselectedAppsPath[0]) return false;
+    struct stat st = {0};
+    if (stat(gStripRuntimePreselectedAppsPath, &st) != 0) return false;
+    return st.st_mtime != gStripPreselectedAppsMtime ||
+           st.st_size  != gStripPreselectedAppsSize;
+}
+
+static bool stagestrip_reinstall_picker_for_current_scene(void)
+{
+    uint64_t UIApplication = r_class("UIApplication");
+    uint64_t app = r_is_objc_ptr(UIApplication)
+        ? r_msg2_main(UIApplication, "sharedApplication", 0, 0, 0, 0) : 0;
+    if (!r_is_objc_ptr(app)) return false;
+
+    uint64_t keyWin = r_msg2_main(app, "keyWindow", 0, 0, 0, 0);
+    if (!r_is_objc_ptr(keyWin)) {
+        uint64_t windows = r_msg2_main(app, "windows", 0, 0, 0, 0);
+        if (r_is_objc_ptr(windows)) {
+            uint64_t cnt = r_msg2_main(windows, "count", 0, 0, 0, 0);
+            if (cnt > 0 && cnt < 64)
+                keyWin = r_msg2_main(windows, "objectAtIndex:", 0, 0, 0, 0);
+        }
+    }
+    uint64_t scene = r_is_objc_ptr(keyWin)
+        ? r_msg2_main(keyWin, "windowScene", 0, 0, 0, 0) : 0;
+    if (!r_is_objc_ptr(scene)) return false;
+
+    CGRect b = UIScreen.mainScreen.bounds;
+    double sw = isfinite(b.size.width)  && b.size.width  >= 200.0 ? b.size.width  : 390.0;
+    double sh = isfinite(b.size.height) && b.size.height >= 200.0 ? b.size.height : 844.0;
+    uint64_t overlay = stagestrip_install_picker_overlay(app, scene, sw, sh);
+    if (!r_is_objc_ptr(overlay)) return false;
+    stagestrip_install_hot_corner_window(app, scene, overlay, sw, sh);
+    printf("[STAGE] picker: reinstalled for updated MilkyWay Lite preselection\n");
+    return true;
+}
+
 // Build (or reuse) a floating UIWindow at the bottom-right corner and parent
 // `hostView` inside it. Caches the window on UIApplication via
 // objc_setAssociatedObject so successive probes update the existing window
@@ -5513,10 +6195,13 @@ static bool stagestrip_present_floating_host_for_slot(int slot,
         }
         if (!r_is_objc_ptr(win)) { printf("[STAGE] float: UIWindow init failed\n"); return false; }
 
-        stagestrip_set_background_white(win, 0.0, 0.04);
+        stagestrip_set_background_white(win, 0.0, (gStripRuntimeMilkyWayLite) ? 0.0 : 0.04);
         if (r_responds(win, "setOpaque:"))
             r_msg2_main(win, "setOpaque:", 0, 0, 0, 0);
-        stagestrip_send_double(win, "setWindowLevel:", kStripWindowLevel);
+        double initialLevel = gStripNextWindowLevel + 1.0;
+        if (initialLevel > kStripWindowLevel + 256.0) initialLevel = kStripWindowLevel + 1.0;
+        gStripNextWindowLevel = initialLevel;
+        stagestrip_send_double(win, "setWindowLevel:", initialLevel);
         r_dlsym_call(R_TIMEOUT, "objc_setAssociatedObject",
                      app, assocKey, win, 1 /* RETAIN_NONATOMIC */, 0, 0, 0, 0);
         uint64_t usesWindowServerHitTesting = r_responds(win, "_usesWindowServerHitTesting")
@@ -5544,7 +6229,7 @@ static bool stagestrip_present_floating_host_for_slot(int slot,
         }
         printf("[STAGE] float[%d]: reusing window=0x%llx\n", slot, win);
     }
-    stagestrip_set_background_white(win, 0.0, 0.04);
+    stagestrip_set_background_white(win, 0.0, (gStripRuntimeMilkyWayLite) ? 0.0 : 0.04);
     if (r_responds(win, "setOpaque:"))
         r_msg2_main(win, "setOpaque:", 0, 0, 0, 0);
 
@@ -5565,9 +6250,19 @@ static bool stagestrip_present_floating_host_for_slot(int slot,
 
     // Host view sits inset from the window edges so the transparent border
     // zone acts as an easy-to-grab resize/move target.
-    double bi = kStripBorderInset;
-    stagestrip_send_rect(hostView, "setFrame:", bi, bi,
-                         frame.width - 2.0 * bi, frame.height - 2.0 * bi);
+    double bi = stagestrip_content_border_inset();
+    double titleH = stagestrip_content_title_height();
+    double contentW = frame.width - 2.0 * bi;
+    double contentH = frame.height - 2.0 * bi - titleH;
+    if (contentW < 80.0) contentW = 80.0;
+    if (contentH < 80.0) contentH = 80.0;
+    if (gStripRuntimeMilkyWayLite) {
+        stagestrip_apply_mwlite_scaled_host_geometry(hostView, bi, bi + titleH, contentW, contentH);
+    } else {
+        stagestrip_set_transform_thread(hostView, CGAffineTransformIdentity);
+        stagestrip_send_rect(hostView, "setFrame:", bi, bi + titleH, contentW, contentH);
+        stagestrip_refresh_host_view_geometry(hostView, contentW, contentH);
+    }
     r_msg2_main(hostView, "setAutoresizingMask:", 2 | 16, 0, 0, 0);
     r_msg2_main(hostView, "setClipsToBounds:", 1, 0, 0, 0);
     r_msg2_main(hostView, "setUserInteractionEnabled:", 1, 0, 0, 0);
@@ -5580,6 +6275,7 @@ static bool stagestrip_present_floating_host_for_slot(int slot,
     S->window = win;
     S->hostView = hostView;
     S->referenceView = r_is_objc_ptr(keyWin) ? keyWin : win;
+    stagestrip_install_mwlite_titlebar(win, frame.width);
 
     // Picker overlay + hot corner are shared across both slots; install once.
     if (!r_is_objc_ptr(gStripPickerOverlayWin)) {
@@ -5595,6 +6291,7 @@ static bool stagestrip_present_floating_host_for_slot(int slot,
     // Per-slot X close button (top-left of the window). The tap chain raises a
     // temporary shield, then hides the window; the control loop tears it down.
     stagestrip_install_slot_close_button(slot, win, hostView, frame.width);
+    stagestrip_layout_mwlite_chrome_slot(S, frame.width, frame.height);
     if (r_is_objc_ptr(oldHostView) && oldHostView != hostView) {
         printf("[STAGE] float: retire oldHost=0x%llx\n", oldHostView);
         r_msg2_main(oldHostView, "setHidden:", 1, 0, 0, 0);
@@ -5727,10 +6424,38 @@ static bool stagestrip_dismiss_floating_host(void)
     gStripPickerTopChipCard = 0;
     gStripPickerBottomChipCard = 0;
     gStripPickerPendingBidLabel = 0;
+    gStripPickerSearchField = 0;
     gStripPickerNextSlot = 0;
+    stagestrip_picker_filter_reset();
     memset(gStripRows, 0, sizeof(gStripRows));
     memset(gStripLives, 0, sizeof(gStripLives));
+    memset(gStripMWLiteSlotBids, 0, sizeof(gStripMWLiteSlotBids));
     return true;
+}
+
+static int stagestrip_mwlite_slot_for_bid(const char *bid)
+{
+    int limit = gStripRuntimeMaxSlots;
+    if (limit <= 0) limit = 2;
+    if (limit > kStripMaxFloatSlots) limit = kStripMaxFloatSlots;
+
+    if (bid && *bid) {
+        for (int s = 0; s < limit; s++) {
+            if (gStripMWLiteSlotBids[s][0] && strcmp(gStripMWLiteSlotBids[s], bid) == 0 &&
+                r_is_objc_ptr(gStripFloatSlots[s].window)) {
+                return -2; // already hosted
+            }
+        }
+    }
+
+    for (int s = 0; s < limit; s++) {
+        StripFloatSlot *S = &gStripFloatSlots[s];
+        bool empty = !r_is_objc_ptr(S->window) || !r_is_objc_ptr(S->hostView);
+        if (!empty && r_responds(S->window, "isHidden"))
+            empty = (r_msg2_main(S->window, "isHidden", 0, 0, 0, 0) & 0xff) != 0;
+        if (empty) return s;
+    }
+    return -3; // full: keep existing windows stable; reject new app
 }
 
 static bool stagestrip_host_stage_picks(StripScenePick *picks,
@@ -5743,7 +6468,8 @@ static bool stagestrip_host_stage_picks(StripScenePick *picks,
         stagestrip_dismiss_floating_host();
         return false;
     }
-    if (pickedCount > 2) pickedCount = 2;
+    if (!gStripRuntimeMilkyWayLite && pickedCount > 2) pickedCount = 2;
+    if (gStripRuntimeMilkyWayLite && pickedCount > 1) pickedCount = 1;
 
     for (int i = 0; i < pickedCount; i++) {
         printf("[STAGE] %s: hosting[%d] handle=0x%llx scene=0x%llx bid=%s\n",
@@ -5798,22 +6524,39 @@ static bool stagestrip_host_stage_picks(StripScenePick *picks,
     double tileW = stageSize.width;
     double tileH = stageSize.height;
     if (tileW > sw - 16.0) tileW = sw - 16.0;
-    if (tileH > (sh - 100.0) / 2.0) tileH = (sh - 100.0) / 2.0;
+    double maxTileH = (pickedCount <= 1) ? (sh - 120.0) : ((sh - 100.0) / 2.0);
+    if (tileH > maxTileH) tileH = maxTileH;
 
     int presented = 0;
+    bool skippedAlreadyHosted = false;
     for (int i = 0; i < pickedCount && i < kStripMaxFloatSlots; i++) {
+        int slot = gStripRuntimeMilkyWayLite ? stagestrip_mwlite_slot_for_bid(picks[i].bid) : i;
+        if (slot == -2) {
+            printf("[STAGE] %s: bid=%s already hosted, skipping\n",
+                   source ? source : "stack", picks[i].bid);
+            skippedAlreadyHosted = true;
+            continue;
+        }
+        if (slot == -3) {
+            printf("[STAGE] %s: max MilkyWay Lite windows reached, refusing bid=%s\n",
+                   source ? source : "stack", picks[i].bid);
+            continue;
+        }
+        if (slot < 0 || slot >= kStripMaxFloatSlots) slot = 0;
         uint64_t view = 0;
+        double hostBuildW = gStripRuntimeMilkyWayLite ? sw : tileW;
+        double hostBuildH = gStripRuntimeMilkyWayLite ? sh : tileH;
         if (kStripPreferRawSceneLayerHost) {
-            view = stagestrip_make_scene_layer_host_view(picks[i].scene, picks[i].bid, tileW, tileH);
+            view = stagestrip_make_scene_layer_host_view(picks[i].scene, picks[i].bid, hostBuildW, hostBuildH);
         }
         if (!r_is_objc_ptr(view) && i < kStripMaxMedusaTiles)
-            view = stagestrip_make_medusa_scene_view(picks[i].handle, i, tileW, tileH);
+            view = stagestrip_make_medusa_scene_view(picks[i].handle, i, hostBuildW, hostBuildH);
         if (!r_is_objc_ptr(view))
-            view = stagestrip_make_direct_scene_view(picks[i].handle, tileW, tileH);
+            view = stagestrip_make_direct_scene_view(picks[i].handle, hostBuildW, hostBuildH);
         if (!r_is_objc_ptr(view))
-            view = stagestrip_handle_make_view(picks[i].handle, tileW, tileH);
+            view = stagestrip_handle_make_view(picks[i].handle, hostBuildW, hostBuildH);
         if (!r_is_objc_ptr(view) && !kStripPreferRawSceneLayerHost)
-            view = stagestrip_make_scene_layer_host_view(picks[i].scene, picks[i].bid, tileW, tileH);
+            view = stagestrip_make_scene_layer_host_view(picks[i].scene, picks[i].bid, hostBuildW, hostBuildH);
         if (!r_is_objc_ptr(view)) {
             printf("[STAGE] %s: no view for slot %d bid=%s\n",
                    source ? source : "stack", i, picks[i].bid);
@@ -5824,23 +6567,26 @@ static bool stagestrip_host_stage_picks(StripScenePick *picks,
         // bottom half. Reused windows keep their last user-set frame.
         double defaultX = (sw - tileW) / 2.0;
         double topInset = sh * 0.08;
-        double defaultY = (i == 0)
+        double defaultY = (slot == 0)
             ? topInset
-            : topInset + tileH + 12.0;
+            : topInset + (double)(slot % 4) * 28.0 + (double)(slot / 4) * 42.0;
 
-        if (stagestrip_present_floating_host_for_slot(i, view, tileW, tileH,
+        if (stagestrip_present_floating_host_for_slot(slot, view, tileW, tileH,
                                                       defaultX, defaultY)) {
             presented++;
-            if (i < 2) {
-                gStripLives[i] = view;
+            if (slot >= 0 && slot < kStripMaxFloatSlots) {
+                gStripFloatSlots[slot].sceneHandle = picks[i].handle;
+                gStripLives[slot] = view;
+                strncpy(gStripMWLiteSlotBids[slot], picks[i].bid, sizeof(gStripMWLiteSlotBids[slot]) - 1);
+                gStripMWLiteSlotBids[slot][sizeof(gStripMWLiteSlotBids[slot]) - 1] = '\0';
             }
         }
     }
-    if (presented == 0) {
+    if (presented == 0 && !skippedAlreadyHosted) {
         stagestrip_dismiss_floating_host();
         return false;
     }
-    return true;
+    return presented > 0 || skippedAlreadyHosted;
 }
 
 static bool stagestrip_rebuild_selected_bids(const char *topBid, const char *bottomBid)
@@ -5865,6 +6611,33 @@ static bool stagestrip_rebuild_selected_bids(const char *topBid, const char *bot
     stagestrip_clear_live_rendering_state();
     StripSize stageSize = stagestrip_stage_size_for_request(4);
     return stagestrip_host_stage_picks(picks, 2, stageSize, "picker");
+}
+
+static bool stagestrip_rebuild_single_bid(const char *bid)
+{
+    if (!bid || !*bid) return false;
+    if (!__sync_bool_compare_and_swap(&gStripPickerApplyBusy, 0, 1)) {
+        printf("[STAGE] picker: single apply already busy\n");
+        return false;
+    }
+
+    strncpy(gStripPickerTopBid, bid, sizeof(gStripPickerTopBid) - 1);
+    gStripPickerTopBid[sizeof(gStripPickerTopBid) - 1] = '\0';
+    gStripPickerBottomBid[0] = '\0';
+
+    printf("[STAGE] picker: single apply bid=%s\n", bid);
+    stagestrip_show_transition_shield(kStripTransitionShieldAlpha);
+    StripScenePick pick;
+    memset(&pick, 0, sizeof(pick));
+    bool ok = stagestrip_get_pick_for_bid(bid, &pick);
+    if (ok) {
+        StripSize stageSize = stagestrip_stage_size_for_request(1);
+        ok = stagestrip_host_stage_picks(&pick, 1, stageSize, "mwlite-picker");
+    }
+    printf("[STAGE] picker: single apply done ok=%d bid=%s\n", ok ? 1 : 0, bid);
+    stagestrip_hide_transition_shield_after(kStripTransitionShieldApplyHold);
+    __sync_lock_release(&gStripPickerApplyBusy);
+    return ok;
 }
 
 // Multitasking-only probe (sidebar UI disabled). Tries first to pull a
@@ -6293,6 +7066,15 @@ static int stagestrip_poll_picker_command(void)
         }
 
         case kStripPickerCmdShow:
+            if (stagestrip_mwlite_preselected_apps_changed()) {
+                printf("[STAGE] picker: preselected app plist changed; rebuilding picker before show\n");
+                if (stagestrip_reinstall_picker_for_current_scene()) {
+                    stagestrip_show_picker_overlay_animated();
+                    return cmd;
+                }
+                printf("[STAGE] picker: rebuild failed; showing existing picker\n");
+            }
+            stagestrip_kick_library_build_now();
             stagestrip_show_picker_overlay_animated();
             return cmd;
 
@@ -6334,6 +7116,19 @@ static int stagestrip_poll_picker_command(void)
                                              pendingBid, sizeof(pendingBid));
             if (!pendingBid[0]) {
                 printf("[STAGE] picker: icon-tap with empty pending bid\n");
+                return cmd;
+            }
+
+            if (gStripRuntimeMilkyWayLite) {
+                printf("[STAGE] picker: single icon-tap bid=%s\n", pendingBid);
+                uint64_t empty = r_nsstr_retained("");
+                if (r_is_objc_ptr(empty)) {
+                    r_msg2_main(gStripPickerPendingBidLabel, "setText:", empty, 0, 0, 0);
+                    r_msg2_main(empty, "release", 0, 0, 0, 0);
+                }
+                if (r_is_objc_ptr(gStripPickerOverlayWin))
+                    stagestrip_hide_picker_overlay_animated();
+                stagestrip_rebuild_single_bid(pendingBid);
                 return cmd;
             }
 
@@ -6441,12 +7236,13 @@ void stagestrip_start_control_loop(void)
         // corners is currently driving the resize (-1 = none).
         bool moveActive[kStripMaxFloatSlots] = {false};
         bool resizeActive[kStripMaxFloatSlots] = {false};
-        int  activeCorner[kStripMaxFloatSlots] = {-1, -1};
+        int  activeCorner[kStripMaxFloatSlots] = {0};
         StripRect moveStart[kStripMaxFloatSlots] = {{0}};
         StripRect resizeStart[kStripMaxFloatSlots] = {{0}};
         StripRect lastResize[kStripMaxFloatSlots] = {{0}};
         uint64_t resizeCover[kStripMaxFloatSlots] = {0};
         int resizeRelayoutTick[kStripMaxFloatSlots] = {0};
+        for (int i = 0; i < kStripMaxFloatSlots; i++) activeCorner[i] = -1;
 
         bool loggedReady = false;
         int pickerPollTick = 0;
@@ -6580,6 +7376,7 @@ void stagestrip_start_control_loop(void)
                 if ((moveState == 1 || (!moveActive[s] && moveState == 2)) &&
                     stagestrip_get_frame_thread(win, &moveStart[s])) {
                     moveActive[s] = true;
+                    stagestrip_raise_slot_window(s);
                     printf("[STAGE] control[%d]: move begin frame=(%.0f,%.0f %.0fx%.0f)\n",
                            s, moveStart[s].x, moveStart[s].y, moveStart[s].width, moveStart[s].height);
                 }
@@ -6608,6 +7405,7 @@ void stagestrip_start_control_loop(void)
                 if (!resizeActive[s] && detectedCorner >= 0 &&
                     stagestrip_get_frame_thread(win, &resizeStart[s])) {
                     resizeActive[s] = true;
+                    stagestrip_raise_slot_window(s);
                     activeCorner[s] = detectedCorner;
                     lastResize[s] = resizeStart[s];
                     resizeRelayoutTick[s] = 0;
@@ -6624,12 +7422,13 @@ void stagestrip_start_control_loop(void)
                                                      "snapshotViewAfterScreenUpdates:",
                                                      0, 0, 0, 0);
                         if (r_is_objc_ptr(cover)) {
-                            double bi = kStripBorderInset;
+                            double bi = stagestrip_content_border_inset();
+                            double titleH = stagestrip_content_title_height();
                             double iw = resizeStart[s].width - 2.0 * bi;
-                            double ih = resizeStart[s].height - 2.0 * bi;
+                            double ih = resizeStart[s].height - 2.0 * bi - titleH;
                             if (iw < 80.0) iw = 80.0;
                             if (ih < 80.0) ih = 80.0;
-                            stagestrip_set_frame_thread(cover, (StripRect){ bi, bi, iw, ih });
+                            stagestrip_set_frame_thread(cover, (StripRect){ bi, bi + titleH, iw, ih });
                             r_msg2_main(cover, "setUserInteractionEnabled:", 0, 0, 0, 0);
                             r_msg2_main(cover, "setClipsToBounds:", 1, 0, 0, 0);
                             uint64_t coverLayer = r_msg2_main(cover, "layer", 0, 0, 0, 0);
@@ -6672,7 +7471,12 @@ void stagestrip_start_control_loop(void)
                         case kStripCornerBR:                       nw += t.x; nh += t.y; break;
                         default: break;
                         }
-                        StripRect next = stagestrip_clamped_rect(nx, ny, nw, nh, sw, sh);
+                        StripRect next = (gStripRuntimeMilkyWayLite)
+                            ? stagestrip_mwlite_aspect_resize_rect(resizeStart[s],
+                                                                   activeCorner[s],
+                                                                   t.x, t.y,
+                                                                   sw, sh)
+                            : stagestrip_clamped_rect(nx, ny, nw, nh, sw, sh);
                         bool changed = fabs(next.width  - lastResize[s].width)  >= 2.0 ||
                                        fabs(next.height - lastResize[s].height) >= 2.0 ||
                                        fabs(next.x      - lastResize[s].x)      >= 2.0 ||
@@ -6680,14 +7484,17 @@ void stagestrip_start_control_loop(void)
                         if (changed) {
                             stagestrip_set_frame_thread(win, next);
                             stagestrip_resize_host_view_frame(hostView, next.width, next.height);
+                            if (gStripRuntimeMilkyWayLite)
+                                stagestrip_layout_mwlite_chrome_slot(S, next.width, next.height);
                             if (r_is_objc_ptr(resizeCover[s])) {
-                                double bi = kStripBorderInset;
+                                double bi = stagestrip_content_border_inset();
+                                double titleH = stagestrip_content_title_height();
                                 double iw = next.width - 2.0 * bi;
-                                double ih = next.height - 2.0 * bi;
+                                double ih = next.height - 2.0 * bi - titleH;
                                 if (iw < 80.0) iw = 80.0;
                                 if (ih < 80.0) ih = 80.0;
                                 stagestrip_set_frame_thread(resizeCover[s],
-                                                           (StripRect){ bi, bi, iw, ih });
+                                                           (StripRect){ bi, bi + titleH, iw, ih });
                             }
                             resizeRelayoutTick[s]++;
                             lastResize[s] = next;
@@ -6715,14 +7522,17 @@ void stagestrip_start_control_loop(void)
                                                                     commitFrame.height);
                     if (r_is_objc_ptr(committedHost))
                         hostView = committedHost;
+                    if (gStripRuntimeMilkyWayLite)
+                        stagestrip_layout_mwlite_chrome_slot(S, commitFrame.width, commitFrame.height);
                     if (r_is_objc_ptr(resizeCover[s])) {
-                        double bi = kStripBorderInset;
+                        double bi = stagestrip_content_border_inset();
+                        double titleH = stagestrip_content_title_height();
                         double iw = commitFrame.width - 2.0 * bi;
-                        double ih = commitFrame.height - 2.0 * bi;
+                        double ih = commitFrame.height - 2.0 * bi - titleH;
                         if (iw < 80.0) iw = 80.0;
                         if (ih < 80.0) ih = 80.0;
                         stagestrip_set_frame_thread(resizeCover[s],
-                                                   (StripRect){ bi, bi, iw, ih });
+                                                   (StripRect){ bi, bi + titleH, iw, ih });
                         r_msg2_main(win, "bringSubviewToFront:", resizeCover[s], 0, 0, 0);
                         stagestrip_schedule_invocation(win,
                             stagestrip_make_double_invocation(resizeCover[s], "setAlpha:", 0.0),
@@ -6766,6 +7576,7 @@ void stagestrip_start_control_loop(void)
                 (++pickerPollTick % 2) == 0) {
                 if (stagestrip_poll_picker_command())
                     gStripPickerCooldownUntilMS = stagestrip_now_ms() + 1000;
+                stagestrip_picker_apply_search_filter();
             }
 
             // Process one deferred library tile per tick when idle. Skipped
@@ -6814,6 +7625,8 @@ bool stagestrip_stop_in_session(void)
     // Also tear down the multitasking probe's floating host window.
     stagestrip_dismiss_floating_host();
 
+    gStripRuntimeMilkyWayLite = 0;
+    memset(gStripMWLiteSlotBids, 0, sizeof(gStripMWLiteSlotBids));
     gStripWindow = 0;
     gStripContainer = 0;
     printf("[STAGE] stop: overlay torn down\n");
@@ -6845,11 +7658,19 @@ void stagestrip_forget_remote_state(void)
     gStripPickerTopChipCard = 0;
     gStripPickerBottomChipCard = 0;
     gStripPickerPendingBidLabel = 0;
+    gStripPickerSearchField = 0;
     gStripPickerNextSlot = 0;
     gStripPickerTopBid[0] = '\0';
     gStripPickerBottomBid[0] = '\0';
+    gStripRuntimeMilkyWayLite = 0;
+    gStripRuntimePreselectedAppsPath[0] = '\0';
+    gStripNextWindowLevel = kStripWindowLevel;
+    gStripPreselectedAppsMtime = 0;
+    gStripPreselectedAppsSize = 0;
     gStripPickerApplyBusy = 0;
     gStripPickerCooldownUntilMS = 0;
+    stagestrip_picker_filter_reset();
+    memset(gStripMWLiteSlotBids, 0, sizeof(gStripMWLiteSlotBids));
     memset(gStripRows, 0, sizeof(gStripRows));
     memset(gStripLives, 0, sizeof(gStripLives));
     gHostViewHasAutoResizeMask = -1;
@@ -6859,22 +7680,39 @@ void stagestrip_forget_remote_state(void)
     printf("[STAGE] forgot remote state\n");
 }
 
-bool stagestrip_apply_in_session(int maxSlots)
+static bool stagestrip_apply_in_session_mode(int maxSlots, bool milkyWayLite)
 {
+    int runtimeSlots = maxSlots;
+    if (runtimeSlots <= 0) runtimeSlots = milkyWayLite ? 2 : 4;
+    if (runtimeSlots > kStripMaxSlotsHard) runtimeSlots = kStripMaxSlotsHard;
+    if (milkyWayLite && runtimeSlots < 1) runtimeSlots = 1;
+    gStripRuntimeMaxSlots = runtimeSlots;
+    gStripRuntimeMilkyWayLite = milkyWayLite ? 1 : 0;
     gStripApplyTick++;
     uint64_t startMS = stagestrip_now_ms();
     uint32_t oldSettleUS = r_settle_us(kStripApplySettleUS);
     if (stagestrip_should_log_tick()) {
-        printf("[STAGE] === entry === maxSlots=%d tick=%d settle=%uus\n",
-               maxSlots, gStripApplyTick, kStripApplySettleUS);
+        printf("[STAGE] === entry === mode=%s maxSlots=%d runtimeSlots=%d tick=%d settle=%uus\n",
+               milkyWayLite ? "mwlite" : "dsl",
+               maxSlots, runtimeSlots, gStripApplyTick, kStripApplySettleUS);
     }
-    bool ok = stagestrip_install_or_refresh(maxSlots);
+    bool ok = stagestrip_install_or_refresh(runtimeSlots);
     r_settle_us(oldSettleUS);
     printf("[STAGE] === exit === ok=%d elapsed=%llums settleRestored=%uus\n",
            ok ? 1 : 0,
            (unsigned long long)(stagestrip_now_ms() - startMS),
            oldSettleUS);
     return ok;
+}
+
+bool stagestrip_apply_in_session(int maxSlots)
+{
+    return stagestrip_apply_in_session_mode(maxSlots, false);
+}
+
+bool stagestrip_apply_mwlite_in_session(int maxWindows)
+{
+    return stagestrip_apply_in_session_mode(maxWindows, true);
 }
 
 bool stagestrip_apply(int maxSlots)

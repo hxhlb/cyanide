@@ -4,21 +4,66 @@
 //
 
 #import "HomeViewController.h"
+#import "PackagesViewController.h"
 #import "SourcesViewController.h"
 #import "../SettingsViewController.h"
 #import "../tweaks/RepoTweaks.h"
 
-static NSString * const kSignalGroupURL  = @"https://signal.group/#CjQKIP0pxjc9V52ddCNk--04DosuoQl-vVOsznJfQ4GwlrlxEhCveFhBS8YdNcILpUFt7IqC";
-static NSString * const kGitHubIssuesURL = @"https://github.com/zeroxjf/cyanide/issues";
-static NSString * const kGitHubRepoURL   = @"https://github.com/zeroxjf/cyanide";
+static NSString * const kGitHubIssuesURL = @"https://github.com/hxhlb/cyanide/issues";
+static NSString * const kGitHubRepoURL   = @"https://github.com/hxhlb/cyanide";
 
 static const CGFloat kMargin = 20.0;
+
+static NSString *home_l10n(NSString *text)
+{
+    return text.length ? NSLocalizedString(text, nil) : text;
+}
+
+@interface CYHomeHeroView : UIView
+@property (nonatomic, strong, readonly) CAGradientLayer *gradientLayer;
+@end
+
+@implementation CYHomeHeroView
+
+- (instancetype)initWithFrame:(CGRect)frame
+{
+    if ((self = [super initWithFrame:frame])) {
+        _gradientLayer = [CAGradientLayer layer];
+        _gradientLayer.colors = @[
+            (id)[UIColor colorWithRed:0.0 green:0.72 blue:0.84 alpha:1.0].CGColor,
+            (id)[UIColor colorWithRed:0.0 green:0.50 blue:0.90 alpha:1.0].CGColor,
+        ];
+        _gradientLayer.startPoint = CGPointMake(0.0, 0.0);
+        _gradientLayer.endPoint = CGPointMake(1.0, 1.0);
+        self.backgroundColor = [UIColor colorWithRed:0.0 green:0.58 blue:0.88 alpha:1.0];
+        [self.layer insertSublayer:_gradientLayer atIndex:0];
+    }
+    return self;
+}
+
+- (void)layoutSubviews
+{
+    [super layoutSubviews];
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    self.gradientLayer.frame = self.bounds;
+    [CATransaction commit];
+}
+
+- (void)didMoveToWindow
+{
+    [super didMoveToWindow];
+    if (self.window) {
+        [self setNeedsLayout];
+        [self layoutIfNeeded];
+    }
+}
+
+@end
 
 @interface HomeViewController ()
 @property (nonatomic, strong) UIScrollView *scrollView;
 @property (nonatomic, strong) UIStackView *stack;
-@property (nonatomic, weak) UIView *heroView;
-@property (nonatomic, weak) CAGradientLayer *heroGrad;
 @end
 
 @implementation HomeViewController
@@ -26,7 +71,7 @@ static const CGFloat kMargin = 20.0;
 - (void)viewDidLoad
 {
     [super viewDidLoad];
-    self.title = @"Home";
+    self.title = home_l10n(@"Home");
     self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeAlways;
     self.navigationController.navigationBar.prefersLargeTitles = YES;
@@ -58,7 +103,6 @@ static const CGFloat kMargin = 20.0;
 
     [self.stack addArrangedSubview:[self buildHero]];
     [self.stack addArrangedSubview:[self buildQuickActions]];
-    [self.stack addArrangedSubview:[self buildWhatsNew]];
     [self.stack addArrangedSubview:[self buildGetStarted]];
     [self.stack addArrangedSubview:[self buildCommunity]];
 }
@@ -67,19 +111,10 @@ static const CGFloat kMargin = 20.0;
 
 - (UIView *)buildHero
 {
-    UIView *hero = [[UIView alloc] init];
+    CYHomeHeroView *hero = [[CYHomeHeroView alloc] init];
     hero.layer.cornerRadius = 20.0;
     hero.layer.cornerCurve = kCACornerCurveContinuous;
     hero.clipsToBounds = YES;
-
-    CAGradientLayer *grad = [CAGradientLayer layer];
-    grad.colors = @[
-        (id)[UIColor colorWithRed:0.0 green:0.72 blue:0.84 alpha:1.0].CGColor,
-        (id)[UIColor colorWithRed:0.0 green:0.50 blue:0.90 alpha:1.0].CGColor,
-    ];
-    grad.startPoint = CGPointMake(0.0, 0.0);
-    grad.endPoint = CGPointMake(1.0, 1.0);
-    [hero.layer insertSublayer:grad atIndex:0];
 
     UIImageView *icon = [[UIImageView alloc] init];
     icon.translatesAutoresizingMaskIntoConstraints = NO;
@@ -101,7 +136,7 @@ static const CGFloat kMargin = 20.0;
 
     UILabel *tagline = [[UILabel alloc] init];
     tagline.translatesAutoresizingMaskIntoConstraints = NO;
-    tagline.text = @"SpringBoard tweaks for stock iOS";
+    tagline.text = home_l10n(@"SpringBoard tweaks for stock iOS");
     tagline.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightBold];
     tagline.textColor = UIColor.whiteColor;
     tagline.textAlignment = NSTextAlignmentCenter;
@@ -109,7 +144,7 @@ static const CGFloat kMargin = 20.0;
 
     UILabel *sub = [[UILabel alloc] init];
     sub.translatesAutoresizingMaskIntoConstraints = NO;
-    sub.text = [NSString stringWithFormat:@"No jailbreak required · v%@", ver];
+    sub.text = [NSString stringWithFormat:home_l10n(@"No jailbreak required · v%@"), ver];
     sub.font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightMedium];
     sub.textColor = [UIColor colorWithWhite:1.0 alpha:0.65];
     sub.textAlignment = NSTextAlignmentCenter;
@@ -129,17 +164,7 @@ static const CGFloat kMargin = 20.0;
         [sub.bottomAnchor   constraintEqualToAnchor:hero.bottomAnchor constant:-18.0],
     ]];
 
-    self.heroGrad = grad;
-    self.heroView = hero;
     return hero;
-}
-
-- (void)viewDidLayoutSubviews
-{
-    [super viewDidLayoutSubviews];
-    if (self.heroGrad && self.heroView) {
-        self.heroGrad.frame = self.heroView.bounds;
-    }
 }
 
 #pragma mark - Quick Actions
@@ -186,7 +211,7 @@ static const CGFloat kMargin = 20.0;
 
     UILabel *lbl = [[UILabel alloc] init];
     lbl.translatesAutoresizingMaskIntoConstraints = NO;
-    lbl.text = title;
+    lbl.text = home_l10n(title);
     lbl.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightSemibold];
     lbl.textColor = UIColor.labelColor;
     [card addSubview:lbl];
@@ -231,26 +256,6 @@ static const CGFloat kMargin = 20.0;
     return card;
 }
 
-#pragma mark - What's New
-
-- (UIView *)buildWhatsNew
-{
-    UIView *card = [self card];
-    UIStackView *s = [self vstackInCard:card spacing:14.0];
-
-    UILabel *header = [self sectionHeader:@"What's New"];
-    [s addArrangedSubview:header];
-
-    [s addArrangedSubview:[self compactRow:@"JavaScript tweak support by @MinePlayer16"
-                                     icon:@"bolt.fill" color:UIColor.systemOrangeColor]];
-    [s addArrangedSubview:[self compactRow:@"Source repos with browsable tweak catalogs"
-                                     icon:@"tray.and.arrow.down.fill" color:UIColor.systemGreenColor]];
-    [s addArrangedSubview:[self compactRow:@"SnowBoard Lite and SpringBoard stability fixes"
-                                     icon:@"wrench.and.screwdriver.fill" color:UIColor.systemBlueColor]];
-
-    return card;
-}
-
 #pragma mark - Get Started
 
 - (UIView *)buildGetStarted
@@ -258,15 +263,15 @@ static const CGFloat kMargin = 20.0;
     UIView *card = [self card];
     UIStackView *s = [self vstackInCard:card spacing:12.0];
 
-    [s addArrangedSubview:[self sectionHeader:@"Get Started"]];
+    [s addArrangedSubview:[self sectionHeader:home_l10n(@"Get Started")]];
 
-    [s addArrangedSubview:[self bigActionButton:@"Open QuickLoader"
-                                          sub:@"Run a local .js tweak file"
+    [s addArrangedSubview:[self bigActionButton:home_l10n(@"Open QuickLoader")
+                                          sub:home_l10n(@"Run a local .js tweak file")
                                          icon:@"bolt.fill"
                                         color:UIColor.systemOrangeColor
                                           sel:@selector(openQuickLoader)]];
-    [s addArrangedSubview:[self bigActionButton:@"Add a Source"
-                                          sub:@"Browse and install JS tweaks from repos"
+    [s addArrangedSubview:[self bigActionButton:home_l10n(@"Add a Source")
+                                          sub:home_l10n(@"Browse and install JS tweaks from repos")
                                          icon:@"plus.circle.fill"
                                         color:UIColor.systemGreenColor
                                           sel:@selector(openSourcesTab)]];
@@ -357,7 +362,7 @@ static const CGFloat kMargin = 20.0;
     UIView *card = [self card];
     UIStackView *s = [self vstackInCard:card spacing:0.0];
 
-    UILabel *header = [self sectionHeader:@"Community"];
+    UILabel *header = [self sectionHeader:home_l10n(@"Community")];
     UIView *headerWrap = [[UIView alloc] init];
     header.translatesAutoresizingMaskIntoConstraints = NO;
     [headerWrap addSubview:header];
@@ -369,9 +374,7 @@ static const CGFloat kMargin = 20.0;
     ]];
     [s addArrangedSubview:headerWrap];
 
-    [s addArrangedSubview:[self linkCell:@"Signal Group" icon:@"bubble.left.and.bubble.right.fill"
-                                  color:UIColor.systemBlueColor url:kSignalGroupURL sep:YES]];
-    [s addArrangedSubview:[self linkCell:@"Report a Bug" icon:@"exclamationmark.bubble.fill"
+    [s addArrangedSubview:[self linkCell:home_l10n(@"Report a Bug") icon:@"exclamationmark.bubble.fill"
                                   color:UIColor.systemRedColor url:kGitHubIssuesURL sep:YES]];
     [s addArrangedSubview:[self linkCell:@"GitHub" icon:@"chevron.left.forwardslash.chevron.right"
                                   color:UIColor.systemGrayColor url:kGitHubRepoURL sep:NO]];
@@ -544,7 +547,9 @@ static const CGFloat kMargin = 20.0;
     UITabBarController *tab = self.tabBarController;
     if (!tab) return;
     for (NSUInteger i = 0; i < tab.viewControllers.count; i++) {
-        if ([tab.viewControllers[i].tabBarItem.title isEqualToString:@"Packages"]) {
+        UIViewController *vc = tab.viewControllers[i];
+        UINavigationController *nav = [vc isKindOfClass:UINavigationController.class] ? (UINavigationController *)vc : nil;
+        if ([nav.viewControllers.firstObject isKindOfClass:PackagesViewController.class]) {
             tab.selectedIndex = i;
             return;
         }
@@ -557,8 +562,8 @@ static const CGFloat kMargin = 20.0;
     if (!tab) return;
     for (NSUInteger i = 0; i < tab.viewControllers.count; i++) {
         UIViewController *vc = tab.viewControllers[i];
-        if ([vc.tabBarItem.title isEqualToString:@"Settings"]) {
-            UINavigationController *nav = [vc isKindOfClass:UINavigationController.class] ? (UINavigationController *)vc : nil;
+        UINavigationController *nav = [vc isKindOfClass:UINavigationController.class] ? (UINavigationController *)vc : nil;
+        if ([nav.viewControllers.firstObject isKindOfClass:SettingsViewController.class]) {
             if (!nav) return;
             [nav popToRootViewControllerAnimated:NO];
             SettingsViewController *ql = [[SettingsViewController alloc] initWithUnderlyingSection:25 bundleTitle:@"QuickLoader"];
@@ -575,7 +580,9 @@ static const CGFloat kMargin = 20.0;
     UITabBarController *tab = self.tabBarController;
     if (!tab) return;
     for (NSUInteger i = 0; i < tab.viewControllers.count; i++) {
-        if ([tab.viewControllers[i].tabBarItem.title isEqualToString:@"Sources"]) {
+        UIViewController *vc = tab.viewControllers[i];
+        UINavigationController *nav = [vc isKindOfClass:UINavigationController.class] ? (UINavigationController *)vc : nil;
+        if ([nav.viewControllers.firstObject isKindOfClass:SourcesViewController.class]) {
             tab.selectedIndex = i;
             return;
         }

@@ -16,6 +16,7 @@
 #import <Foundation/Foundation.h>
 
 NSArray<NSDictionary<NSString *, NSString *> *> *ipadecryptor_installed_apps(void);
+NSArray<NSDictionary<NSString *, NSString *> *> *ipadecryptor_installed_apps_with_system_apps(BOOL includeSystemApps);
 NSString *ipadecryptor_display_name_for_bundle(NSString *bundleID);
 NSString *ipadecryptor_default_output_directory(void);
 NSString *ipadecryptor_app_store_account_summary(void);

@@ -1,0 +1,462 @@
+None launched yet. Install MilkyWay Lite, then choose apps from its picker.
+MilkyWay Lite App Launcher
+After installing MilkyWay Lite, tap apps below or use the SpringBoard picker to open floating windows. No preselection during install is required.
+Max floating windows
+Default is 2. MilkyWay Lite can keep up to 8 app windows; when full, new apps are refused.
+Refresh App List
+Compatibility
+MilkyWay Lite and Dynamic Stage Lite both own SpringBoard floating-window state. Only one can be installed at a time.
+No Apps Found
+Cyanide could not read the installed-app list yet. Run the chain and sandbox escape first, then return here and tap Refresh App List.
+List Truncated
+Showing first %lu of %lu apps. Search/filter UI can be added later.
+Window Limit
+MilkyWay Lite will keep up to %ld floating app window(s).
+Last Target
+Target
+Max windows
+Experimental floating-window route. Activate MilkyWay Lite from Installer, then choose apps from the picker to open movable/resizable SpringBoard-hosted windows. It defaults to 2 concurrent windows and can be configured up to 8.
+Compatibility: MilkyWay Lite and Dynamic Stage Lite are mutually exclusive because both own SpringBoard floating-window/scene-host state.
+Cyanide could not list installed user apps yet. Run the chain once, then try again.
+OK
+Choose MilkyWay Lite App
+Select the app MilkyWay Lite should open as a floating window.
+In Development
+Active
+No tweak loaded
+Select a .js file or install from Sources
+Cancel
+Save
+Invalid Number
+Run Tweak
+Activate Tweak
+Queued — Run Apply Tweaks
+Re-run Tweak
+Select .js File
+Browse Sources
+Clear Loaded Tweak
+Auto-run kexploit on launch
+Sandbox escape (escape_sbx_demo2)
+Keep app alive in background
+Required for app-driven live tweaks to persist while minimized, including StatBar receiving fresh live data.
+Dock icons
+Home columns
+Home rows
+Hide icon labels
+Reset to Defaults
+Level
+Disable OTA Updates
+Enable OTA Updates
+watchOS Pairing Limit
+Highest watchOS pairing generation this iPhone will accept. 99 raises the phone-side ceiling for newer watchOS releases.
+Setup Protocol Floor
+Lowest pairing setup generation this iPhone will accept. Keep this at 23 so generation-23 setup messages are not rejected.
+Legacy Chip Floor
+Leave this alone unless you are trying to pair an old S-chip watch, such as a Series 3.
+Multi-Watch Switching
+Leave this alone unless switching between multiple older paired watches is not working.
+Load Saved Override
+Use watchOS Range 99/23/10/6
+Apply Pairing Override
+Remove Override
+Coefficient
+1.00 = default, 0.50 = 2× faster, 0.25 = 4× faster. Minimum is 0.01.
+Home extra left
+Home extra right
+Home extra top
+Home extra bottom
+Dock extra horizontal
+Home icon scale
+Dock icon scale
+Celsius
+Show CPU %
+Show CPU / RAM labels
+Show network speed
+Network speed only
+Refresh rate
+Position
+Choose Position…
+Layout
+Top and bottom rows move separately. Changes update live while NiceBar Lite is running.
+Top side inset
+Bottom side inset
+Top Y offset
+Bottom Y offset
+Center X offset
+Use Celsius
+Traffic History
+Apply Now
+WiFi (bar count)
+Cellular (dBm)
+Test: Poll Daemon & Show Banner
+Runs the live imagent detection path once. Banner shows the result; the [TYPEBANNER] log lines explain what was/wasn't found.
+Show Sample Island
+Starts the same ActivityKit route used for captured incoming notification banners.
+Include Dock
+Gravity strength
+Bounce
+Friction
+Resistance
+Spin resistance
+Explosion Pulse
+Restore Icon Layout
+Mode
+Set Exact Coordinates…
+Major Cities…
+Simulate Rockaway Test Point
+Altitude
+Accuracy
+Simulate Current Target
+Restore Real Location
+Reset can take a few minutes. If location still looks simulated, reboot and wait a little longer.
+App Store Account
+Required before Cyanide can request an authenticated IPA download ticket. 2FA is requested after Apple asks for it.
+Selected App
+App Store Link
+Download Status
+Output Folder
+Choose Installed App…
+Paste App Store Link & Download…
+Resolves the link, then starts the IPA download path.
+Download IPA from App Store
+Requests an authenticated download ticket, then fetches the encrypted IPA to Documents.
+Clear Saved App Store Token
+Downloaded IPA
+Probe Target
+Reads the app bundle and reports the main Mach-O FairPlay encryption command.
+Start Decrypt
+Runs the in-dev pipeline. Dump and IPA writer stages are still being wired.
+Selected Theme
+Import Custom Theme…
+Theme Format Guide
+Clear Selected Theme
+Import Theme Folder…
+Import Theme Archive (ZIP/DEB)…
+Selected Video
+Choose Video…
+Clear Selected Video
+This is a runtime SpringBoard method patch. It does not write system files; respring restores the stock app switcher.
+Session note
+If you respring after Hide Home Bar, run App Switcher Grid again because respring resets this live SpringBoard patch.
+Restore Stock Switcher
+Restores the original switcher style in the active SpringBoard session when available.
+FastLockX Lite
+Always On keeps the Face ID retry pulse and unlock request armed in SpringBoard until Disable, Clean Up, or respring.
+Enable Always On
+Keeps pickup-to-unlock armed after Cyanide closes.
+Disable
+Stops the SpringBoard timers.
+Retry interval
+Always On uses this as the off→on pulse gap. Default is 0.3s.
+Block if media is active — In progress
+In progress — not wired yet. This blocker is disabled for now.
+Block if flashlight is on — In progress
+Block in Low Power Mode — In progress
+Home extra L/R
+Home extra T/B
+Dock extra H
+Home scale %
+Dock scale %
+Show CPU/RAM labels
+Show net speed
+Switcher style
+Always On
+Blockers
+watchOS limit
+Setup floor
+Legacy chip floor
+Multi-watch switch
+Theme
+Video
+App Store
+Dock
+Strength
+Spin resist.
+Launch Options
+SBCustomizer
+StatBar
+NSBar
+NiceBar Lite
+Signal Display
+Axon Lite
+TypeBanner
+Notification Island
+IPA Decryptor
+MilkyWay Lite
+Gravity Lite
+App Switcher Grid
+Location Simulator
+SnowBoard Lite
+LiveWP
+QuickLoader
+RepoTweaks
+Powercuff
+SpringBoard Tweaks
+Drag Coefficient
+Home Layout Extras
+OTA Updates
+Watch Pairing
+📦 Open Sources Tab
+Add Source
+Source Failed
+Refreshing Sources
+Export Failed
+Respring?
+Powercuff Level
+Import Theme Folder
+Import Theme Archive
+Choose Video
+Import Failed
+Video Selected
+NSBar Position
+Can't Change Icon
+App Icon
+No Log Yet
+Mail Not Available
+Choose App
+App Store Sign In
+Two-Factor Code
+Code Required
+Invalid Coordinates
+Exact Coordinates
+Major Cities
+Clean Up?
+Reset All Packages?
+Apply Pairing Override?
+Seed Compatibility Index?
+Remove Pairing Override?
+Paste the RAW link to your packages.json
+Nuking old scripts and downloading the latest...
+SpringBoard will restart. Any unsaved live state will be reset.
+Navigate into your theme folder so you can see the PNG files inside, then tap Open in the top-right corner to import the folder.
+Navigate into your theme folder so you can see IconBundles inside, then tap Open.\n\nIf tapping Open does nothing, your signing tool may need \"Match provisioning identifier\" enabled, or you can use Import Theme Archive instead.
+Pick a ZIP or DEB file that contains an IconBundles directory. Cyanide extracts and imports a local copy.
+Choose an MP4, MOV, or M4V video.
+The selected item could not be accessed. Try picking from a different location or file provider.
+Choose the weather display language.
+This iOS build doesn't expose alternate icon switching.
+Run a chain once, then come back to share the latest diagnostic log.
+Set up Mail in iOS Settings to send feedback, or DM @zeroxjf on Twitter. View Log in Settings to copy the latest diagnostic log.
+Enter a plain number, then try again.
+Select the installed app to probe/decrypt.
+Sign in with the Apple ID that owns or can download the app. If Apple asks for two-factor authentication, Cyanide will prompt for the code next.
+Enter the 6-digit Apple verification code.
+Paste an App Store URL like https://apps.apple.com/us/app/name/id123456789, or enter the numeric app ID. Cyanide will resolve it, then attempt the IPA download path.
+Use decimal degrees. Latitude must be between -90 and 90. Longitude must be between -180 and 180. Chinese labels like 北纬/南纬/东经/西经 and full-width punctuation are supported.
+Enter decimal degrees, or paste a pair like 40.7128, -74.0060 or 北纬39.9042，东经116.4074.
+Stops live SpringBoard sessions and closes local KRW state. The next Run will try recovery first.
+Are you sure you want to respring? SpringBoard will restart.
+Deactivates every package and clears pending changes. Already-applied patches stay until respring or reboot. Per-tweak settings are not affected.
+Saves these watchOS pairing settings on this iPhone. Respring or reboot afterwards before trying to pair.
+Adds this phone's product type to the local NanoRegistry compatibility-index MobileAsset and saves a .cyanide.bak backup beside the original file.
+Removes the saved Watch Pairing Override without touching the rest of your watch data. Respring or reboot afterwards.
+Add
+Later
+Respring
+Use Nominal
+Continue
+Photos
+Files
+English
+中文
+Off
+Custom Text
+System Item
+Date / Time
+Weather
+Sign In
+Verify
+Resolve
+Set Target
+Set & Simulate
+Clean Up
+Reset
+Apply
+Seed
+Remove
+Top Left
+Top Right
+Bottom Left
+Bottom Right
+Bottom Center
+Slot
+System
+Battery Temp
+Free RAM
+Battery
+Network Speed
+Uptime
+Date
+Lunar Date
+Today Traffic
+Current IP
+Free Disk
+Thermal State
+Center
+No video selected.
+iOS 6 Theme
+None
+None selected. Choose an installed app first.
+None. Paste an App Store link or numeric app ID.
+Only icons with matching bundle IDs change. Missing apps keep their stock icon.
+Use a binary plist when you want one portable file instead of a folder of PNGs.
+Quick Actions
+About
+These entries are not installable because they do not work yet. They remain visible so the unfinished settings/source paths are discoverable for anyone who wants to continue them.
+kexploit_opa334 runs once per app lifetime. Keep Alive applies only while Cyanide is minimized; an App Switcher kill still terminates the process.
+Imported from DarkSword-Tweaks. These are SpringBoard runtime patches; turning one off only skips future applies.
+Overrides _UIAnimationDragCoefficient in SpringBoard. Type the raw coefficient: 1.00 = stock, 0.50 = 2× faster, 0.25 = 4× faster, minimum 0.01. Imported from kolbicz/DarkSword-Tweaks.
+Adds extra padding and per-icon scaling on top of the stock home/dock layout. Defaults are zero padding and 100% scale (no change). Toggle Enable on and hit Run to apply; values aren't persisted across respring.
+Edits launchd disabled.plist. A reboot or userspace restart is required for changes to take effect.
+Underclocks the CPU/GPU via thermalmonitord by simulating thermal pressure. Nominal is the daily-use default. Light, Moderate, and Heavy intentionally underclock the CPU more and can make the device feel laggy, especially on older hardware.
+Live overlay. When enabled, StatBar keeps a SpringBoard RemoteCall session open. Refresh rate applies when Cyanide is minimized but the screen is still awake; StatBar pauses while the screen is locked or asleep.
+Network speed overlay ported from d1y/cyanide-ios. When enabled, NSBar keeps a SpringBoard RemoteCall session open and refreshes roughly once per second.
+Tap a box to choose what it shows. NiceBar Lite places plain text in the configured status-bar slots around the notch or Dynamic Island, including the bottom center position. Weather is fetched from your current location through Open-Meteo and follows the Celsius toggle.
+Adds a UILabel as a sibling of each STUI signal view (no new UIWindow), refreshed every second. Cellular shows live RSRP dBm (sign implicit). WiFi shows the bar count (0-4); the wifid XPC dBm path crashed SpringBoard in prior tests.
+RemoteCall-only Axon port. It uses a live app-side loop rather than substrate hooks, so it lasts for the active Cyanide SpringBoard session.
+Partial TypeMillennium port. Detection runs against imagent using original-thread RemoteCall probes, while SpringBoard renders a prewarmed banner window.
+Experimental Dynamic Island notification route. Cyanide polls SpringBoard's active banner request through the shared RemoteCall session, then mirrors it through the app's ActivityKit Live Activity.
+Runtime patch. It changes SpringBoard's app switcher style in memory, writes no system files, and a respring restores stock. Unsupported builds may glitch the app switcher or crash SpringBoard.
+RemoteCall-only core port of Julio Verne's Gravity. Run applies UIDynamicAnimator gravity, collision, bounce, friction, optional dock physics, and accelerometer steering to SpringBoard icon snapshots. It can restore the icon layout or fire a manual explosion pulse while the SpringBoard session is active.\n\nNot included in this core port: Activator/Home-button hooks, drag gestures, automatic shake effects, and preference-daemon notifications.
+Beta CoreLocation simulation. Requires Apple Maps installed and set up — Maps is the RemoteCall host process that drives the simulation.\n\nThis is a manual tool, not an installable package. Use Simulate Current Target to start; use Restore Real Location to stop simulation and return CoreLocation to the device's real providers. Each run opens the activity log and marks completion when the request returns.\n\nNot all apps respect the simulated location. Apps that use their own location validation or additional signals may ignore it.\n\nCredits: kolbicz for the RemoteCall/CLSimulationManager GPS spoofer prototype, and ezzuldinSt's LSpoof for picker/route references.\n\nWarning: this can affect more than maps. Location-tied system behavior, including time zone and date/time handling, may behave unexpectedly. Only use this if you know what you're doing.
+In-development local IPA decryptor. Current build discovers installed user apps, resolves pasted App Store links to bundle IDs, signs in for an App Store download token, and fetches the encrypted IPA to Documents. The fetched IPA still needs SINF/iTunesMetadata patching plus the KRW dump/rebuild stage before it becomes a decrypted IPA.
+SnowBoard/IconBundles importer ported from d1y/cyanide-ios. Folder imports are copied into Cyanide's Documents/SnowBoardLite library and applied through the existing icon replacement pipeline.\n\nThe import copies theme assets into Cyanide's local storage so the original theme in Files is not changed.\n\nCompatibility: SnowBoard Lite keeps live icon repair active and reuses the SpringBoard RemoteCall channel between repair ticks. Re-run it after a respring if icons reset.
+Video wallpaper ported from d1y/cyanide-ios. Select an MP4, MOV, or M4V; Cyanide copies it into Documents/LiveWP and plays it in SpringBoard while the RemoteCall session stays alive.
+Hidden
+Multiple apps in floating windows
+Experimental floating-window route based on Cyanide's Dynamic Stage Lite direction.
+MilkyWay Lite launches installed apps as movable/resizable SpringBoard-hosted floating windows. It defaults to 2 concurrent windows and can be configured up to 8.
+Apps are chosen from the MilkyWay Lite picker after install; no app preselection is required before running the chain.
+Compatibility: MilkyWay Lite and Dynamic Stage Lite both own SpringBoard floating-window/scene-host state. Only one can be installed at a time.
+Experimental: MilkyWay Lite is mutually exclusive with Dynamic Stage Lite. It keeps a configurable number of floating app windows alive in SpringBoard.
+Battery temperature + free RAM overlay
+Network speed overlay in the status bar
+NiceBar-style status labels
+RSRP dBm on cellular, bar count on WiFi
+Custom dock count and home screen grid
+Underclock the CPU/GPU thermal pressure
+Group Notification Center requests by app
+iMessage typing banner under the Dynamic Island
+Mirror incoming banners into the Dynamic Island
+Decrypt installed App Store app payloads
+Two floating app windows, iPad-style
+CoreLocation static point simulation
+Local SnowBoard-style icon themes
+Video wallpaper for Home and Lock Screen
+Extra home/dock padding and per-icon scaling
+Make home-screen icons fall with physics
+Grid-style app switcher
+Executes custom .js code
+Face ID retry + unlock controls
+Pair a newer watch or revive an older one
+Silence disclosure start/stop sounds
+Hide the bottom home indicator
+Enable or disable over-the-air system updates
+Remove the App Library page
+Skip the icon spring animation
+Snap on instantly when waking
+Instant lock/unlock backlight
+Lock with a wallpaper double-tap
+Custom SpringBoard animation speed multiplier
+Installs an overlay window in SpringBoard that shows live battery temperature and free RAM next to the system status bar. Refresh timing is adjustable so you can trade live updates for battery life.\n\nConfigure units, visible metrics, and refresh speed in the Settings tab.
+Displays real-time download and upload speed in a compact SpringBoard status-bar overlay. Pick its corner or center position in Settings.\n\nPorted from d1y/cyanide-ios.
+Adds configurable text labels around the status bar. Slots can show custom text, date/time formats, and system values such as battery, memory, network speed, uptime, IP address, disk space, thermal state, and traffic counters.\n\nPorted from d1y/cyanide-ios.
+Replaces the signal-strength glyphs in the status bar with live numeric readouts: RSRP in dBm for cellular, and the active bar count for WiFi. Updates roughly once per second.\n\nToggle WiFi-only or cellular-only in the Settings tab.
+Customizes the dock icon count and the home screen icon grid (columns and rows). Optionally hides icon labels.\n\nAdjust the per-axis counts and the label-hide switch in the Settings tab.
+Drives thermalmonitord with synthetic thermal pressure to underclock the CPU and GPU. Useful for cooling-sensitive workloads or extending runtime under load. Effects persist until reboot.\n\nNominal is the daily-use default. Light, Moderate, and Heavy intentionally underclock the CPU more, so lag and slower app launches mean it is working as intended. Those levels can be too slow for comfortable day-to-day use, especially on older devices.\n\nPick a level in the Settings tab.
+Groups visible Notification Center requests by app in a SpringBoard overlay and filters duplicates while Cyanide keeps the RemoteCall session alive.\n\nNo extra configuration.
+Port of TypeMillennium. Shows a pill banner just below the Dynamic Island when imagent reports an active iMessage typing indicator.\n\nNo extra configuration.
+Experimental Dynamic Island notification route. Watches SpringBoard's active banner request over the shared RemoteCall session, then mirrors the title/body into Cyanide's ActivityKit Live Activity.\n\nNo extra configuration.
+In-development local IPA decryptor. Select an installed user app or paste an App Store link, resolve it to a bundle ID, sign in for an App Store download token, fetch the encrypted IPA to Documents, probe FairPlay encryption metadata, then run the decrypt pipeline.\n\nCurrent build wires app discovery, App Store link resolution, sign-in, encrypted IPA fetching, and encryption probing first. SINF/iTunesMetadata patching, decrypted page dumping, and rebuilding the Payload IPA are being added behind this same settings tool.
+Spoofs the device's GPS location via Apple's CLSimulationManager. Requires Apple Maps installed and set up — Maps is the RemoteCall host process that drives the simulation.\n\nThis is a manual tool, not an installable package. Open Controls, choose a target, then use Simulate Current Target or Restore Real Location. Each run opens the activity log and marks completion when the request returns. Reset may take a few minutes and may require a reboot plus extra wait time.\n\nSettings exposes the current target plus altitude and accuracy. v1 is static-point only; route playback and alternate daemon hosts are next.\n\nNot all apps respect the simulated location. Apps that use their own location validation or additional signals may ignore it.\n\nCredits: kolbicz provided the GPS spoofer RemoteCall/CLSimulationManager prototype this is based on. ezzuldinSt's LSpoof provided the app-side CLLocationManager spoofing, picker, bookmarks, and route-simulation reference.\n\nSystem-behavior warning: simulated locations can affect more than maps. Features tied to location, including time zone, date/time behavior, weather, automation, reminders, and service checks, may behave unexpectedly. Only use this if you know what you're doing.\n\nLegal and service-use note: simulated locations may violate app terms, platform rules, game rules, ride-share or delivery policies, or local law depending on how they are used. Use only where you have permission. You are responsible for your use and apply or restore this tweak at your own risk.
+Imports SnowBoard/IconBundles themes into a local library and applies the selected theme through Cyanide's icon replacement pipeline. Supports the bundled iOS 6 theme and local folder imports.\n\nSnowBoard Lite is the main icon-theme entry point in Cyanide.\n\nPorted from d1y/cyanide-ios.
+Plays a selected MP4/MOV/M4V video behind SpringBoard's home and lock screen windows while Cyanide keeps the RemoteCall session alive.\n\nPorted from d1y/cyanide-ios.
+Adds extra padding around the home grid and the dock, and scales icons up or down. Stacks on top of SBCustomizer.\n\nDial in left/right/top/bottom padding for the home screen, horizontal padding for the dock, and home/dock icon scale in the Settings tab. Defaults match stock (zero padding, 100% scale).\n\nApplied at Run; not persisted across respring.\n\niOS 18: mutates the SBIconController layout configuration directly (upstream kolbicz path).\niOS 26: walks the live SBIconListView/SBIconView hierarchy and adjusts frames + iconImageInfo per icon (the iOS 26 layout class is read-only). One-shot at Run on iOS 26 — rotation/page swipe may force iOS 26's auto-layout to re-fit, so re-Run if that happens.
+Core RemoteCall-only port of Julio Verne's classic Gravity tweak for iOS 26. Applies UIDynamicAnimator gravity, collision bounds, bounce, friction, resistance, optional dock physics, accelerometer steering, shake pulses, restore, and an explosion pulse to the currently visible SpringBoard icon views.\n\nThis is not a full Substrate-style port. Activator/Home-button hooks, drag gestures, and preference-daemon notifications are intentionally left out. Use Settings to tune the core physics and the Restore button to reset the layout.
+Applies a runtime SpringBoard method patch that makes the app switcher use grid/deck style.\n\nThis does not write system files. A respring restores the stock app switcher. If you respring after Hide Home Bar, run App Switcher Grid again because respring resets this live SpringBoard patch.\n\nPorted from d1y/cyanide-ios.
+Select a local JavaScript file from Files, configure any declared parameters, and run it through Cyanide's SpringBoard RemoteCall bridge.\n\nOnly run scripts you trust. JavaScript tweaks can send private SpringBoard messages and destabilize the device if the script is buggy.
+RemoteCall-only port of the usable FastLockX primitives recovered from the iOS 15 tweak by Artem Kasper.\n\nCredits: original FastLockX by Artem Kasper; Cyanide FastLockX Lite port by zeroxjf.\n\nIt can pulse SpringBoard's biometric retry path, ask the iOS 26 biometric coordinator to start a Mesa/Face ID unlock, and send the original Lock Screen unlock request as a fallback. Installing it through Apply Tweaks keeps those retry/unlock requests armed with SpringBoard timers so pickup-to-unlock can work after Cyanide closes. The pulse loop pauses again after unlock.\n\nUse Disable, Clean Up, or a respring to stop the timers.
+Changes the watchOS pairing range saved on this iPhone.\n\nMost people should use watchOS Range 99/23/10/6 in Settings, then apply the override. These are pairing protocol generations, not Apple Watch model numbers. 99 raises the watchOS pairing ceiling. 23 keeps the generation-23 setup protocol accepted. 10 and 6 leave the legacy chip and multi-watch floors at their normal values.\n\nApple Watch Ultra 3 cannot pair on iOS versions below 26 at this time.\n\nSystem-file warning: this modifies the local NanoRegistry compatibility-index MobileAsset and saves a .cyanide.bak backup beside the original file. Pairing-asset edits can fail, partially apply, require a respring or reboot to settle, or leave pairing state inconsistent. You apply or remove this override at your own risk.\n\nRespring or reboot after installing or removing the override before trying to pair.
+Replaces the CallServices StartDisclosureWithTone and StopDisclosure audio files with Cyanide's bundled silent payloads.\n\nCredits: YangJiiii (@duongduong0908) for the EnsWilde and Disable Call Recording BookRestore reference tools. @Little_34306 is credited by the original projects for the Disable Call Recording concept. Cyanide port, KRW-backed implementation, and generated replacement silent audio assets by zeroxjf.\n\nSystem-file warning: this modifies files under /var/mobile/Library/CallServices/Greetings/default. Cyanide backs up the first originals into its app container, but system file replacement can fail, partially apply, or require a respring/reboot to settle.\n\nLegal note: call-recording disclosure sounds may exist to satisfy consent, notification, or privacy-law requirements in some places. You are responsible for understanding and following the laws that apply to you.\n\nThis port does not use the old Books/BookRestore/sparserestore path. Cyanide runs KRW, unlocks local /private/var write access, then writes directly to the CallServices files.\n\nUse Restore Original Sounds to write Cyanide's backups back when present. You apply or restore this tweak at your own risk.
+Zeros the first page of /System/Library/PrivateFrameworks/MaterialKit.framework/Assets.car using Cyanide's stable file-page zero path, which hides the bottom home indicator after SpringBoard reloads assets.\n\nRun Hide Home Bar by itself, then respring so SpringBoard refreshes the asset cache. To bring the home indicator back, choose Restore Home Bar and respring again. Other live SpringBoard tweaks, such as App Switcher Grid, should be applied in a separate run after the respring.\n\nCredits: C4ndyF1sh/ZeroCalories for the Home Bar target and jailbreakdotparty/dirtyZero for the original page-zeroing idea. Cyanide port by zeroxjf.
+Disables or enables the launchd jobs responsible for over-the-air system updates by editing disabled.plist. State persists across reboots.\n\nSystem-file warning: this edits /private/var/db/com.apple.xpc.launchd/disabled.plist. Incorrect or partial writes can affect launchd job state across boot. You disable or re-enable OTA updates at your own risk.\n\nNo Run/Apply step required for this package. Use Disable to block OTA updates, or Enable to restore them.
+Removes the App Library page that sits past your last home-screen page. Swiping past the last page becomes a no-op.
+Skips the spring animation that plays when home screen icons appear after unlock or app switch. Icons just appear in their final position.
+Removes the fade-in animation when waking the display. The screen pops on at full brightness immediately.
+Cuts the backlight fade duration to zero so the display switches on or off instantly on lock and unlock.
+Double-tap an empty area of the wallpaper to lock the device. No more reaching for the side button.
+Overrides _UIAnimationDragCoefficient in SpringBoard to make all UIKit spring animations faster or slower.\n\nSet the coefficient in the Drag Coefficient settings panel. 50% = 0.50× (2× faster), 25% = 0.25× (4× faster), 100% = stock.\n\nImported from kolbicz/DarkSword-Tweaks.
+⚠️ In development only — install is disabled because this does not work yet. The live status-bar refresh interferes with other SpringBoard tweaks and can drop readouts entirely.
+⚠️ Experimental: work-in-progress. Expect SpringBoard crashes, dropped notifications, layout glitches, and breakage between Cyanide builds. Don't rely on it for anything important.
+⚠️ In development only — install is disabled because this does not work yet. Keeps an original-thread imagent RemoteCall session for live polling and may miss indicators or destabilize SpringBoard.
+⚠️ In development only — install is disabled because this does not work yet. Polls SpringBoard notification state over RemoteCall and may miss banners, duplicate activity updates, or destabilize SpringBoard.
+⚠️ In development only — install is disabled because this does not work yet. Encrypted IPA download is experimental. SINF/iTunesMetadata patching, task-port dump, and IPA writer stages are not finished yet.
+Beta / unstable: First Run takes 1-2 minutes because the picker enumerates every installed app and builds a tile per app. Re-Runs are fast. Touch routing into hosted windows isn't wired yet, so scrolling/typing inside a floating window may not work.
+Beta: requires Apple Maps installed and set up. Changes CoreLocation's active simulation state — may affect time zone, date/time, and other location-tied behavior. Some apps and services prohibit or detect simulated locations. Only use this if you know what you're doing.
+Preview: import or select a SnowBoard Lite theme before applying.
+Beta: RemoteCall-only physics can be reset by SpringBoard relayouts such as page swipes, rotations, folder transitions, or resprings. Use Restore Icon Layout if icons stay displaced.
+Beta: patches SpringBoard runtime methods in memory. Respring restores stock, but unsupported builds may glitch the app switcher or crash SpringBoard. Re-run after any respring.
+Runs user-selected JavaScript with access to Cyanide's RemoteCall helpers. Only use scripts you trust; bad scripts can crash SpringBoard.
+Beta / unstable: sends private SpringBoard lock-screen and biometric-resource messages. Always On runs SpringBoard timers while the device is locked, so disable it or respring if Face ID feels noisy or unstable.
+Warning: modifies a local NanoRegistry MobileAsset. Cyanide saves a .cyanide.bak backup beside the original, but system-file edits can fail or require a respring/reboot. Apply or remove this override at your own risk.
+Beta: persistent CallServices system-file replacement. Disclosure sounds may be legally required where you live; you are responsible for your use and apply this at your own risk. Use Restore Original Sounds before removing Cyanide if you want Cyanide's backups written back.
+Beta: system asset page zeroing. Run by itself, then respring after hiding. To restore the home indicator, choose Restore Home Bar and respring.
+Warning: persistent system-file edit. This package modifies launchd disabled.plist to change OTA job state across reboot. Disable or re-enable OTA updates at your own risk.
+Refresh this source from the Sources tab before installing.
+This repo tweak needs a dedicated Cyanide native backend before it can install.
+Hide Home Bar changes the system home-indicator asset and needs a respring right after. Clear the current queue, run Hide Home Bar by itself, respring, then queue your other tweaks.
+Hide Home Bar is already waiting in the queue and must run by itself. Apply or remove Hide Home Bar first, then queue other tweaks after the respring.
+QuickLoader installs one repo tweak at a time. Apply or remove the currently queued repo tweak first.
+Icon Theme Engine needs a selected theme before it can be activated. Open its settings and choose a theme first.
+SnowBoard Lite needs a selected theme before it can be activated. Open SnowBoard Lite settings and choose iOS 6 Theme or import a SnowBoard/IconBundles theme first.
+Dynamic Stage Lite
+the other floating-window tweak
+Search
+These tweaks are visible for continuity only. Installing is disabled because they do not work yet; the unfinished app/source paths remain for anyone who wants to pick them up.
+Installed, unsupported here
+Run Hide Home Bar Alone
+Cannot Queue Install
+Author
+Version
+Known Issues
+Configure
+Current Settings
+Options
+Settings can be changed before or after activation.
+Saved here before install; QuickLoader applies these values when the queued package runs.
+Saved here before install; Cyanide applies these values through the native package backend.
+Open
+Customize
+Choose a target and run actions directly
+Adjust options in the Settings tab
+Call Recording Disclosure
+Select a Theme
+Customize Before Activating?
+Silencing call-recording disclosure sounds may violate consent, notice, or privacy laws where you live or where the call participants are located. Only use this where you have permission and understand the rules that apply to you.\n\nCyanide modifies CallServices system files and keeps a backup when possible. You can restore the original sounds from this package.
+I Understand, Silence
+Remove Pairing Override
+Silence Disclosure Sounds
+Restore Original Sounds
+Hide Home Bar
+Restore Home Bar
+Open Theme Settings
+Configure First
+Activate Anyway
+Apply/Remove
+Silence/Restore
+Disable/Enable
+Apply Pending
+Remove Pending
+Manual Control
+Silence Pending
+Restore Pending
+Hide Pending
+Disable Pending
+Enable Pending
+Removal Pending
+Update Available
+Installed
+Available
+Activation Pending
+Deactivation Pending
+Inactive

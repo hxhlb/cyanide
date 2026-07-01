@@ -12,6 +12,11 @@
 
 static NSString * const kCatPkgCellID = @"CatPkgCell";
 
+static NSString *catpkg_l10n(NSString *text)
+{
+    return text.length > 0 ? NSLocalizedString(text, nil) : text;
+}
+
 @interface CategoryPackagesViewController () <UISearchResultsUpdating>
 @property (nonatomic, copy) NSArray<Package *> *allPackages;
 @property (nonatomic, copy) NSArray<Package *> *filteredPackages;
@@ -46,10 +51,10 @@ static NSString * const kCatPkgCellID = @"CatPkgCell";
     if ([[PackageQueue sharedQueue] canQueueIntent:intent forPackage:pkg reason:&reason]) return NO;
     BOOL hideHomeBarReason = [reason containsString:@"Hide Home Bar"];
     UIAlertController *alert =
-        [UIAlertController alertControllerWithTitle:(hideHomeBarReason ? @"Run Hide Home Bar Alone" : @"Cannot Queue Install")
-                                            message:reason ?: @"This package cannot be queued yet."
+        [UIAlertController alertControllerWithTitle:catpkg_l10n(hideHomeBarReason ? @"Run Hide Home Bar Alone" : @"Cannot Queue Install")
+                                            message:catpkg_l10n(reason ?: @"This package cannot be queued yet.")
                                      preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:catpkg_l10n(@"OK") style:UIAlertActionStyleDefault handler:nil]];
     [self presentViewController:alert animated:YES completion:nil];
     return YES;
 }
@@ -57,7 +62,7 @@ static NSString * const kCatPkgCellID = @"CatPkgCell";
 - (void)viewDidLoad
 {
     [super viewDidLoad];
-    self.title = self.categoryName ?: @"Packages";
+    self.title = catpkg_l10n(self.categoryName ?: @"Packages");
     self.searchText = @"";
 
     [self refreshPackages];
@@ -68,7 +73,7 @@ static NSString * const kCatPkgCellID = @"CatPkgCell";
     self.searchCtl = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchCtl.searchResultsUpdater = self;
     self.searchCtl.obscuresBackgroundDuringPresentation = NO;
-    self.searchCtl.searchBar.placeholder = @"Search";
+    self.searchCtl.searchBar.placeholder = catpkg_l10n(@"Search");
     self.navigationItem.searchController = self.searchCtl;
     self.navigationItem.hidesSearchBarWhenScrolling = YES;
 
@@ -156,7 +161,7 @@ static NSString * const kCatPkgCellID = @"CatPkgCell";
     (void)tableView;
     (void)section;
     if ([self.categoryName isEqualToString:@"In Development"]) {
-        return @"These tweaks are visible for continuity only. Installing is disabled because they do not work yet; the unfinished app/source paths remain for anyone who wants to pick them up.";
+        return catpkg_l10n(@"These tweaks are visible for continuity only. Installing is disabled because they do not work yet; the unfinished app/source paths remain for anyone who wants to pick them up.");
     }
     return nil;
 }
@@ -177,18 +182,20 @@ static NSString * const kCatPkgCellID = @"CatPkgCell";
     config.imageProperties.reservedLayoutSize = CGSizeMake(32.0, 32.0);
     config.imageProperties.maximumSize = CGSizeMake(32.0, 32.0);
     config.imageToTextPadding = 12.0;
-    config.text = pkg.name;
+    config.text = catpkg_l10n(pkg.name);
     config.textProperties.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightSemibold];
     if (disabledForInstall) config.textProperties.color = UIColor.secondaryLabelColor;
     if (pkg.isInstallDisabled && installed && pkg.installDisabledReason.length > 0 && pkg.shortDescription.length > 0) {
-        config.secondaryText = [NSString stringWithFormat:@"Installed, unsupported here · %@ · %@",
-                                pkg.installDisabledReason,
-                                pkg.shortDescription];
+        config.secondaryText = [NSString stringWithFormat:@"%@ · %@ · %@",
+                                catpkg_l10n(@"Installed, unsupported here"),
+                                catpkg_l10n(pkg.installDisabledReason),
+                                catpkg_l10n(pkg.shortDescription)];
     } else if (pkg.isInstallDisabled && installed && pkg.installDisabledReason.length > 0) {
-        config.secondaryText = [NSString stringWithFormat:@"Installed, unsupported here · %@",
-                                pkg.installDisabledReason];
+        config.secondaryText = [NSString stringWithFormat:@"%@ · %@",
+                                catpkg_l10n(@"Installed, unsupported here"),
+                                catpkg_l10n(pkg.installDisabledReason)];
     } else {
-        config.secondaryText = pkg.shortDescription;
+        config.secondaryText = catpkg_l10n(pkg.shortDescription);
     }
     config.secondaryTextProperties.font = [UIFont systemFontOfSize:14.0 weight:UIFontWeightRegular];
     config.secondaryTextProperties.color = (pkg.isInstallDisabled && pkg.installDisabledReason.length > 0)
@@ -212,45 +219,45 @@ static NSString * const kCatPkgCellID = @"CatPkgCell";
 {
     PackageQueueIntent intent = [[PackageQueue sharedQueue] intentForPackage:pkg];
     if (pkg.isInstallDisabled && !pkg.isInstalled) {
-        return [self pillWithText:@"DISABLED" background:[[UIColor systemRedColor] colorWithAlphaComponent:0.16] textColor:UIColor.systemRedColor];
+        return [self pillWithText:catpkg_l10n(@"DISABLED") background:[[UIColor systemRedColor] colorWithAlphaComponent:0.16] textColor:UIColor.systemRedColor];
     }
     if (pkg.kind == PackageInstallKindDirectTool ||
         ((pkg.kind == PackageInstallKindOTA || pkg.kind == PackageInstallKindNanoRegistry ||
           pkg.kind == PackageInstallKindCallRecordingSound || pkg.kind == PackageInstallKindHideHomeBar))) {
         if (intent != PackageQueueIntentNone) {
-            return [self pillWithText:@"PENDING" background:[self.view.tintColor colorWithAlphaComponent:0.18] textColor:self.view.tintColor];
+            return [self pillWithText:catpkg_l10n(@"PENDING") background:[self.view.tintColor colorWithAlphaComponent:0.18] textColor:self.view.tintColor];
         }
         if (pkg.kind == PackageInstallKindHideHomeBar && pkg.isInstalled) {
-            return [self pillWithText:@"HIDDEN" background:[UIColor colorWithRed:0.16 green:0.55 blue:0.32 alpha:0.18] textColor:UIColor.systemGreenColor];
+            return [self pillWithText:catpkg_l10n(@"HIDDEN") background:[UIColor colorWithRed:0.16 green:0.55 blue:0.32 alpha:0.18] textColor:UIColor.systemGreenColor];
         }
-        return [self pillWithText:@"MANUAL" background:[UIColor.secondaryLabelColor colorWithAlphaComponent:0.14] textColor:UIColor.secondaryLabelColor];
+        return [self pillWithText:catpkg_l10n(@"MANUAL") background:[UIColor.secondaryLabelColor colorWithAlphaComponent:0.14] textColor:UIColor.secondaryLabelColor];
     }
     if (pkg.kind == PackageInstallKindRepoTweak) {
         if (intent != PackageQueueIntentNone) {
-            NSString *t = (intent == PackageQueueIntentInstall) ? @"WILL INSTALL" : @"WILL REMOVE";
+            NSString *t = catpkg_l10n((intent == PackageQueueIntentInstall) ? @"WILL INSTALL" : @"WILL REMOVE");
             return [self pillWithText:t background:[self.view.tintColor colorWithAlphaComponent:0.18] textColor:self.view.tintColor];
         }
         if (pkg.isInstalled)
-            return [self pillWithText:@"INSTALLED" background:[UIColor colorWithRed:0.16 green:0.55 blue:0.32 alpha:0.18] textColor:UIColor.systemGreenColor];
+            return [self pillWithText:catpkg_l10n(@"INSTALLED") background:[UIColor colorWithRed:0.16 green:0.55 blue:0.32 alpha:0.18] textColor:UIColor.systemGreenColor];
         if (pkg.isInstallDisabled) {
-            NSString *label = [pkg.installDisabledReason containsString:@"Refresh"] ? @"REFRESH" : @"DISABLED";
+            NSString *label = catpkg_l10n([pkg.installDisabledReason containsString:@"Refresh"] ? @"REFRESH" : @"DISABLED");
             return [self pillWithText:label background:[[UIColor systemOrangeColor] colorWithAlphaComponent:0.16] textColor:UIColor.systemOrangeColor];
         }
     }
     if (intent != PackageQueueIntentNone) {
-        NSString *t = (intent == PackageQueueIntentInstall) ? @"WILL ACTIVATE" : @"WILL DEACTIVATE";
+        NSString *t = catpkg_l10n((intent == PackageQueueIntentInstall) ? @"WILL ACTIVATE" : @"WILL DEACTIVATE");
         return [self pillWithText:t background:[self.view.tintColor colorWithAlphaComponent:0.18] textColor:self.view.tintColor];
     }
     if (pkg.isInstalled)
-        return [self pillWithText:@"INSTALLED" background:[UIColor colorWithRed:0.16 green:0.55 blue:0.32 alpha:0.18] textColor:UIColor.systemGreenColor];
+        return [self pillWithText:catpkg_l10n(@"INSTALLED") background:[UIColor colorWithRed:0.16 green:0.55 blue:0.32 alpha:0.18] textColor:UIColor.systemGreenColor];
     if (pkg.isInstallDisabled)
-        return [self pillWithText:@"DISABLED" background:[[UIColor systemRedColor] colorWithAlphaComponent:0.16] textColor:UIColor.systemRedColor];
+        return [self pillWithText:catpkg_l10n(@"DISABLED") background:[[UIColor systemRedColor] colorWithAlphaComponent:0.16] textColor:UIColor.systemRedColor];
     if (pkg.creatorOnly)
-        return [self pillWithText:@"IN DEV" background:[[UIColor systemPurpleColor] colorWithAlphaComponent:0.16] textColor:UIColor.systemPurpleColor];
+        return [self pillWithText:catpkg_l10n(@"IN DEV") background:[[UIColor systemPurpleColor] colorWithAlphaComponent:0.16] textColor:UIColor.systemPurpleColor];
     if (pkg.experimental)
-        return [self pillWithText:@"EXPERIMENTAL" background:[[UIColor systemRedColor] colorWithAlphaComponent:0.18] textColor:UIColor.systemRedColor];
+        return [self pillWithText:catpkg_l10n(@"EXPERIMENTAL") background:[[UIColor systemRedColor] colorWithAlphaComponent:0.18] textColor:UIColor.systemRedColor];
     if ([pkg.category caseInsensitiveCompare:@"Beta"] == NSOrderedSame)
-        return [self pillWithText:@"BETA" background:[[UIColor systemPurpleColor] colorWithAlphaComponent:0.18] textColor:UIColor.systemPurpleColor];
+        return [self pillWithText:catpkg_l10n(@"BETA") background:[[UIColor systemPurpleColor] colorWithAlphaComponent:0.18] textColor:UIColor.systemPurpleColor];
     return nil;
 }
 
@@ -292,7 +299,7 @@ static NSString * const kCatPkgCellID = @"CatPkgCell";
 
     if (pkg.isInstallDisabled && !pkg.isInstalled && intent == PackageQueueIntentNone) return nil;
     if (pkg.kind == PackageInstallKindDirectTool) {
-        UIContextualAction *open = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:@"Open" handler:^(UIContextualAction *a, UIView *v, void (^done)(BOOL)) {
+        UIContextualAction *open = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal title:catpkg_l10n(@"Open") handler:^(UIContextualAction *a, UIView *v, void (^done)(BOOL)) {
             done(YES);
             [self navigateToSettingsSectionForPackage:pkg];
         }];
@@ -307,20 +314,20 @@ static NSString * const kCatPkgCellID = @"CatPkgCell";
     UIColor *color;
     NSString *symbol;
     if (intent != PackageQueueIntentNone) {
-        title = @"Cancel"; color = UIColor.systemGrayColor; symbol = @"xmark.circle";
+        title = catpkg_l10n(@"Cancel"); color = UIColor.systemGrayColor; symbol = @"xmark.circle";
     } else if (pkg.kind == PackageInstallKindHideHomeBar) {
-        title = pkg.isInstalled ? @"Restore" : @"Hide";
+        title = catpkg_l10n(pkg.isInstalled ? @"Restore" : @"Hide");
         color = pkg.isInstalled ? UIColor.systemRedColor : self.view.tintColor;
         symbol = pkg.isInstalled ? @"arrow.clockwise" : @"line.3.horizontal";
     } else if (pkg.isInstalled) {
-        title = (pkg.kind == PackageInstallKindRepoTweak) ? @"Remove" : @"Deactivate";
+        title = catpkg_l10n((pkg.kind == PackageInstallKindRepoTweak) ? @"Remove" : @"Deactivate");
         color = UIColor.systemRedColor; symbol = @"power";
     } else if ([self packageNeedsThemeBeforeInstall:pkg]) {
-        title = @"Select Theme"; color = self.view.tintColor; symbol = @"paintpalette";
+        title = catpkg_l10n(@"Select Theme"); color = self.view.tintColor; symbol = @"paintpalette";
     } else if ([self packageNeedsLiveWPVideoBeforeInstall:pkg]) {
-        title = @"Select Video"; color = self.view.tintColor; symbol = @"photo.badge.plus";
+        title = catpkg_l10n(@"Select Video"); color = self.view.tintColor; symbol = @"photo.badge.plus";
     } else {
-        title = (pkg.kind == PackageInstallKindRepoTweak) ? @"Install" : @"Activate";
+        title = catpkg_l10n((pkg.kind == PackageInstallKindRepoTweak) ? @"Install" : @"Activate");
         color = self.view.tintColor; symbol = @"play.circle";
     }
 
@@ -348,9 +355,10 @@ static NSString * const kCatPkgCellID = @"CatPkgCell";
     UINavigationController *settingsNav = nil;
     for (NSUInteger i = 0; i < tab.viewControllers.count; i++) {
         UIViewController *vc = tab.viewControllers[i];
-        if ([vc.tabBarItem.title isEqualToString:@"Settings"]) {
+        UINavigationController *nav = [vc isKindOfClass:UINavigationController.class] ? (UINavigationController *)vc : nil;
+        if ([nav.viewControllers.firstObject isKindOfClass:SettingsViewController.class]) {
             settingsIndex = i;
-            if ([vc isKindOfClass:UINavigationController.class]) settingsNav = (UINavigationController *)vc;
+            settingsNav = nav;
             break;
         }
     }

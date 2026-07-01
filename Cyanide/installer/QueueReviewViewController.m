@@ -32,12 +32,17 @@ static BOOL QueuePackageIsHideHomeBar(Package *pkg)
            [pkg.repoTweakID isEqualToString:@"lightsaber.hide-homebar"];
 }
 
+static NSString *queue_review_l10n(NSString *text)
+{
+    return text.length ? NSLocalizedString(text, nil) : text;
+}
+
 @implementation QueueReviewViewController
 
 - (void)viewDidLoad
 {
     [super viewDidLoad];
-    self.title = @"Queue";
+    self.title = queue_review_l10n(@"Queue");
     self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
 
     self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
@@ -52,7 +57,7 @@ static BOOL QueuePackageIsHideHomeBar(Package *pkg)
 
     self.emptyLabel = [[UILabel alloc] init];
     self.emptyLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    self.emptyLabel.text = @"No pending changes\nQueue packages from the Packages tab";
+    self.emptyLabel.text = queue_review_l10n(@"No pending changes\nQueue packages from the Packages tab");
     self.emptyLabel.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightMedium];
     self.emptyLabel.textColor = UIColor.tertiaryLabelColor;
     self.emptyLabel.textAlignment = NSTextAlignmentCenter;
@@ -98,7 +103,7 @@ static BOOL QueuePackageIsHideHomeBar(Package *pkg)
     container.backgroundColor = UIColor.systemGroupedBackgroundColor;
 
     UIButtonConfiguration *confirmCfg = [UIButtonConfiguration filledButtonConfiguration];
-    confirmCfg.title = @"Confirm";
+    confirmCfg.title = queue_review_l10n(@"Confirm");
     confirmCfg.cornerStyle = UIButtonConfigurationCornerStyleLarge;
     confirmCfg.titleTextAttributesTransformer = ^NSDictionary<NSAttributedStringKey,id> *(NSDictionary<NSAttributedStringKey,id> *incoming) {
         NSMutableDictionary *attrs = [incoming mutableCopy];
@@ -112,7 +117,7 @@ static BOOL QueuePackageIsHideHomeBar(Package *pkg)
     [container addSubview:self.confirmButton];
 
     UIButtonConfiguration *clearCfg = [UIButtonConfiguration plainButtonConfiguration];
-    clearCfg.title = @"Clear Queue";
+    clearCfg.title = queue_review_l10n(@"Clear Queue");
     clearCfg.baseForegroundColor = UIColor.systemRedColor;
     clearCfg.titleTextAttributesTransformer = ^NSDictionary<NSAttributedStringKey,id> *(NSDictionary<NSAttributedStringKey,id> *incoming) {
         NSMutableDictionary *attrs = [incoming mutableCopy];
@@ -150,11 +155,11 @@ static BOOL QueuePackageIsHideHomeBar(Package *pkg)
 
     NSString *confirmTitle;
     if (count == 1) {
-        confirmTitle = @"Confirm 1 Change";
+        confirmTitle = queue_review_l10n(@"Confirm 1 Change");
     } else if (count > 1) {
-        confirmTitle = [NSString stringWithFormat:@"Confirm %ld Changes", (long)count];
+        confirmTitle = [NSString stringWithFormat:queue_review_l10n(@"Confirm %ld Changes"), (long)count];
     } else {
-        confirmTitle = @"Confirm";
+        confirmTitle = queue_review_l10n(@"Confirm");
     }
     UIButtonConfiguration *cfg = self.confirmButton.configuration;
     cfg.title = confirmTitle;
@@ -186,14 +191,14 @@ static BOOL QueuePackageIsHideHomeBar(Package *pkg)
 
     UILabel *title = [[UILabel alloc] init];
     title.translatesAutoresizingMaskIntoConstraints = NO;
-    title.text = @"Hide Home Bar must run alone";
+    title.text = queue_review_l10n(@"Hide Home Bar must run alone");
     title.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightBold];
     title.textColor = UIColor.labelColor;
     [card addSubview:title];
 
     UILabel *body = [[UILabel alloc] init];
     body.translatesAutoresizingMaskIntoConstraints = NO;
-    body.text = @"It edits the system home-indicator asset and then needs a respring. Confirm only Hide Home Bar, respring, then queue your other tweaks.";
+    body.text = queue_review_l10n(@"It edits the system home-indicator asset and then needs a respring. Confirm only Hide Home Bar, respring, then queue your other tweaks.");
     body.font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightRegular];
     body.textColor = UIColor.secondaryLabelColor;
     body.numberOfLines = 0;
@@ -326,22 +331,22 @@ static BOOL QueuePackageIsHideHomeBar(Package *pkg)
     NSString *label;
     switch ((QueueReviewSection)section) {
         case QueueReviewSectionInstall:
-            if (allSameKind && commonKind == PackageInstallKindOTA) label = @"Disable";
-            else if (allSameKind && commonKind == PackageInstallKindNanoRegistry) label = @"Apply";
-            else if (allSameKind && commonKind == PackageInstallKindCallRecordingSound) label = @"Silence";
-            else if (allSameKind && commonKind == PackageInstallKindHideHomeBar) label = @"Hide";
-            else if (allSameKind && commonKind == PackageInstallKindRepoTweak) label = @"Install";
-            else label = @"Activate";
+            if (allSameKind && commonKind == PackageInstallKindOTA) label = queue_review_l10n(@"Disable");
+            else if (allSameKind && commonKind == PackageInstallKindNanoRegistry) label = queue_review_l10n(@"Apply");
+            else if (allSameKind && commonKind == PackageInstallKindCallRecordingSound) label = queue_review_l10n(@"Silence");
+            else if (allSameKind && commonKind == PackageInstallKindHideHomeBar) label = queue_review_l10n(@"Hide");
+            else if (allSameKind && commonKind == PackageInstallKindRepoTweak) label = queue_review_l10n(@"Install");
+            else label = queue_review_l10n(@"Activate");
             break;
         case QueueReviewSectionUninstall:
-            if (allSameKind && commonKind == PackageInstallKindOTA) label = @"Enable";
-            else if (allSameKind && commonKind == PackageInstallKindNanoRegistry) label = @"Remove";
-            else if (allSameKind && commonKind == PackageInstallKindCallRecordingSound) label = @"Restore";
-            else if (allSameKind && commonKind == PackageInstallKindHideHomeBar) label = @"Restore";
-            else if (allSameKind && commonKind == PackageInstallKindRepoTweak) label = @"Remove";
-            else label = @"Deactivate";
+            if (allSameKind && commonKind == PackageInstallKindOTA) label = queue_review_l10n(@"Enable");
+            else if (allSameKind && commonKind == PackageInstallKindNanoRegistry) label = queue_review_l10n(@"Remove");
+            else if (allSameKind && commonKind == PackageInstallKindCallRecordingSound) label = queue_review_l10n(@"Restore");
+            else if (allSameKind && commonKind == PackageInstallKindHideHomeBar) label = queue_review_l10n(@"Restore");
+            else if (allSameKind && commonKind == PackageInstallKindRepoTweak) label = queue_review_l10n(@"Remove");
+            else label = queue_review_l10n(@"Deactivate");
             break;
-        case QueueReviewSectionReApply: label = @"Already Active"; break;
+        case QueueReviewSectionReApply: label = queue_review_l10n(@"Already Active"); break;
         default: return nil;
     }
     return [NSString stringWithFormat:@"%@  ·  %ld", label, (long)list.count];
@@ -363,10 +368,10 @@ static BOOL QueuePackageIsHideHomeBar(Package *pkg)
     switch ((QueueReviewSection)section) {
         case QueueReviewSectionInstall:
             if (![self queueIncludesHideHomeBar]) return nil;
-            return @"Hide Home Bar must run by itself because it edits the system home-indicator asset and then needs a respring. Run it alone first, then apply other tweaks after the respring.";
+            return queue_review_l10n(@"Hide Home Bar must run by itself because it edits the system home-indicator asset and then needs a respring. Run it alone first, then apply other tweaks after the respring.");
         case QueueReviewSectionReApply:
             if ([self reApplyPackages].count == 0) return nil;
-            return @"These are already installed, not new pending changes. Confirming re-runs the chain so RemoteCall-backed tweaks come back after a force-quit. To stop one from running, deactivate it from the Packages tab, or use Reset All Packages in Settings → Quick Actions.";
+            return queue_review_l10n(@"These are already installed, not new pending changes. Confirming re-runs the chain so RemoteCall-backed tweaks come back after a force-quit. To stop one from running, deactivate it from the Packages tab, or use Reset All Packages in Settings → Quick Actions.");
         default:
             return nil;
     }
@@ -380,9 +385,9 @@ static BOOL QueuePackageIsHideHomeBar(Package *pkg)
     }
     NSArray<Package *> *packages = [self packagesForSection:indexPath.section];
     if (indexPath.row >= (NSInteger)packages.count) {
-        cell.textLabel.text = @"No longer pending";
+        cell.textLabel.text = queue_review_l10n(@"No longer pending");
         cell.textLabel.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightRegular];
-        cell.detailTextLabel.text = @"This queue row was already applied or cleared.";
+        cell.detailTextLabel.text = queue_review_l10n(@"This queue row was already applied or cleared.");
         cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
         cell.detailTextLabel.font = [UIFont systemFontOfSize:12.0];
         cell.imageView.image = [UIImage systemImageNamed:@"checkmark.circle"];
@@ -398,9 +403,9 @@ static BOOL QueuePackageIsHideHomeBar(Package *pkg)
                           [pkg.enabledKey isEqualToString:kSettingsQuickLoaderEnabled]);
     if (isQuickLoader) {
         NSString *scriptName = [[NSUserDefaults standardUserDefaults] stringForKey:@"QuickLoaderSourceScriptName"];
-        cell.textLabel.text = scriptName.length ? [NSString stringWithFormat:@"QuickLoader: %@", scriptName] : pkg.name;
+        cell.textLabel.text = scriptName.length ? [NSString stringWithFormat:@"QuickLoader: %@", scriptName] : queue_review_l10n(pkg.name);
     } else {
-        cell.textLabel.text = pkg.name;
+        cell.textLabel.text = queue_review_l10n(pkg.name);
     }
     cell.textLabel.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold];
 
@@ -409,27 +414,27 @@ static BOOL QueuePackageIsHideHomeBar(Package *pkg)
         case QueueReviewSectionInstall:
             switch (pkg.kind) {
                 case PackageInstallKindOTA:
-                    cell.detailTextLabel.text = @"Pending OTA disable";
+                    cell.detailTextLabel.text = queue_review_l10n(@"Pending OTA disable");
                     cell.detailTextLabel.textColor = UIColor.systemOrangeColor;
                     break;
                 case PackageInstallKindNanoRegistry:
-                    cell.detailTextLabel.text = @"Pending override apply";
+                    cell.detailTextLabel.text = queue_review_l10n(@"Pending override apply");
                     cell.detailTextLabel.textColor = self.view.tintColor;
                     break;
                 case PackageInstallKindCallRecordingSound:
-                    cell.detailTextLabel.text = @"Pending sound silence";
+                    cell.detailTextLabel.text = queue_review_l10n(@"Pending sound silence");
                     cell.detailTextLabel.textColor = UIColor.systemOrangeColor;
                     break;
                 case PackageInstallKindHideHomeBar:
-                    cell.detailTextLabel.text = @"Runs alone; respring required";
+                    cell.detailTextLabel.text = queue_review_l10n(@"Runs alone; respring required");
                     cell.detailTextLabel.textColor = UIColor.systemOrangeColor;
                     break;
                 case PackageInstallKindRepoTweak:
-                    cell.detailTextLabel.text = @"Install pending";
+                    cell.detailTextLabel.text = queue_review_l10n(@"Install pending");
                     cell.detailTextLabel.textColor = UIColor.systemGreenColor;
                     break;
                 default:
-                    cell.detailTextLabel.text = @"Activation pending";
+                    cell.detailTextLabel.text = queue_review_l10n(@"Activation pending");
                     cell.detailTextLabel.textColor = UIColor.systemGreenColor;
                     break;
             }
@@ -437,33 +442,33 @@ static BOOL QueuePackageIsHideHomeBar(Package *pkg)
         case QueueReviewSectionUninstall:
             switch (pkg.kind) {
                 case PackageInstallKindOTA:
-                    cell.detailTextLabel.text = @"Pending OTA enable";
+                    cell.detailTextLabel.text = queue_review_l10n(@"Pending OTA enable");
                     cell.detailTextLabel.textColor = UIColor.systemGreenColor;
                     break;
                 case PackageInstallKindNanoRegistry:
-                    cell.detailTextLabel.text = @"Pending override remove";
+                    cell.detailTextLabel.text = queue_review_l10n(@"Pending override remove");
                     cell.detailTextLabel.textColor = UIColor.systemRedColor;
                     break;
                 case PackageInstallKindCallRecordingSound:
-                    cell.detailTextLabel.text = @"Pending sound restore";
+                    cell.detailTextLabel.text = queue_review_l10n(@"Pending sound restore");
                     cell.detailTextLabel.textColor = UIColor.systemGreenColor;
                     break;
                 case PackageInstallKindHideHomeBar:
-                    cell.detailTextLabel.text = @"Pending respring restore";
+                    cell.detailTextLabel.text = queue_review_l10n(@"Pending respring restore");
                     cell.detailTextLabel.textColor = UIColor.systemGreenColor;
                     break;
                 case PackageInstallKindRepoTweak:
-                    cell.detailTextLabel.text = @"Removal pending";
+                    cell.detailTextLabel.text = queue_review_l10n(@"Removal pending");
                     cell.detailTextLabel.textColor = UIColor.systemRedColor;
                     break;
                 default:
-                    cell.detailTextLabel.text = @"Deactivation pending";
+                    cell.detailTextLabel.text = queue_review_l10n(@"Deactivation pending");
                     cell.detailTextLabel.textColor = UIColor.systemRedColor;
                     break;
             }
             break;
         case QueueReviewSectionReApply:
-            cell.detailTextLabel.text = @"Active; will refresh";
+            cell.detailTextLabel.text = queue_review_l10n(@"Active; will refresh");
             cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
             break;
         default:
@@ -493,7 +498,7 @@ static BOOL QueuePackageIsHideHomeBar(Package *pkg)
 
     Package *pkg = packages[indexPath.row];
     UIContextualAction *remove = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive
-                                                                         title:@"Remove"
+                                                                         title:queue_review_l10n(@"Remove")
                                                                        handler:^(UIContextualAction * _Nonnull action, __kindof UIView * _Nonnull sourceView, void (^ _Nonnull completionHandler)(BOOL)) {
         [[PackageQueue sharedQueue] removePackage:pkg];
         completionHandler(YES);
@@ -524,10 +529,10 @@ static BOOL QueuePackageIsHideHomeBar(Package *pkg)
     }
     if (includesHideHomeBar && count > 1) {
         UIAlertController *ac = [UIAlertController
-            alertControllerWithTitle:@"Run Hide Home Bar Alone"
-                             message:@"Hide Home Bar edits the system home-indicator asset and needs a respring after it applies. Remove the other pending changes, run Hide Home Bar by itself, then apply other tweaks after the respring."
+            alertControllerWithTitle:queue_review_l10n(@"Run Hide Home Bar Alone")
+                             message:queue_review_l10n(@"Hide Home Bar edits the system home-indicator asset and needs a respring after it applies. Remove the other pending changes, run Hide Home Bar by itself, then apply other tweaks after the respring.")
                       preferredStyle:UIAlertControllerStyleAlert];
-        [ac addAction:[UIAlertAction actionWithTitle:@"OK"
+        [ac addAction:[UIAlertAction actionWithTitle:queue_review_l10n(@"OK")
                                                style:UIAlertActionStyleDefault
                                              handler:nil]];
         [self presentViewController:ac animated:YES completion:nil];
@@ -547,11 +552,11 @@ static BOOL QueuePackageIsHideHomeBar(Package *pkg)
 - (void)didTapClear
 {
     if ([PackageQueue sharedQueue].pendingCount == 0) return;
-        UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Clear Queue?"
-                                                                message:@"Discard all pending activation / deactivation changes."
+        UIAlertController *ac = [UIAlertController alertControllerWithTitle:queue_review_l10n(@"Clear Queue?")
+                                                                message:queue_review_l10n(@"Discard all pending activation / deactivation changes.")
                                                          preferredStyle:UIAlertControllerStyleAlert];
-    [ac addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [ac addAction:[UIAlertAction actionWithTitle:@"Clear" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_) {
+    [ac addAction:[UIAlertAction actionWithTitle:queue_review_l10n(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+    [ac addAction:[UIAlertAction actionWithTitle:queue_review_l10n(@"Clear") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_) {
         [[PackageQueue sharedQueue] clear];
     }]];
     [self presentViewController:ac animated:YES completion:nil];

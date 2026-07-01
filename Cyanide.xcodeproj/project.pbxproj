@@ -19,6 +19,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		2810023F2FF212B6009B50CD /* ChOma.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = ChOma.xcodeproj; sourceTree = "<group>"; };
+		281009B32FF2639A009B50CD /* ChOma.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = ChOma.xcodeproj; sourceTree = "<group>"; };
 		AA73F7982F7BC6CB00134C31 /* ChOma.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = ChOma.xcodeproj; sourceTree = "<group>"; };
 		AA794BC92F828668001F0544 /* ChOma.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = ChOma.xcodeproj; sourceTree = "<group>"; };
 		AAA297772F72D439000B5902 /* Cyanide.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Cyanide.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -103,9 +105,6 @@
 				XPF/external/ChOma/tests/kpf/main.c,
 				XPF/LICENSE.md,
 				XPF/Makefile,
-				XPF/output/ios/libxpf.dylib,
-				XPF/output/ios/xpf_test,
-				XPF/output/iphonesimulator/libxpf.dylib,
 				XPF/src/bad_recovery.c,
 				XPF/src/cli/main.c,
 				XPF/src/common.c,
@@ -119,25 +118,11 @@
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
-/* Begin PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
-		AA794C7B2F853D1A001F0544 /* Exceptions for "Cyanide" folder in "Copy Files" phase from "Cyanide" target */ = {
-			isa = PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet;
-			attributesByRelativePath = {
-				XPF/output/ios/libxpf.dylib = (CodeSignOnCopy, );
-			};
-			buildPhase = AAA2989D2F7418CC000B5902 /* CopyFiles */;
-			membershipExceptions = (
-				XPF/output/ios/libxpf.dylib,
-			);
-		};
-/* End PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
-
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		AAA297792F72D439000B5902 /* Cyanide */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				AAA2978E2F72D43A000B5902 /* Exceptions for "Cyanide" folder in "Cyanide" target */,
-				AA794C7B2F853D1A001F0544 /* Exceptions for "Cyanide" folder in "Copy Files" phase from "Cyanide" target */,
 			);
 			path = Cyanide;
 			sourceTree = "<group>";
@@ -155,6 +140,20 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		281002772FF212B6009B50CD /* Products */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		281009EE2FF2639A009B50CD /* Products */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
 		AA73F7C72F7BC6CB00134C31 /* Products */ = {
 			isa = PBXGroup;
 			children = (
@@ -408,7 +407,7 @@
 				AAA297742F72D439000B5902 /* Frameworks */,
 				AAA297752F72D439000B5902 /* Resources */,
 				AAA2989D2F7418CC000B5902 /* CopyFiles */,
-				FBC0A0012FD6000000C0A001 /* Copy Simulator XPF */,
+				FBC0A0012FD6000000C0A001 /* Copy XPF */,
 			);
 			buildRules = (
 			);
@@ -444,6 +443,8 @@
 			knownRegions = (
 				en,
 				Base,
+				"zh-Hans",
+				"zh-Hant",
 			);
 			mainGroup = AAA2976E2F72D439000B5902;
 			minimizedProjectReferenceProxies = 1;
@@ -452,28 +453,12 @@
 			projectDirPath = "";
 			projectReferences = (
 				{
-					ProductGroup = FBA376492FB7FE5600886898 /* Products */;
-					ProjectRef = FBA376182FB7FE5600886898 /* ChOma.xcodeproj */;
-				},
-				{
 					ProductGroup = FBEF03792FAC52D5005E14B9 /* Products */;
 					ProjectRef = FBEF03482FAC52D5005E14B9 /* ChOma.xcodeproj */;
 				},
 				{
-					ProductGroup = FB41176B2FB9597C00461945 /* Products */;
-					ProjectRef = FB4117392FB9597C00461945 /* ChOma.xcodeproj */;
-				},
-				{
-					ProductGroup = FBE1CBB32FC0EA040043E3DA /* Products */;
-					ProjectRef = FBE1CB812FC0EA040043E3DA /* ChOma.xcodeproj */;
-				},
-				{
 					ProductGroup = AA794BF82F828668001F0544 /* Products */;
 					ProjectRef = AA794BC92F828668001F0544 /* ChOma.xcodeproj */;
-				},
-				{
-					ProductGroup = FB0A9FB02FBBBE5100C03573 /* Products */;
-					ProjectRef = FB0A9F7E2FBBBE5100C03573 /* ChOma.xcodeproj */;
 				},
 				{
 					ProductGroup = FB4112462FB93FB800461945 /* Products */;
@@ -492,24 +477,8 @@
 					ProjectRef = FB45558C2FC7DA4F004466F5 /* ChOma.xcodeproj */;
 				},
 				{
-					ProductGroup = FBDA75C92FCB770D00816DA0 /* Products */;
-					ProjectRef = FBDA75932FCB770D00816DA0 /* ChOma.xcodeproj */;
-				},
-				{
-					ProductGroup = FB45D7D52FD01E4A00076C12 /* Products */;
-					ProjectRef = FB45D79F2FD01E4A00076C12 /* ChOma.xcodeproj */;
-				},
-				{
-					ProductGroup = FBA008852FB522840080FFE2 /* Products */;
-					ProjectRef = FBA008522FB522840080FFE2 /* ChOma.xcodeproj */;
-				},
-				{
-					ProductGroup = FBEF02552FAC52BF005E14B9 /* Products */;
-					ProjectRef = FBEF02242FAC52BF005E14B9 /* ChOma.xcodeproj */;
-				},
-				{
-					ProductGroup = AAA298312F741178000B5902 /* Products */;
-					ProjectRef = AAA2982D2F741178000B5902 /* ChOma.xcodeproj */;
+					ProductGroup = 281002772FF212B6009B50CD /* Products */;
+					ProjectRef = 2810023F2FF212B6009B50CD /* ChOma.xcodeproj */;
 				},
 				{
 					ProductGroup = FB1C33BF2FD7B58E000677B5 /* Products */;
@@ -528,12 +497,68 @@
 					ProjectRef = FBFA38382FB68E0600B9F081 /* ChOma.xcodeproj */;
 				},
 				{
-					ProductGroup = FB6E0DC92FD617F8003D17B7 /* Products */;
-					ProjectRef = FB6E0D8C2FD617F8003D17B7 /* ChOma.xcodeproj */;
-				},
-				{
 					ProductGroup = FBFECADC2FCF1D67006A02BE /* Products */;
 					ProjectRef = FBFECAA52FCF1D67006A02BE /* ChOma.xcodeproj */;
+				},
+				{
+					ProductGroup = FBE3DA702FD4A45700529B2F /* Products */;
+					ProjectRef = FBE3DA332FD4A45700529B2F /* ChOma.xcodeproj */;
+				},
+				{
+					ProductGroup = FB222C532FC3707B001D5118 /* Products */;
+					ProjectRef = FB222C212FC3707B001D5118 /* ChOma.xcodeproj */;
+				},
+				{
+					ProductGroup = 281009EE2FF2639A009B50CD /* Products */;
+					ProjectRef = 281009B32FF2639A009B50CD /* ChOma.xcodeproj */;
+				},
+				{
+					ProductGroup = FB5949302FC0DFEA006FB8AE /* Products */;
+					ProjectRef = FB5948FE2FC0DFEA006FB8AE /* ChOma.xcodeproj */;
+				},
+				{
+					ProductGroup = FBA376492FB7FE5600886898 /* Products */;
+					ProjectRef = FBA376182FB7FE5600886898 /* ChOma.xcodeproj */;
+				},
+				{
+					ProductGroup = AA73F7C72F7BC6CB00134C31 /* Products */;
+					ProjectRef = AA73F7982F7BC6CB00134C31 /* ChOma.xcodeproj */;
+				},
+				{
+					ProductGroup = FB41176B2FB9597C00461945 /* Products */;
+					ProjectRef = FB4117392FB9597C00461945 /* ChOma.xcodeproj */;
+				},
+				{
+					ProductGroup = FBE1CBB32FC0EA040043E3DA /* Products */;
+					ProjectRef = FBE1CB812FC0EA040043E3DA /* ChOma.xcodeproj */;
+				},
+				{
+					ProductGroup = FB0A9FB02FBBBE5100C03573 /* Products */;
+					ProjectRef = FB0A9F7E2FBBBE5100C03573 /* ChOma.xcodeproj */;
+				},
+				{
+					ProductGroup = FB45D7D52FD01E4A00076C12 /* Products */;
+					ProjectRef = FB45D79F2FD01E4A00076C12 /* ChOma.xcodeproj */;
+				},
+				{
+					ProductGroup = FBDA75C92FCB770D00816DA0 /* Products */;
+					ProjectRef = FBDA75932FCB770D00816DA0 /* ChOma.xcodeproj */;
+				},
+				{
+					ProductGroup = FBA008852FB522840080FFE2 /* Products */;
+					ProjectRef = FBA008522FB522840080FFE2 /* ChOma.xcodeproj */;
+				},
+				{
+					ProductGroup = FBEF02552FAC52BF005E14B9 /* Products */;
+					ProjectRef = FBEF02242FAC52BF005E14B9 /* ChOma.xcodeproj */;
+				},
+				{
+					ProductGroup = AAA298312F741178000B5902 /* Products */;
+					ProjectRef = AAA2982D2F741178000B5902 /* ChOma.xcodeproj */;
+				},
+				{
+					ProductGroup = FB6E0DC92FD617F8003D17B7 /* Products */;
+					ProjectRef = FB6E0D8C2FD617F8003D17B7 /* ChOma.xcodeproj */;
 				},
 				{
 					ProductGroup = FB45DCB52FD01F6700076C12 /* Products */;
@@ -548,10 +573,6 @@
 					ProjectRef = FB1C38E32FD7CF8A000677B5 /* ChOma.xcodeproj */;
 				},
 				{
-					ProductGroup = FBE3DA702FD4A45700529B2F /* Products */;
-					ProjectRef = FBE3DA332FD4A45700529B2F /* ChOma.xcodeproj */;
-				},
-				{
 					ProductGroup = FBA40B782FF02FE40094D8DA /* Products */;
 					ProjectRef = FBA40B372FF02FE40094D8DA /* ChOma.xcodeproj */;
 				},
@@ -562,18 +583,6 @@
 				{
 					ProductGroup = FB3EF06D2FEB07BB009040FC /* Products */;
 					ProjectRef = FB3EF02A2FEB07BB009040FC /* ChOma.xcodeproj */;
-				},
-				{
-					ProductGroup = FB222C532FC3707B001D5118 /* Products */;
-					ProjectRef = FB222C212FC3707B001D5118 /* ChOma.xcodeproj */;
-				},
-				{
-					ProductGroup = FB5949302FC0DFEA006FB8AE /* Products */;
-					ProjectRef = FB5948FE2FC0DFEA006FB8AE /* ChOma.xcodeproj */;
-				},
-				{
-					ProductGroup = AA73F7C72F7BC6CB00134C31 /* Products */;
-					ProjectRef = AA73F7982F7BC6CB00134C31 /* ChOma.xcodeproj */;
 				},
 			);
 			projectRoot = "";
@@ -611,7 +620,7 @@
 			shellPath = /bin/sh;
 			shellScript = "if [ \"$PLATFORM_NAME\" = \"iphonesimulator\" ]; then\n    make -C \"$SRCROOT/Cyanide/XPF\" output/iphonesimulator/libxpf.dylib\nelse\n    make -C \"$SRCROOT/Cyanide/XPF\" output/ios/libxpf.dylib\nfi\n";
 		};
-		FBC0A0012FD6000000C0A001 /* Copy Simulator XPF */ = {
+		FBC0A0012FD6000000C0A001 /* Copy XPF */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
@@ -620,16 +629,15 @@
 			inputFileListPaths = (
 			);
 			inputPaths = (
-				"$(SRCROOT)/Cyanide/XPF/output/iphonesimulator/libxpf.dylib",
 			);
-			name = "Copy Simulator XPF";
+			name = "Copy XPF";
 			outputFileListPaths = (
 			);
 			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "if [ \"$PLATFORM_NAME\" = \"iphonesimulator\" ]; then\n    cp \"$SRCROOT/Cyanide/XPF/output/iphonesimulator/libxpf.dylib\" \"$TARGET_BUILD_DIR/$WRAPPER_NAME/libxpf.dylib\"\nfi\n";
+			shellScript = "set -e\nif [ \"$PLATFORM_NAME\" = \"iphonesimulator\" ]; then\n    XPF_DYLIB=\"$SRCROOT/Cyanide/XPF/output/iphonesimulator/libxpf.dylib\"\nelse\n    XPF_DYLIB=\"$SRCROOT/Cyanide/XPF/output/ios/libxpf.dylib\"\nfi\n\nDEST=\"$TARGET_BUILD_DIR/$WRAPPER_NAME/libxpf.dylib\"\ncp \"$XPF_DYLIB\" \"$DEST\"\n\nif [ \"$PLATFORM_NAME\" != \"iphonesimulator\" ] && [ -n \"$EXPANDED_CODE_SIGN_IDENTITY\" ] && [ \"$EXPANDED_CODE_SIGN_IDENTITY\" != \"-\" ]; then\n    /usr/bin/codesign --force --sign \"$EXPANDED_CODE_SIGN_IDENTITY\" --preserve-metadata=identifier,entitlements \"$DEST\"\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -651,9 +659,9 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1003006;
+				CURRENT_PROJECT_VERSION = 1003007;
 				DEVELOPMENT_ASSET_PATHS = "";
-				DEVELOPMENT_TEAM = 7LGY4NE2VM;
+				DEVELOPMENT_TEAM = 7CYH7THFLQ;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -663,6 +671,8 @@
 				);
 				INFOPLIST_FILE = Cyanide/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Cyanide;
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Cyanide uses your location to show local weather in NiceBar Lite.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIMainStoryboardFile = Main;
@@ -694,7 +704,7 @@
 					"$(PROJECT_DIR)/Cyanide/XPF/external/ChOma/external/ios",
 					"$(PROJECT_DIR)/Cyanide/resident/output",
 				);
-				MARKETING_VERSION = 1.3.6;
+				MARKETING_VERSION = 1.3.7;
 				OTHER_CFLAGS = "";
 				OTHER_LDFLAGS = "$(inherited)";
 				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
@@ -705,7 +715,7 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/Cyanide/XPF/output/iphonesimulator/libxpf.dylib",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "com.zeroxjf.ios-cyanide1";
+				PRODUCT_BUNDLE_IDENTIFIER = iya.banana.cyanide;
 				PRODUCT_NAME = Cyanide;
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -726,9 +736,9 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1003006;
+				CURRENT_PROJECT_VERSION = 1003007;
 				DEVELOPMENT_ASSET_PATHS = "";
-				DEVELOPMENT_TEAM = 7LGY4NE2VM;
+				DEVELOPMENT_TEAM = 7CYH7THFLQ;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -738,6 +748,8 @@
 				);
 				INFOPLIST_FILE = Cyanide/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Cyanide;
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Cyanide uses your location to show local weather in NiceBar Lite.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIMainStoryboardFile = Main;
@@ -769,7 +781,7 @@
 					"$(PROJECT_DIR)/Cyanide/XPF/external/ChOma/external/ios",
 					"$(PROJECT_DIR)/Cyanide/resident/output",
 				);
-				MARKETING_VERSION = 1.3.6;
+				MARKETING_VERSION = 1.3.7;
 				OTHER_CFLAGS = "";
 				OTHER_LDFLAGS = "$(inherited)";
 				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
@@ -780,7 +792,7 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/Cyanide/XPF/output/iphonesimulator/libxpf.dylib",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "com.zeroxjf.ios-cyanide1";
+				PRODUCT_BUNDLE_IDENTIFIER = iya.banana.cyanide;
 				PRODUCT_NAME = Cyanide;
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -931,9 +943,9 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1003006;
+				CURRENT_PROJECT_VERSION = 1003007;
 				DEVELOPMENT_ASSET_PATHS = "";
-				DEVELOPMENT_TEAM = 7LGY4NE2VM;
+				DEVELOPMENT_TEAM = 7CYH7THFLQ;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
 				GCC_PREPROCESSOR_DEFINITIONS = (
@@ -946,7 +958,9 @@
 					"$(SRCROOT)/Cyanide/XPF/external/ChOma/include",
 				);
 				INFOPLIST_FILE = Cyanide/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Cyanide VPhone";
+				INFOPLIST_KEY_CFBundleDisplayName = Cyanide;
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Cyanide uses your location to show local weather in NiceBar Lite.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIMainStoryboardFile = Main;
@@ -978,7 +992,7 @@
 					"$(PROJECT_DIR)/Cyanide/XPF/external/ChOma/external/ios",
 					"$(PROJECT_DIR)/Cyanide/resident/output",
 				);
-				MARKETING_VERSION = 1.3.6;
+				MARKETING_VERSION = 1.3.7;
 				OTHER_CFLAGS = "";
 				OTHER_LDFLAGS = "$(inherited)";
 				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
@@ -989,7 +1003,7 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/Cyanide/XPF/output/iphonesimulator/libxpf.dylib",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "com.zeroxjf.ios-cyanide1";
+				PRODUCT_BUNDLE_IDENTIFIER = iya.banana.cyanide;
 				PRODUCT_NAME = Cyanide;
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;

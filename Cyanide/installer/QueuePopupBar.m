@@ -7,6 +7,11 @@
 #import "PackageQueue.h"
 #import "../SettingsViewController.h"
 
+static NSString *queue_popup_l10n(NSString *text)
+{
+    return text.length ? NSLocalizedString(text, nil) : text;
+}
+
 @interface QueuePopupBar ()
 @property (nonatomic, strong) UIVisualEffectView *blurView;
 @property (nonatomic, strong) UIImageView *iconView;
@@ -160,11 +165,18 @@
     NSInteger installs   = (NSInteger)q.queuedInstalls.count;
     NSInteger uninstalls = (NSInteger)q.queuedUninstalls.count;
 
-    self.titleLabel.text = (count == 1) ? @"1 pending change" : [NSString stringWithFormat:@"%ld pending changes", (long)count];
+    self.titleLabel.text = [NSString stringWithFormat:queue_popup_l10n(count == 1 ? @"%ld pending change" : @"%ld pending changes"),
+                            (long)count];
 
     NSMutableArray<NSString *> *parts = [NSMutableArray array];
-    if (installs > 0)   [parts addObject:[NSString stringWithFormat:@"%ld activate", (long)installs]];
-    if (uninstalls > 0) [parts addObject:[NSString stringWithFormat:@"%ld deactivate", (long)uninstalls]];
+    if (installs > 0) {
+        [parts addObject:[NSString stringWithFormat:queue_popup_l10n(installs == 1 ? @"%ld activate" : @"%ld activate"),
+                          (long)installs]];
+    }
+    if (uninstalls > 0) {
+        [parts addObject:[NSString stringWithFormat:queue_popup_l10n(uninstalls == 1 ? @"%ld deactivate" : @"%ld deactivate"),
+                          (long)uninstalls]];
+    }
     self.subtitleLabel.text = [parts componentsJoinedByString:@" · "];
 
     [self setVisible:YES animated:animated];

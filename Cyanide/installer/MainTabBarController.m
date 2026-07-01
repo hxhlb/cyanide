@@ -8,8 +8,10 @@
 #import "QueueReviewViewController.h"
 #import "PackageQueue.h"
 #import "HomeViewController.h"
+#import "PackagesViewController.h"
 #import "SourcesViewController.h"
 #import "../SettingsViewController.h"
+#import "../LogViewController.h"
 #import "../tweaks/RepoTweaks.h"
 
 static const CGFloat kPopupHeight  = 56.0;
@@ -17,6 +19,11 @@ static const CGFloat kPopupGap     = 8.0;
 static const CGFloat kPopupPadding = 2.0;
 static const NSTimeInterval kSourcesRefreshInterval = 3 * 60 * 60; // 3 hours
 static NSString * const kSourcesLastRefreshKey = @"RepoTweaksLastRefreshTimestamp";
+
+static NSString *main_tab_l10n(NSString *text)
+{
+    return text.length ? NSLocalizedString(text, nil) : text;
+}
 
 @interface MainTabBarController ()
 @property (nonatomic, strong) QueuePopupBar *popupBar;
@@ -68,26 +75,41 @@ static NSString * const kSourcesLastRefreshKey = @"RepoTweaksLastRefreshTimestam
     NSMutableArray<UIViewController *> *controllers = [self.viewControllers mutableCopy];
     if (controllers.count == 0) return;
 
+    for (UIViewController *vc in controllers) {
+        UINavigationController *nav = [vc isKindOfClass:UINavigationController.class] ? (UINavigationController *)vc : nil;
+        UIViewController *top = nav.viewControllers.firstObject ?: vc;
+        if ([top isKindOfClass:SettingsViewController.class]) {
+            vc.tabBarItem.title = main_tab_l10n(@"Settings");
+            top.title = main_tab_l10n(@"Settings");
+            top.navigationItem.title = main_tab_l10n(@"Settings");
+        } else if ([top isKindOfClass:LogViewController.class]) {
+            vc.tabBarItem.title = main_tab_l10n(@"Log");
+            top.title = main_tab_l10n(@"Log");
+            top.navigationItem.title = main_tab_l10n(@"Log");
+        }
+    }
+
     UIViewController *packages = controllers.firstObject;
-    packages.tabBarItem.title = @"Packages";
+    packages.tabBarItem.title = main_tab_l10n(@"Packages");
     packages.tabBarItem.image = [UIImage systemImageNamed:@"shippingbox.fill"];
     if ([packages isKindOfClass:UINavigationController.class]) {
         UINavigationController *nav = (UINavigationController *)packages;
-        nav.tabBarItem.title = @"Packages";
-        nav.topViewController.title = @"Packages";
-        nav.topViewController.navigationItem.title = @"Packages";
+        nav.tabBarItem.title = main_tab_l10n(@"Packages");
+        nav.viewControllers.firstObject.title = main_tab_l10n(@"Packages");
+        nav.viewControllers.firstObject.navigationItem.title = main_tab_l10n(@"Packages");
     }
 
     // Inject Home tab at position 0 if not already present.
     BOOL hasHome = NO;
     for (UIViewController *vc in controllers) {
-        if ([vc.tabBarItem.title isEqualToString:@"Home"]) { hasHome = YES; break; }
+        UINavigationController *nav = [vc isKindOfClass:UINavigationController.class] ? (UINavigationController *)vc : nil;
+        if ([nav.viewControllers.firstObject isKindOfClass:HomeViewController.class]) { hasHome = YES; break; }
     }
     if (!hasHome) {
         HomeViewController *home = [[HomeViewController alloc] init];
         UINavigationController *homeNav = [[UINavigationController alloc] initWithRootViewController:home];
         homeNav.navigationBar.barStyle = UIBarStyleBlack;
-        homeNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"Home"
+        homeNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:main_tab_l10n(@"Home")
                                                            image:[UIImage systemImageNamed:@"house.fill"]
                                                              tag:0];
         [controllers insertObject:homeNav atIndex:0];
@@ -96,19 +118,22 @@ static NSString * const kSourcesLastRefreshKey = @"RepoTweaksLastRefreshTimestam
     // Inject Sources tab right after Packages if not already present.
     BOOL hasSources = NO;
     for (UIViewController *vc in controllers) {
-        if ([vc.tabBarItem.title isEqualToString:@"Sources"]) { hasSources = YES; break; }
+        UINavigationController *nav = [vc isKindOfClass:UINavigationController.class] ? (UINavigationController *)vc : nil;
+        if ([nav.viewControllers.firstObject isKindOfClass:SourcesViewController.class]) { hasSources = YES; break; }
     }
     if (!hasSources) {
         SourcesViewController *sources = [[SourcesViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
         UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:sources];
         nav.navigationBar.barStyle = UIBarStyleBlack;
-        nav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"Sources"
+        nav.tabBarItem = [[UITabBarItem alloc] initWithTitle:main_tab_l10n(@"Sources")
                                                        image:[UIImage systemImageNamed:@"tray.and.arrow.down.fill"]
                                                          tag:0];
         // Find Packages and insert Sources right after it.
         NSUInteger pkgIdx = 0;
         for (NSUInteger i = 0; i < controllers.count; i++) {
-            if ([controllers[i].tabBarItem.title isEqualToString:@"Packages"]) { pkgIdx = i; break; }
+            UIViewController *vc = controllers[i];
+            UINavigationController *nav = [vc isKindOfClass:UINavigationController.class] ? (UINavigationController *)vc : nil;
+            if ([nav.viewControllers.firstObject isKindOfClass:PackagesViewController.class]) { pkgIdx = i; break; }
         }
         NSUInteger insertIndex = MIN(pkgIdx + 1, controllers.count);
         [controllers insertObject:nav atIndex:insertIndex];
@@ -253,7 +278,7 @@ static NSString * const kSourcesLastRefreshKey = @"RepoTweaksLastRefreshTimestam
 
     UILabel *label = [[UILabel alloc] init];
     label.translatesAutoresizingMaskIntoConstraints = NO;
-    label.text = @"Refreshing sources…";
+    label.text = main_tab_l10n(@"Refreshing sources…");
     label.font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightSemibold];
     label.textColor = UIColor.whiteColor;
     label.tag = 102;
@@ -297,7 +322,7 @@ static NSString * const kSourcesLastRefreshKey = @"RepoTweaksLastRefreshTimestam
     } completion:^(BOOL finished) {
         [spinner stopAnimating];
         checkmark.hidden = NO;
-        label.text = @"Sources up to date";
+        label.text = main_tab_l10n(@"Sources up to date");
         [UIView animateWithDuration:0.2 animations:^{
             checkmark.alpha = 1.0;
         }];
@@ -331,7 +356,8 @@ static NSString * const kSourcesLastRefreshKey = @"RepoTweaksLastRefreshTimestam
     NSUInteger count = repotweaks_available_update_count();
     NSString *badge = count > 0 ? [NSString stringWithFormat:@"%lu", (unsigned long)count] : nil;
     for (UIViewController *vc in self.viewControllers) {
-        if ([vc.tabBarItem.title isEqualToString:@"Packages"]) {
+        UINavigationController *nav = [vc isKindOfClass:UINavigationController.class] ? (UINavigationController *)vc : nil;
+        if ([nav.viewControllers.firstObject isKindOfClass:PackagesViewController.class]) {
             vc.tabBarItem.badgeValue = badge;
             break;
         }

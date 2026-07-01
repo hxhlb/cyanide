@@ -10,6 +10,11 @@
 #import "../LogTextView.h"
 #import <sys/utsname.h>
 
+static NSString *install_l10n(NSString *text)
+{
+    return text.length ? NSLocalizedString(text, nil) : text;
+}
+
 @interface InstallProgressViewController ()
 @property (nonatomic, strong) UILabel *bannerLabel;
 @property (nonatomic, strong) LogTextView *logView;
@@ -28,7 +33,7 @@
     self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     UIColor *bg = [UIColor colorWithRed:0.04 green:0.05 blue:0.07 alpha:1.0];
     self.view.backgroundColor = bg;
-    self.title = @"Activity";
+    self.title = install_l10n(@"Activity");
     self.modalInPresentation = NO;
 
     self.bannerLabel = [[UILabel alloc] init];
@@ -71,7 +76,7 @@
 
     self.statusLabel = [[UILabel alloc] init];
     self.statusLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    self.statusLabel.text = @"Running — stay here until complete.";
+    self.statusLabel.text = install_l10n(@"Running — stay here until complete.");
     self.statusLabel.font = [UIFont systemFontOfSize:13.5 weight:UIFontWeightRegular];
     self.statusLabel.textColor = [UIColor colorWithWhite:0.55 alpha:1.0];
     self.statusLabel.numberOfLines = 1;
@@ -111,7 +116,7 @@
         [self.statusLabel.centerYAnchor  constraintEqualToAnchor:self.spinner.centerYAnchor],
     ]];
 
-    self.hideOrDoneButton = [[UIBarButtonItem alloc] initWithTitle:@"Hide"
+    self.hideOrDoneButton = [[UIBarButtonItem alloc] initWithTitle:install_l10n(@"Hide")
                                                              style:UIBarButtonItemStylePlain
                                                             target:self
                                                             action:@selector(didTapDone)];
@@ -139,13 +144,13 @@
     NSString *message = note.userInfo[kSettingsActionsDidCompleteMessageKey];
     self.statusLabel.text = message.length
         ? message
-        : (success ? @"All tweaks applied in-session." : @"Failed — check the log above.");
+        : (success ? install_l10n(@"All tweaks applied in-session.") : install_l10n(@"Failed — check the log above."));
     self.statusLabel.font = [UIFont systemFontOfSize:13.5 weight:UIFontWeightSemibold];
     self.statusLabel.textColor = success
         ? [UIColor colorWithRed:0.38 green:0.90 blue:0.55 alpha:1.0]
         : [UIColor colorWithRed:1.0 green:0.38 blue:0.32 alpha:1.0];
-    self.title = success ? @"Complete" : @"Failed";
-    self.hideOrDoneButton.title = @"Done";
+    self.title = success ? install_l10n(@"Complete") : install_l10n(@"Failed");
+    self.hideOrDoneButton.title = install_l10n(@"Done");
     if (success &&
         self.promptsForHideHomeBarRespring &&
         settings_hide_home_bar_respring_pending()) {

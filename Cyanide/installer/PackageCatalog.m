@@ -123,9 +123,10 @@ static const NSInteger kSecLocationSim      = 20;
 static const NSInteger kSecGravityLite      = 21;
 static const NSInteger kSecAppSwitcherGrid  = 22;
 static const NSInteger kSecIPADecryptor     = 23;
-static const NSInteger kSecFastLockXLite    = 24;
-static const NSInteger kSecQuickLoader      = 25;
-static const NSInteger kSecRepoTweaks       = 26;
+static const NSInteger kSecMWLite           = 24;
+static const NSInteger kSecFastLockXLite    = 25;
+static const NSInteger kSecQuickLoader      = 26;
+static const NSInteger kSecRepoTweaks       = 27;
 
 + (NSArray<Package *> *)allPackages
 {
@@ -317,6 +318,25 @@ static const NSInteger kSecRepoTweaks       = 26;
                                      enabledKey:kSettingsStageStripEnabled
                                           isNew:NO];
         stageStrip.unstableWarning = @"Beta / unstable: First Run takes 1-2 minutes because the picker enumerates every installed app and builds a tile per app. Re-Runs are fast. Touch routing into hosted windows isn't wired yet, so scrolling/typing inside a floating window may not work.";
+
+        Package *mwLite = [[Package alloc] initWithIdentifier:@"com.darksword.mwlite"
+                                           name:@"MilkyWay Lite"
+                               shortDescription:NSLocalizedString(@"Multiple apps in floating windows", nil)
+                                longDescription:
+            [NSString stringWithFormat:@"%@\n\n%@\n\n%@\n\n%@",
+             NSLocalizedString(@"Experimental floating-window route based on Cyanide's Dynamic Stage Lite direction.", nil),
+             NSLocalizedString(@"MilkyWay Lite launches installed apps as movable/resizable SpringBoard-hosted floating windows. It defaults to 2 concurrent windows and can be configured up to 8.", nil),
+             NSLocalizedString(@"Apps are chosen from the MilkyWay Lite picker after install; no app preselection is required before running the chain.", nil),
+             NSLocalizedString(@"Compatibility: MilkyWay Lite and Dynamic Stage Lite both own SpringBoard floating-window/scene-host state. Only one can be installed at a time.", nil)]
+                                        version:version
+                                         author:@"banana / zeroxjf"
+                                       category:@"Beta"
+                                     symbolName:@"macwindow"
+                                           kind:PackageInstallKindToggle
+                                     enabledKey:kSettingsMWLiteEnabled
+                                          isNew:YES];
+        mwLite.settingsSection = kSecMWLite;
+        mwLite.unstableWarning = NSLocalizedString(@"Experimental: MilkyWay Lite is mutually exclusive with Dynamic Stage Lite. It keeps a configurable number of floating app windows alive in SpringBoard.", nil);
 #endif
 
         Package *locationSim = [[Package alloc] initWithIdentifier:@"com.darksword.locationsim"
@@ -600,6 +620,7 @@ static const NSInteger kSecRepoTweaks       = 26;
             notificationIsland,
             ipaDecryptor,
             stageStrip,
+            mwLite,
             fastLockXLite,
 #endif
             locationSim,

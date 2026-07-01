@@ -40,6 +40,7 @@
 #import "installer/Package.h"
 #import "installer/PackageCatalog.h"
 #import "installer/PackageQueue.h"
+#import "installer/PackagesViewController.h"
 #import "docs/DocsViewController.h"
 #import "UpdateChecker.h"
 #import "SBLArchiveExtractor.h"
@@ -94,6 +95,12 @@ static NSString *hexStringFromColor(UIColor *color) {
 static NSString *settings_string_or_empty(id value)
 {
     return [value isKindOfClass:NSString.class] ? (NSString *)value : @"";
+}
+
+static NSString *settings_l10n_text(id value)
+{
+    NSString *text = settings_string_or_empty(value);
+    return text.length > 0 ? NSLocalizedString(text, nil) : text;
 }
 
 static BOOL settings_js_identifier_valid(NSString *name)
@@ -274,9 +281,9 @@ static NSArray<NSDictionary *> *settings_repotweaks_tweaks_for_url(NSString *rep
 }
 
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
-    if (section == 0) return CYSectionHeaderView(@"Tweak Infos");
-    if (section == 1) return CYSectionHeaderView(@"Tweak Status");
-    return CYSectionHeaderView(@"Personalization Options");
+    if (section == 0) return CYSectionHeaderView(settings_l10n_text(@"Tweak Infos"));
+    if (section == 1) return CYSectionHeaderView(settings_l10n_text(@"Tweak Status"));
+    return CYSectionHeaderView(settings_l10n_text(@"Personalization Options"));
 }
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section { return 46.0; }
 
@@ -285,11 +292,11 @@ static NSArray<NSDictionary *> *settings_repotweaks_tweaks_for_url(NSString *rep
         UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"info-cell"];
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
         if (indexPath.row == 0) {
-            cell.textLabel.text = @"Description";
+            cell.textLabel.text = settings_l10n_text(@"Description");
             cell.detailTextLabel.text = settings_string_or_empty(self.tweak[@"description"]);
             cell.detailTextLabel.numberOfLines = 0;
         } else {
-            cell.textLabel.text = @"Version";
+            cell.textLabel.text = settings_l10n_text(@"Version");
             cell.detailTextLabel.text = settings_string_or_empty(self.tweak[@"version"]);
         }
         return cell;
@@ -300,7 +307,7 @@ static NSArray<NSDictionary *> *settings_repotweaks_tweaks_for_url(NSString *rep
     if (indexPath.section == 1) {
         UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"toggle-cell"];
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
-        cell.textLabel.text = @"Enable Tweak";
+        cell.textLabel.text = settings_l10n_text(@"Enable Tweak");
 
         UISwitch *sw = [[UISwitch alloc] init];
         NSString *toggleKey = repotweaks_enabled_defaults_key(self.repoURL, self.tweakID);
@@ -443,7 +450,7 @@ static NSArray<NSDictionary *> *settings_repotweaks_tweaks_for_url(NSString *rep
     [super viewDidLoad];
     NSDictionary *repo = settings_repotweaks_repo_for_url(self.repoURL);
     NSString *repoName = settings_string_or_empty(repo[@"repoName"]);
-    self.title = repoName.length ? repoName : @"Repository";
+    self.title = repoName.length ? repoName : settings_l10n_text(@"Repository");
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
@@ -454,7 +461,7 @@ static NSArray<NSDictionary *> *settings_repotweaks_tweaks_for_url(NSString *rep
     if (section == 0) {
         NSDictionary *repo = settings_repotweaks_repo_for_url(self.repoURL);
         NSString *author = settings_string_or_empty(repo[@"author"]);
-        return CYSectionHeaderView([NSString stringWithFormat:@"By %@", author.length ? author : @"Unknown"]);
+        return CYSectionHeaderView([NSString stringWithFormat:settings_l10n_text(@"By %@"), author.length ? author : settings_l10n_text(@"Unknown")]);
     }
     return nil;
 }
@@ -472,7 +479,7 @@ static NSArray<NSDictionary *> *settings_repotweaks_tweaks_for_url(NSString *rep
 
     // The Delete Button
     if (indexPath.section == 1) {
-        cell.textLabel.text = @"Delete Repository";
+        cell.textLabel.text = settings_l10n_text(@"Delete Repository");
         cell.textLabel.textColor = [UIColor systemRedColor];
         cell.textLabel.textAlignment = NSTextAlignmentCenter;
         return cell;
@@ -601,24 +608,24 @@ static NSArray<NSDictionary *> *settings_repotweaks_tweaks_for_url(NSString *rep
 }
 
 - (void)addRepo {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Add Source" message:@"Paste the RAW link to your packages.json" preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:settings_l10n_text(@"Add Source") message:settings_l10n_text(@"Paste the RAW link to your packages.json") preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) { textField.placeholder = @"https://raw.githubusercontent.com/..."; }];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Add" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+    [alert addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Add") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         NSString *url = alert.textFields.firstObject.text;
         if (url.length > 0) {
             repotweaks_refresh_repo(url, ^(BOOL success, NSString *message) {
                 [self updateData];
                 if (!success) {
-                    UIAlertController *err = [UIAlertController alertControllerWithTitle:@"Source Failed"
-                                                                                 message:message ?: @"Could not refresh that repository."
-                                                                          preferredStyle:UIAlertControllerStyleAlert];
-                    [err addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        UIAlertController *err = [UIAlertController alertControllerWithTitle:settings_l10n_text(@"Source Failed")
+                                                                     message:message ?: settings_l10n_text(@"Could not refresh that repository.")
+                                                              preferredStyle:UIAlertControllerStyleAlert];
+                    [err addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"OK") style:UIAlertActionStyleDefault handler:nil]];
                     [self presentViewController:err animated:YES completion:nil];
                 }
             });
         }
     }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
     [self presentViewController:alert animated:YES completion:nil];
 }
 
@@ -627,8 +634,8 @@ static NSArray<NSDictionary *> *settings_repotweaks_tweaks_for_url(NSString *rep
     if (urls.count == 0) return;
 
     // Refresh Alert
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Refreshing Sources"
-                                                                   message:@"Nuking old scripts and downloading the latest..."
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:settings_l10n_text(@"Refreshing Sources")
+                                                                   message:settings_l10n_text(@"Nuking old scripts and downloading the latest...")
                                                             preferredStyle:UIAlertControllerStyleAlert];
     [self presentViewController:alert animated:YES completion:nil];
 
@@ -653,7 +660,7 @@ static NSArray<NSDictionary *> *settings_repotweaks_tweaks_for_url(NSString *rep
 // Native tweak sections
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 2; }
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
-    return CYSectionHeaderView(section == 0 ? @"Sources" : @"All Tweaks");
+    return CYSectionHeaderView(settings_l10n_text(section == 0 ? @"Sources" : @"All Tweaks"));
 }
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section { return 46.0; }
 
@@ -995,6 +1002,10 @@ NSString * const kSettingsGravityLiteResistancePct = @"GravityLiteResistancePct"
 NSString * const kSettingsGravityLiteAngularResistancePct = @"GravityLiteAngularResistancePct";
 
 NSString * const kSettingsStageStripEnabled = @"StageStripEnabled";
+NSString * const kSettingsMWLiteEnabled = @"MWLiteEnabled";
+static NSString * const kSettingsMWLiteTargetBundleID = @"MWLiteTargetBundleID";
+static NSString * const kSettingsMWLiteMaxWindows = @"MWLiteMaxWindows";
+static NSString * const kSettingsMWLiteSelectedApps = @"MWLiteSelectedApps";
 
 NSString * const kSettingsLocationSimEnabled = @"LocationSimEnabled";
 NSString * const kSettingsLocationSimLatitude = @"LocationSimLatitude";
@@ -1367,6 +1378,7 @@ static void settings_each_springboard_cleanup_entry(void (^block)(const Settings
         { kSettingsSnowBoardLiteEnabled, "SnowBoard Lite", NULL, settings_stop_themer_registered, themer_forget_remote_state, NULL, YES, YES },
         { kSettingsLiveWPEnabled, "LiveWP", settings_request_livewp_stop, settings_stop_livewp_registered, livewp_forget_remote_state, settings_livewp_running, YES, YES },
         { kSettingsStageStripEnabled, "Stage Strip", settings_request_stagestrip_stop, settings_stop_stagestrip_registered, stagestrip_forget_remote_state, NULL, YES, YES },
+        { kSettingsMWLiteEnabled, "MilkyWay Lite", settings_request_stagestrip_stop, settings_stop_stagestrip_registered, stagestrip_forget_remote_state, NULL, YES, YES },
         { kSettingsFastLockXLiteEnabled, "FastLockX Lite", NULL, settings_stop_fastlockx_lite_registered, fastlockx_lite_forget_remote_state, NULL, NO, YES },
         { kSettingsQuickLoaderEnabled, "QuickLoader", NULL, settings_stop_quickloader_registered, NULL, NULL, YES, YES },
         { kSettingsRepoTweaksEnabled, "RepoTweaks", NULL, settings_stop_repotweaks_registered, NULL, NULL, YES, YES },
@@ -1850,7 +1862,8 @@ static void settings_purge_legacy_access_auth(void)
 static BOOL settings_themer_dynamic_updates_blocked_by_stage(NSUserDefaults *d)
 {
     if (!settings_stagestrip_install_allowed()) return NO;
-    if (![d boolForKey:kSettingsStageStripEnabled]) return NO;
+    if (![d boolForKey:kSettingsStageStripEnabled] &&
+        ![d boolForKey:kSettingsMWLiteEnabled]) return NO;
     return [d boolForKey:kSettingsThemerEnabled];
 }
 
@@ -2615,6 +2628,20 @@ static NSArray<NSString *> *powercuff_levels(void) {
     return @[ @"off", @"nominal", @"light", @"moderate", @"heavy" ];
 }
 
+static NSArray<NSString *> *powercuff_level_titles(void) {
+    return @[ NSLocalizedString(@"Off", nil),
+              NSLocalizedString(@"Nominal", nil),
+              NSLocalizedString(@"Light", nil),
+              NSLocalizedString(@"Moderate", nil),
+              NSLocalizedString(@"Heavy", nil) ];
+}
+
+static NSString *powercuff_level_title(NSString *level) {
+    NSUInteger idx = [powercuff_levels() indexOfObject:level ?: @""];
+    if (idx == NSNotFound || idx >= powercuff_level_titles().count) return settings_l10n_text(level);
+    return powercuff_level_titles()[idx];
+}
+
 static NSComparisonResult settings_compare_system_version(NSString *target)
 {
     NSString *version = UIDevice.currentDevice.systemVersion ?: @"0";
@@ -3149,7 +3176,7 @@ static NSString *settings_nsbar_position_name(NSInteger position)
 static NSString *settings_livewp_video_detail(void)
 {
     NSString *path = livewp_absolute_path();
-    if (path.length == 0) return @"No video selected.";
+    if (path.length == 0) return settings_l10n_text(@"No video selected.");
     NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
     if (attrs) {
         unsigned long long bytes = [attrs fileSize];
@@ -3407,11 +3434,11 @@ void settings_present_hide_home_bar_respring_prompt(UIViewController *host)
                                   ? @"Hide Home Bar was applied, but SpringBoard needs to restart before the home indicator disappears."
                                   : @"Home Bar restore was queued, but SpringBoard needs to restart before the stock home indicator returns.")
                   preferredStyle:UIAlertControllerStyleAlert];
-    [ac addAction:[UIAlertAction actionWithTitle:@"Later"
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Later")
                                            style:UIAlertActionStyleCancel
                                          handler:nil]];
     __weak UIViewController *weakHost = host;
-    [ac addAction:[UIAlertAction actionWithTitle:@"Respring"
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Respring")
                                            style:UIAlertActionStyleDestructive
                                          handler:^(UIAlertAction *_) {
         dispatch_async(dispatch_get_global_queue(0, 0), ^{
@@ -6144,9 +6171,91 @@ static NSString *settings_ipadecryptor_target_summary(NSUserDefaults *d)
 {
     NSString *bundleID = [d stringForKey:kSettingsIPADecryptorTargetBundleID];
     if (bundleID.length == 0) {
-        return @"None selected. Choose an installed app first.";
+        return settings_l10n_text(@"None selected. Choose an installed app first.");
     }
     return ipadecryptor_display_name_for_bundle(bundleID);
+}
+
+static NSString *settings_mwlite_selected_apps_path(void)
+{
+    NSArray<NSString *> *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
+                                                                    NSUserDomainMask,
+                                                                    YES);
+    NSString *base = docs.firstObject ?: NSTemporaryDirectory();
+    NSString *dir = [base stringByAppendingPathComponent:@"MilkyWayLite"];
+    [NSFileManager.defaultManager createDirectoryAtPath:dir
+                            withIntermediateDirectories:YES
+                                             attributes:nil
+                                                  error:nil];
+    return [dir stringByAppendingPathComponent:@"SelectedApps.plist"];
+}
+
+static NSArray<NSDictionary<NSString *, NSString *> *> *settings_mwlite_selected_apps(NSUserDefaults *d)
+{
+    id raw = [d objectForKey:kSettingsMWLiteSelectedApps];
+    NSMutableArray<NSDictionary<NSString *, NSString *> *> *out = [NSMutableArray array];
+    NSMutableSet<NSString *> *seen = [NSMutableSet set];
+    if ([raw isKindOfClass:NSArray.class]) {
+        for (id item in (NSArray *)raw) {
+            if (![item isKindOfClass:NSDictionary.class]) continue;
+            NSString *bundleID = [(NSDictionary *)item objectForKey:@"bundleID"];
+            if (![bundleID isKindOfClass:NSString.class] || bundleID.length == 0) continue;
+            if ([seen containsObject:bundleID]) continue;
+            NSString *name = [(NSDictionary *)item objectForKey:@"name"];
+            if (![name isKindOfClass:NSString.class] || name.length == 0) name = bundleID;
+            [out addObject:@{@"bundleID": bundleID, @"name": name}];
+            [seen addObject:bundleID];
+        }
+    }
+
+    NSString *legacy = [d stringForKey:kSettingsMWLiteTargetBundleID] ?: @"";
+    if (out.count == 0 && legacy.length > 0) {
+        NSString *name = ipadecryptor_display_name_for_bundle(legacy);
+        [out addObject:@{@"bundleID": legacy, @"name": name.length > 0 ? name : legacy}];
+    }
+    return out;
+}
+
+static BOOL settings_mwlite_app_is_selected(NSUserDefaults *d, NSString *bundleID)
+{
+    if (bundleID.length == 0) return NO;
+    for (NSDictionary<NSString *, NSString *> *entry in settings_mwlite_selected_apps(d)) {
+        if ([entry[@"bundleID"] isEqualToString:bundleID]) return YES;
+    }
+    return NO;
+}
+
+static void settings_mwlite_save_selected_apps(NSUserDefaults *d,
+                                               NSArray<NSDictionary<NSString *, NSString *> *> *apps)
+{
+    NSMutableArray<NSDictionary<NSString *, NSString *> *> *clean = [NSMutableArray array];
+    NSMutableSet<NSString *> *seen = [NSMutableSet set];
+    for (NSDictionary<NSString *, NSString *> *entry in apps) {
+        NSString *bundleID = entry[@"bundleID"];
+        if (bundleID.length == 0 || [seen containsObject:bundleID]) continue;
+        NSString *name = [entry[@"name"] isKindOfClass:NSString.class] && [entry[@"name"] length] > 0 ? entry[@"name"] : bundleID;
+        [clean addObject:@{@"bundleID": bundleID, @"name": name}];
+        [seen addObject:bundleID];
+    }
+    [d setObject:clean forKey:kSettingsMWLiteSelectedApps];
+    [d synchronize];
+}
+
+static BOOL settings_mwlite_export_selected_apps(NSUserDefaults *d)
+{
+    NSArray *apps = settings_mwlite_selected_apps(d);
+    NSDictionary *plist = @{
+        @"version": @1,
+        @"updatedAt": @((long long)([NSDate.date timeIntervalSince1970] * 1000.0)),
+        @"apps": apps,
+    };
+    NSString *path = settings_mwlite_selected_apps_path();
+    BOOL ok = [plist writeToFile:path atomically:YES];
+    log_user("[MWLITE] Selected app export %s: %lu app(s), path=%s\n",
+             ok ? "OK" : "FAILED",
+             (unsigned long)apps.count,
+             path.UTF8String);
+    return ok;
 }
 
 static NSString *settings_ipadecryptor_app_store_summary(NSUserDefaults *d)
@@ -6156,7 +6265,7 @@ static NSString *settings_ipadecryptor_app_store_summary(NSUserDefaults *d)
     NSString *version = [d stringForKey:kSettingsIPADecryptorAppStoreVersion];
     NSString *url = [d stringForKey:kSettingsIPADecryptorAppStoreURL];
     if (appID.length == 0 && url.length == 0) {
-        return @"None. Paste an App Store link or numeric app ID.";
+        return settings_l10n_text(@"None. Paste an App Store link or numeric app ID.");
     }
     if (name.length > 0) {
         return [NSString stringWithFormat:@"%@%@%@",
@@ -6164,7 +6273,7 @@ static NSString *settings_ipadecryptor_app_store_summary(NSUserDefaults *d)
                 version.length > 0 ? @" " : @"",
                 version.length > 0 ? version : @""];
     }
-    return appID.length > 0 ? [NSString stringWithFormat:@"App Store ID %@", appID] : url;
+    return appID.length > 0 ? [NSString stringWithFormat:settings_l10n_text(@"App Store ID %@"), appID] : url;
 }
 
 static BOOL settings_apply_location_sim_from_defaults_locked(NSUserDefaults *d)
@@ -6905,6 +7014,10 @@ void settings_register_defaults(void)
         kSettingsGravityLiteAngularResistancePct: @0,
 
         kSettingsStageStripEnabled: @NO,
+        kSettingsMWLiteEnabled: @NO,
+        kSettingsMWLiteTargetBundleID: @"",
+        kSettingsMWLiteSelectedApps: @[],
+        kSettingsMWLiteMaxWindows: @2,
 
         kSettingsLocationSimEnabled: @NO,
         kSettingsLocationSimLatitude: @(kLocationSimDefaultLatitude),
@@ -6954,6 +7067,7 @@ void settings_register_defaults(void)
             kSettingsTypeBannerEnabled,
             kSettingsNotificationIslandEnabled,
             kSettingsStageStripEnabled,
+            kSettingsMWLiteEnabled,
             kSettingsFastLockXLiteEnabled,
         ];
         for (NSString *key in privateKeys) {
@@ -7045,6 +7159,7 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             BOOL liveWPEnabled = [d boolForKey:kSettingsLiveWPEnabled];
             BOOL layoutExtrasEnabled = [d boolForKey:kSettingsLayoutExtrasEnabled];
             BOOL stageStripEnabled = settings_stagestrip_install_allowed() && [d boolForKey:kSettingsStageStripEnabled];
+            BOOL mwLiteEnabled = settings_stagestrip_install_allowed() && [d boolForKey:kSettingsMWLiteEnabled];
             BOOL gravityLiteEnabled = [d boolForKey:kSettingsGravityLiteEnabled];
             BOOL runSBC = settings_enabled_tweak_should_run(d, kSettingsSBCEnabled, springBoardPendingOnly);
             BOOL runDarkTweaks = settings_dark_tweaks_should_run(d, springBoardPendingOnly);
@@ -7061,6 +7176,7 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             BOOL runLiveWP = settings_enabled_tweak_should_run(d, kSettingsLiveWPEnabled, springBoardPendingOnly);
             BOOL runLayoutExtras = settings_enabled_tweak_should_run(d, kSettingsLayoutExtrasEnabled, springBoardPendingOnly);
             BOOL runStageStrip = settings_stagestrip_install_allowed() && settings_enabled_tweak_should_run(d, kSettingsStageStripEnabled, springBoardPendingOnly);
+            BOOL runMWLite = settings_stagestrip_install_allowed() && settings_enabled_tweak_should_run(d, kSettingsMWLiteEnabled, springBoardPendingOnly);
             BOOL runFastLockXLite = settings_fastlockx_lite_install_allowed() && settings_enabled_tweak_should_run(d, kSettingsFastLockXLiteEnabled, springBoardPendingOnly);
             BOOL runGravityLite = settings_enabled_tweak_should_run(d, kSettingsGravityLiteEnabled, springBoardPendingOnly);
             BOOL runQuickLoader = settings_enabled_tweak_should_run(d, kSettingsQuickLoaderEnabled, springBoardPendingOnly);
@@ -7070,7 +7186,12 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                 settings_note_themer_stage_conflict(YES);
             }
             BOOL cleanupDisabledSpringBoardTweaks = settings_disabled_applied_springboard_cleanup_needed(d);
-            BOOL needsSpringBoardWork = runSBC || runDarkTweaks || runStatBar || runNSBar || runNiceBarLite || runRSSI || runAxonLite || runGravityLite || runLayoutExtras || runTypeBanner || runNotificationIsland || runAppSwitcherGrid || runThemer || runSnowBoardLite || runLiveWP || runStageStrip || runFastLockXLite || runQuickLoader || runRepoTweaks || cleanupDisabledSpringBoardTweaks;
+            if (stageStripEnabled && mwLiteEnabled) {
+                log_user("[COMPAT] MilkyWay Lite and Dynamic Stage Lite cannot both be active. Skipping MilkyWay Lite until Dynamic Stage Lite is disabled.\n");
+                runMWLite = NO;
+                mwLiteEnabled = NO;
+            }
+            BOOL needsSpringBoardWork = runSBC || runDarkTweaks || runStatBar || runNSBar || runNiceBarLite || runRSSI || runAxonLite || runGravityLite || runLayoutExtras || runTypeBanner || runNotificationIsland || runAppSwitcherGrid || runThemer || runSnowBoardLite || runLiveWP || runStageStrip || runMWLite || runFastLockXLite || runQuickLoader || runRepoTweaks || cleanupDisabledSpringBoardTweaks;
             BOOL runSandboxEscape = [d boolForKey:kSettingsRunSandboxEscape] && (!pendingOnly || needsSpringBoardWork);
             // TypeBanner prewarms its hidden SpringBoard window during Apply
             // and reuses the open SpringBoard session for text-only updates.
@@ -7104,6 +7225,7 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             if (runNotificationIsland) total++;
             if (runAppSwitcherGrid) total++;
             if (runStageStrip) total++;
+            if (runMWLite) total++;
             if (runFastLockXLite) total++;
             if (runQuickLoader) total++;
             if (runRepoTweaks) total++;
@@ -7131,6 +7253,7 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             if (runTypeBanner) [enabledTweaks addObject:@"typebanner"];
             if (runFastLockXLite) [enabledTweaks addObject:@"fastlockx"];
             if (runStageStrip) [enabledTweaks addObject:@"stagestrip"];
+            if (runMWLite) [enabledTweaks addObject:@"mwlite"];
             if (runQuickLoader) [enabledTweaks addObject:@"quickloader"];
             if (runRepoTweaks) [enabledTweaks addObject:@"repotweaks"];
             if (cleanupDisabledSpringBoardTweaks) [enabledTweaks addObject:@"cleanup"];
@@ -7535,10 +7658,33 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                                  ok ? "[OK]" : "[WARN]",
                                  ok ? "overlay active" : "did not install cleanly");
                         cyanide_upload_log_milestone(ok ? @"stagestrip-initial-applied" : @"stagestrip-initial-failed");
-                    } else if (!stageStripEnabled) {
+                    } else if (!stageStripEnabled && !mwLiteEnabled) {
                         // Uninstall path: tear down the overlay if one survived
                         // from a prior Run. No-op when the strip was never up.
                         stagestrip_stop_in_session();
+                    }
+
+                    if (runMWLite) {
+                        settings_progress(&step, total, "Installing MilkyWay Lite host");
+                        settings_mwlite_export_selected_apps(d);
+                        NSString *selectedAppsPath = settings_mwlite_selected_apps_path();
+                        stagestrip_set_mwlite_preselected_apps_path(selectedAppsPath.UTF8String);
+                        NSInteger maxWindows = [d integerForKey:kSettingsMWLiteMaxWindows];
+                        if (maxWindows < 1) maxWindows = 2;
+                        if (maxWindows > 8) maxWindows = 8;
+                        bool ok = stagestrip_apply_mwlite_in_session((int)maxWindows);
+                        startStageStripControlLoopAfterInstall = ok;
+                        settings_mark_tweak_applied(kSettingsMWLiteEnabled,
+                                                    ok && [d boolForKey:kSettingsMWLiteEnabled]);
+                        if (ok) {
+                            log_user("[OK] MilkyWay Lite host active (max windows: %ld). Use the bottom-right SpringBoard dot to open the picker.\n",
+                                     (long)maxWindows);
+                        } else {
+                            log_user("[WARN] MilkyWay Lite host did not install cleanly.\n");
+                            runHadBlockingFailure = YES;
+                            runCompletionMessage = @"MilkyWay Lite host did not install cleanly.";
+                        }
+                        cyanide_upload_log_milestone(ok ? @"mwlite-host-applied" : @"mwlite-host-failed");
                     }
                 }
 
@@ -7696,6 +7842,7 @@ typedef NS_ENUM(NSInteger, SettingsSection) {
     SectionGravityLite,
     SectionAppSwitcherGrid,
     SectionIPADecryptor,
+    SectionMWLite,
     SectionFastLockXLite,
     SectionQuickLoader,
     SectionRepoTweaks,
@@ -7772,6 +7919,12 @@ static NSString *settings_pretty_date_for_iso(NSString *iso)
 @property (nonatomic, strong) NSString *qlRawScript;
 @property (nonatomic, strong) NSMutableDictionary *qlValues;
 @property (nonatomic, strong) NSArray *qlParams;
+@property (nonatomic, strong) NSArray<NSDictionary<NSString *, NSString *> *> *mwLiteInstalledApps;
+@property (nonatomic, assign) BOOL mwLiteAppsLoading;
+@property (nonatomic, copy) NSString *mwLiteSearchText;
+- (void)startMWLiteAppListLoadForce:(BOOL)force;
+- (void)mwLiteSearchTextDidChange:(UITextField *)field;
+- (void)mwLiteSearchEditingDidEnd:(UITextField *)field;
 @end
 
 // Singleton delegate so MFMailCompose's host VC doesn't need to conform. Lives
@@ -7820,9 +7973,9 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section
 {
     switch (section) {
-        case 0: return CYSectionHeaderView(@"Folder Theme");
-        case 1: return CYSectionHeaderView(@"Plist Theme");
-        case 2: return CYSectionHeaderView(@"Files");
+        case 0: return CYSectionHeaderView(settings_l10n_text(@"Folder Theme"));
+        case 1: return CYSectionHeaderView(settings_l10n_text(@"Plist Theme"));
+        case 2: return CYSectionHeaderView(settings_l10n_text(@"Files"));
         default: return nil;
     }
 }
@@ -7831,10 +7984,10 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section
 {
     if (section == 0) {
-        return @"Only icons with matching bundle IDs change. Missing apps keep their stock icon.";
+        return settings_l10n_text(@"Only icons with matching bundle IDs change. Missing apps keep their stock icon.");
     }
     if (section == 1) {
-        return @"Use a binary plist when you want one portable file instead of a folder of PNGs.";
+        return settings_l10n_text(@"Use a binary plist when you want one portable file instead of a folder of PNGs.");
     }
     return nil;
 }
@@ -7854,7 +8007,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 
     if (indexPath.section == 0) {
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
-        cell.textLabel.text = @"PNG Files";
+        cell.textLabel.text = settings_l10n_text(@"PNG Files");
         cell.detailTextLabel.text =
             @"Make a folder containing PNG files named by app bundle ID:\n"
              "com.apple.mobilesafari.png\n"
@@ -7862,21 +8015,21 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
              "com.apple.mobiletimer.png";
     } else if (indexPath.section == 1) {
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
-        cell.textLabel.text = @"Bundle ID → PNG Data";
+        cell.textLabel.text = settings_l10n_text(@"Bundle ID → PNG Data");
         cell.detailTextLabel.text =
             @"Make a dictionary plist. Each key is a bundle ID. Each value is raw PNG data. "
              "Cyanide imports the plist and copies it into Documents/Themes.";
     } else {
         cell.selectionStyle = UITableViewCellSelectionStyleDefault;
         if (indexPath.row == 0) {
-            cell.textLabel.text = @"Share Sample Theme Plist";
-            cell.detailTextLabel.text = @"Exports a small binary plist template with example bundle IDs.";
+            cell.textLabel.text = settings_l10n_text(@"Share Sample Theme Plist");
+            cell.detailTextLabel.text = settings_l10n_text(@"Exports a small binary plist template with example bundle IDs.");
         } else if (indexPath.row == 1) {
-            cell.textLabel.text = @"Share iOS 6 Theme Plist";
-            cell.detailTextLabel.text = @"Exports the iOS 6 Theme plist. Icons by zagnut531/iOS-6-Icons.";
+            cell.textLabel.text = settings_l10n_text(@"Share iOS 6 Theme Plist");
+            cell.detailTextLabel.text = settings_l10n_text(@"Exports the iOS 6 Theme plist. Icons by zagnut531/iOS-6-Icons.");
         } else {
-            cell.textLabel.text = @"Share App Info.plist";
-            cell.detailTextLabel.text = @"Exports Cyanide's bundled Info.plist for reference.";
+            cell.textLabel.text = settings_l10n_text(@"Share App Info.plist");
+            cell.detailTextLabel.text = settings_l10n_text(@"Exports Cyanide's bundled Info.plist for reference.");
         }
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     }
@@ -7940,7 +8093,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         if (error) {
             *error = [NSError errorWithDomain:@"CyanideThemerGuide"
                                          code:1
-                                     userInfo:@{NSLocalizedDescriptionKey: @"Bundled iOS 6 plist was not found."}];
+                                     userInfo:@{NSLocalizedDescriptionKey: settings_l10n_text(@"Bundled iOS 6 plist was not found.")}];
         }
         return nil;
     }
@@ -7962,7 +8115,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         if (error) {
             *error = [NSError errorWithDomain:@"CyanideThemerGuide"
                                          code:2
-                                     userInfo:@{NSLocalizedDescriptionKey: @"Bundled Info.plist was not found."}];
+                                     userInfo:@{NSLocalizedDescriptionKey: settings_l10n_text(@"Bundled Info.plist was not found.")}];
         }
         return nil;
     }
@@ -7994,10 +8147,10 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 
 - (void)showExportError:(NSError *)error
 {
-    UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Export Failed"
+    UIAlertController *ac = [UIAlertController alertControllerWithTitle:settings_l10n_text(@"Export Failed")
                                                                 message:error.localizedDescription ?: @"Could not write the plist."
                                                          preferredStyle:UIAlertControllerStyleAlert];
-    [ac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"OK") style:UIAlertActionStyleDefault handler:nil]];
     [self presentViewController:ac animated:YES completion:nil];
 }
 
@@ -8183,7 +8336,8 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 - (void)viewDidLoad
 {
     [super viewDidLoad];
-    self.title = self.detailMode ? (self.bundleTitle ?: @"Settings") : @"Settings";
+    self.title = self.detailMode ? (settings_l10n_text(self.bundleTitle) ?: settings_l10n_text(@"Settings")) : settings_l10n_text(@"Settings");
+    self.tabBarItem.title = settings_l10n_text(@"Settings");
     self.tableView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentAlways;
     self.tableView.rowHeight                      = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight             = 44.0;
@@ -8222,7 +8376,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
                                                                           style:UIBarButtonItemStylePlain
                                                                          target:self
                                                                          action:@selector(navRespringTapped)];
-        respringItem.accessibilityLabel = @"Respring";
+        respringItem.accessibilityLabel = settings_l10n_text(@"Respring");
         self.navigationItem.rightBarButtonItem = respringItem;
     }
 }
@@ -8230,14 +8384,14 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 - (void)navRespringTapped
 {
     UIAlertController *ac = [UIAlertController
-        alertControllerWithTitle:@"Respring?"
-                         message:@"SpringBoard will restart. Any unsaved live state will be reset."
+        alertControllerWithTitle:settings_l10n_text(@"Respring?")
+                         message:settings_l10n_text(@"SpringBoard will restart. Any unsaved live state will be reset.")
                   preferredStyle:UIAlertControllerStyleAlert];
-    [ac addAction:[UIAlertAction actionWithTitle:@"Cancel"
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel")
                                            style:UIAlertActionStyleCancel
                                          handler:nil]];
     __weak typeof(self) weakSelf = self;
-    [ac addAction:[UIAlertAction actionWithTitle:@"Respring"
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Respring")
                                            style:UIAlertActionStyleDestructive
                                          handler:^(UIAlertAction *_) {
         dispatch_async(dispatch_get_global_queue(0, 0), ^{
@@ -8299,7 +8453,8 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     NSUInteger installerIdx = NSNotFound;
     for (NSUInteger i = 0; i < tab.viewControllers.count; i++) {
         UIViewController *vc = tab.viewControllers[i];
-        if ([vc.tabBarItem.title isEqualToString:@"Packages"] ||
+        UINavigationController *nav = [vc isKindOfClass:UINavigationController.class] ? (UINavigationController *)vc : nil;
+        if ([nav.viewControllers.firstObject isKindOfClass:PackagesViewController.class] ||
             [vc.tabBarItem.title isEqualToString:@"Installer"]) {
             installerIdx = i;
             break;
@@ -8317,7 +8472,8 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     if (![tab isKindOfClass:UITabBarController.class]) return;
     for (NSUInteger i = 0; i < tab.viewControllers.count; i++) {
         UIViewController *vc = tab.viewControllers[i];
-        if ([vc.tabBarItem.title isEqualToString:title]) {
+        if ([vc.tabBarItem.title isEqualToString:title] ||
+            [vc.tabBarItem.title isEqualToString:settings_l10n_text(title)]) {
             tab.selectedIndex = i;
             return;
         }
@@ -8362,14 +8518,14 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 
     NSString *level = [d stringForKey:kSettingsPowercuffLevel] ?: @"nominal";
     BOOL alreadyNominal = [level isEqualToString:@"nominal"];
-    NSString *message = @"Powercuff now defaults to Nominal.\n\nLight, Moderate, and Heavy intentionally underclock the CPU. That means lag or slower app launches can happen, especially on older devices. The lag means Powercuff is working, but those levels may be too slow for comfortable day-to-day use.\n\nUse Nominal for daily use, then raise it only when you want stronger throttling.";
+    NSString *message = NSLocalizedString(@"Powercuff now defaults to Nominal.\n\nLight, Moderate, and Heavy intentionally underclock the CPU. That means lag or slower app launches can happen, especially on older devices. The lag means Powercuff is working, but those levels may be too slow for comfortable day-to-day use.\n\nUse Nominal for daily use, then raise it only when you want stronger throttling.", nil);
 
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Powercuff Level"
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:NSLocalizedString(@"Powercuff Level", nil)
                                                                    message:message
                                                             preferredStyle:UIAlertControllerStyleAlert];
     __weak typeof(self) weakSelf = self;
     if (!alreadyNominal) {
-        [alert addAction:[UIAlertAction actionWithTitle:@"Use Nominal"
+        [alert addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Use Nominal", nil)
                                                   style:UIAlertActionStyleDefault
                                                 handler:^(UIAlertAction *_) {
             NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
@@ -8379,7 +8535,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
             [weakSelf.tableView reloadData];
         }]];
     }
-    [alert addAction:[UIAlertAction actionWithTitle:alreadyNominal ? @"OK" : @"Keep Current"
+    [alert addAction:[UIAlertAction actionWithTitle:NSLocalizedString(alreadyNominal ? @"OK" : @"Keep Current", nil)
                                              style:UIAlertActionStyleCancel
                                            handler:^(UIAlertAction *_) {
         [d setBool:YES forKey:kSettingsPowercuffNominalNoticeShown];
@@ -8420,7 +8576,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     [icon setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
 
     UILabel *label = [[UILabel alloc] init];
-    label.text = @"Cyanide is a limited tweak environment. Session tweaks reset on reboot, while a few packages intentionally modify local system files and may persist until restored. Backups are best-effort only. Use these tools only where you have permission, understand the legal and service-rule impact, and accept the risk. Live tweaks like StatBar and Axon Lite stop if you force-quit Cyanide. A progress log opens while changes apply; tap Hide to dismiss.";
+    label.text = settings_l10n_text(@"Cyanide is a limited tweak environment. Session tweaks reset on reboot, while a few packages intentionally modify local system files and may persist until restored. Backups are best-effort only. Use these tools only where you have permission, understand the legal and service-rule impact, and accept the risk. Live tweaks like StatBar and Axon Lite stop if you force-quit Cyanide. A progress log opens while changes apply; tap Hide to dismiss.");
     label.textColor = UIColor.labelColor;
     label.font = [UIFont systemFontOfSize:13 weight:UIFontWeightRegular];
     label.numberOfLines = 0;
@@ -8834,6 +8990,136 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     return rows;
 }
 
+- (NSArray<NSDictionary *> *)mwLiteRows
+{
+    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    if ([d integerForKey:kSettingsMWLiteMaxWindows] < 1)
+        [d setInteger:2 forKey:kSettingsMWLiteMaxWindows];
+    if (!self.mwLiteInstalledApps && !self.mwLiteAppsLoading) {
+        self.mwLiteAppsLoading = YES;
+        __weak typeof(self) weakSelf = self;
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            NSArray<NSDictionary<NSString *, NSString *> *> *loadedApps = ipadecryptor_installed_apps_with_system_apps(YES);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) return;
+                strongSelf.mwLiteInstalledApps = loadedApps ?: @[];
+                strongSelf.mwLiteAppsLoading = NO;
+                [strongSelf reloadMWLiteUI];
+            });
+        });
+    }
+    NSArray<NSDictionary<NSString *, NSString *> *> *apps = self.mwLiteInstalledApps ?: @[];
+    NSArray<NSDictionary<NSString *, NSString *> *> *selectedApps = settings_mwlite_selected_apps(d);
+    NSString *search = self.mwLiteSearchText ?: @"";
+    NSMutableArray<NSDictionary *> *rows = [NSMutableArray arrayWithArray:@[
+        @{ @"kind": @"info",
+           @"title": NSLocalizedString(@"MilkyWay Lite App Launcher", nil),
+           @"subtitle": NSLocalizedString(@"Choose the apps you want in the MilkyWay Lite picker. SpringBoard only shows recents plus this preselected list, so install stays fast even with many apps.", nil) },
+        @{ @"kind": @"stepper",
+           @"key": kSettingsMWLiteMaxWindows,
+           @"title": NSLocalizedString(@"Max floating windows", nil),
+           @"subtitle": NSLocalizedString(@"Default is 2. MilkyWay Lite can keep up to 8 app windows; when full, new apps are refused.", nil),
+           @"min": @1,
+           @"max": @8,
+           @"default": @2 },
+        @{ @"kind": @"button",
+           @"title": NSLocalizedString(@"Refresh App List", nil),
+           @"subtitle": self.mwLiteAppsLoading ? NSLocalizedString(@"Loading installed apps…", nil) : @"",
+           @"action": @"mwlite-refresh" },
+        @{ @"kind": @"mwlite-search",
+           @"title": NSLocalizedString(@"Search apps", nil),
+           @"text": search },
+        @{ @"kind": @"info",
+           @"title": NSLocalizedString(@"Selected Apps", nil),
+           @"subtitle": [NSString stringWithFormat:NSLocalizedString(@"%lu selected. Tap apps below to add or remove them from the picker.", nil),
+                         (unsigned long)selectedApps.count] },
+        @{ @"kind": @"info",
+           @"title": NSLocalizedString(@"Compatibility", nil),
+           @"subtitle": NSLocalizedString(@"MilkyWay Lite and Dynamic Stage Lite both own SpringBoard floating-window state. Only one can be installed at a time.", nil) },
+    ]];
+
+    NSMutableSet<NSString *> *installedIDs = [NSMutableSet set];
+    for (NSDictionary<NSString *, NSString *> *app in apps) {
+        NSString *bundleID = app[@"bundleID"];
+        if (bundleID.length > 0) [installedIDs addObject:bundleID];
+    }
+    NSMutableSet<NSString *> *selectedIDs = [NSMutableSet set];
+
+    for (NSDictionary<NSString *, NSString *> *entry in selectedApps) {
+        NSString *bundleID = entry[@"bundleID"];
+        if (bundleID.length == 0) continue;
+        [selectedIDs addObject:bundleID];
+        NSString *name = entry[@"name"];
+        if (name.length == 0) name = bundleID;
+        BOOL installed = [installedIDs containsObject:bundleID];
+        NSString *detail = installed
+            ? bundleID
+            : [NSString stringWithFormat:@"%@ · %@", bundleID, NSLocalizedString(@"not installed", nil)];
+        [rows addObject:@{ @"kind": @"mwlite-app",
+                           @"title": name,
+                           @"action": @"mwlite-toggle-app",
+                           @"bundleID": bundleID,
+                           @"appName": name,
+                           @"detail": detail,
+                           @"selected": @YES }];
+    }
+
+    if (self.mwLiteAppsLoading) {
+        [rows addObject:@{ @"kind": @"info",
+                           @"title": NSLocalizedString(@"Loading Apps", nil),
+                           @"subtitle": NSLocalizedString(@"The installed-app list is loading in the background. You can still remove already selected apps above.", nil) }];
+        return rows;
+    }
+
+    if (!self.mwLiteInstalledApps) {
+        [rows addObject:@{ @"kind": @"info",
+                           @"title": NSLocalizedString(@"App List Not Loaded", nil),
+                           @"subtitle": NSLocalizedString(@"Tap Refresh App List to load installed apps.", nil) }];
+        return rows;
+    }
+
+    if (apps.count == 0) {
+        [rows addObject:@{ @"kind": @"info",
+                           @"title": NSLocalizedString(@"No Apps Found", nil),
+                           @"subtitle": NSLocalizedString(@"Cyanide could not read the installed-app list yet. Run the chain and sandbox escape first, then return here and tap Refresh App List.", nil) }];
+        return rows;
+    }
+
+    for (NSDictionary<NSString *, NSString *> *app in apps) {
+        NSString *bundleID = app[@"bundleID"];
+        if (bundleID.length == 0) continue;
+        NSString *name = [app[@"name"] isKindOfClass:NSString.class] && [app[@"name"] length] > 0 ? app[@"name"] : bundleID;
+        if (search.length > 0 &&
+            [name rangeOfString:search options:NSCaseInsensitiveSearch].location == NSNotFound &&
+            [bundleID rangeOfString:search options:NSCaseInsensitiveSearch].location == NSNotFound) {
+            continue;
+        }
+        NSString *title = [name isEqualToString:bundleID]
+            ? name
+            : [NSString stringWithFormat:@"%@ — %@", name, bundleID];
+        if ([selectedIDs containsObject:bundleID]) continue;
+        [rows addObject:@{ @"kind": @"mwlite-app",
+                           @"title": title,
+                           @"action": @"mwlite-toggle-app",
+                           @"bundleID": bundleID,
+                           @"appName": name,
+                           @"selected": @NO }];
+    }
+    NSInteger maxWindows = [d integerForKey:kSettingsMWLiteMaxWindows];
+    if (maxWindows < 1) maxWindows = 2;
+    if (maxWindows > 8) maxWindows = 8;
+    [rows addObject:@{ @"kind": @"info",
+                       @"title": NSLocalizedString(@"Window Limit", nil),
+                       @"subtitle": [NSString stringWithFormat:NSLocalizedString(@"MilkyWay Lite will keep up to %ld floating app window(s).", nil), (long)maxWindows] }];
+    if (selectedApps.count > 0) {
+        [rows addObject:@{ @"kind": @"info",
+                           @"title": NSLocalizedString(@"Picker Source", nil),
+                           @"subtitle": settings_mwlite_selected_apps_path() }];
+    }
+    return rows;
+}
+
 - (NSArray<NSDictionary *> *)themerRows
 {
     BOOL hasSelection = settings_themer_has_selected_theme();
@@ -9015,7 +9301,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
                          @"value": @"In progress"}];
     } else if (section == SectionPowercuff) {
         NSString *lvl = [d stringForKey:kSettingsPowercuffLevel] ?: @"nominal";
-        [out addObject:@{@"title": @"Level", @"value": lvl}];
+        [out addObject:@{@"title": @"Level", @"value": powercuff_level_title(lvl)}];
     } else if (section == SectionDragCoefficient) {
         double v = settings_drag_coefficient_value(d);
         [out addObject:@{@"title": @"Coefficient", @"value": [NSString stringWithFormat:@"%.2f", v]}];
@@ -9035,6 +9321,14 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     } else if (section == SectionIPADecryptor) {
         [out addObject:@{@"title": @"Target", @"value": settings_ipadecryptor_target_summary(d)}];
         [out addObject:@{@"title": @"App Store", @"value": settings_ipadecryptor_app_store_summary(d)}];
+    } else if (section == SectionMWLite) {
+        NSUInteger selectedCount = settings_mwlite_selected_apps(d).count;
+        [out addObject:@{@"title": NSLocalizedString(@"Selected Apps", nil),
+                         @"value": [NSString stringWithFormat:@"%lu", (unsigned long)selectedCount]}];
+        NSInteger maxWindows = [d integerForKey:kSettingsMWLiteMaxWindows];
+        if (maxWindows < 1) maxWindows = 2;
+        if (maxWindows > 8) maxWindows = 8;
+        [out addObject:@{@"title": NSLocalizedString(@"Max windows", nil), @"value": [@(maxWindows) stringValue]}];
     } else if (section == SectionGravityLite) {
         [out addObject:@{@"title": @"Dock",         @"value": [d boolForKey:kSettingsGravityLiteDockEnabled] ? @"Included" : @"Home only"}];
         [out addObject:@{@"title": @"Strength",     @"value": [NSString stringWithFormat:@"%ld%%", (long)[d integerForKey:kSettingsGravityLiteMagnitudePct]]}];
@@ -9070,6 +9364,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         case SectionGravityLite: return self.gravityLiteRows;
         case SectionLocationSim: return self.locationSimRows;
         case SectionIPADecryptor: return self.ipaDecryptorRows;
+        case SectionMWLite: return self.mwLiteRows;
         case SectionSnowBoardLite: return self.snowboardLiteRows;
         case SectionLiveWP: return self.liveWPRows;
         case SectionQuickLoader: return self.quickLoaderRows;
@@ -9100,6 +9395,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         @{ @"title": @"TypeBanner",         @"icon": @"ellipsis.bubble.fill",                @"color": [UIColor systemTealColor],   @"section": @(SectionTypeBanner), @"indev": @YES },
         @{ @"title": @"Notification Island", @"icon": @"bell.and.waves.left.and.right.fill",  @"color": [UIColor systemOrangeColor], @"section": @(SectionNotificationIsland), @"indev": @YES },
         @{ @"title": @"IPA Decryptor",      @"icon": @"lock.open.fill",                      @"color": [UIColor systemPurpleColor], @"section": @(SectionIPADecryptor), @"indev": @YES },
+        @{ @"title": @"MilkyWay Lite",             @"icon": @"macwindow",                           @"color": [UIColor systemMintColor],   @"section": @(SectionMWLite), @"indev": @YES },
         @{ @"title": @"FastLockX Lite",     @"icon": @"lock.open.fill",                      @"color": [UIColor systemGreenColor],  @"section": @(SectionFastLockXLite) },
 #endif
         @{ @"title": @"Gravity Lite",       @"icon": @"arrow.down.circle.fill",              @"color": [UIColor systemGreenColor],  @"section": @(SectionGravityLite) },
@@ -9216,7 +9512,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section
 {
     NSString *title = [self settingsRootSectionTitle:section];
-    return title ? CYSectionHeaderView(title) : nil;
+    return title ? CYSectionHeaderView(settings_l10n_text(title)) : nil;
 }
 
 
@@ -9224,23 +9520,23 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 {
     if (!self.detailMode) {
         if ((RootSection)section == RootSectionInDev && self.inDevBundleRows.count > 0) {
-            return @"These entries are not installable because they do not work yet. They remain visible so the unfinished settings/source paths are discoverable for anyone who wants to continue them.";
+            return settings_l10n_text(@"These entries are not installable because they do not work yet. They remain visible so the unfinished settings/source paths are discoverable for anyone who wants to continue them.");
         }
         return nil;
     }
     NSInteger s = self.underlyingSection;
     if (s == SectionLaunch) {
-        return @"kexploit_opa334 runs once per app lifetime. Keep Alive applies only while Cyanide is minimized; an App Switcher kill still terminates the process.";
+        return settings_l10n_text(@"kexploit_opa334 runs once per app lifetime. Keep Alive applies only while Cyanide is minimized; an App Switcher kill still terminates the process.");
     }
     if (s == SectionSBC) {
-        return [NSString stringWithFormat:@"Stock iOS defaults: dock %ld, columns %ld, rows %ld.",
+        return [NSString stringWithFormat:settings_l10n_text(@"Stock iOS defaults: dock %ld, columns %ld, rows %ld."),
                 (long)kSBCDefaultDockIcons, (long)kSBCDefaultCols, (long)kSBCDefaultRows];
     }
     if (s == SectionDarkSwordTweaks) {
-        return @"Imported from DarkSword-Tweaks. These are SpringBoard runtime patches; turning one off only skips future applies.";
+        return settings_l10n_text(@"Imported from DarkSword-Tweaks. These are SpringBoard runtime patches; turning one off only skips future applies.");
     }
     if (s == SectionDragCoefficient) {
-        return @"Overrides _UIAnimationDragCoefficient in SpringBoard. Type the raw coefficient: 1.00 = stock, 0.50 = 2× faster, 0.25 = 4× faster, minimum 0.01. Imported from kolbicz/DarkSword-Tweaks.";
+        return settings_l10n_text(@"Overrides _UIAnimationDragCoefficient in SpringBoard. Type the raw coefficient: 1.00 = stock, 0.50 = 2× faster, 0.25 = 4× faster, minimum 0.01. Imported from kolbicz/DarkSword-Tweaks.");
     }
     if (s == SectionLayoutExtras) {
         NSInteger major = [[NSProcessInfo processInfo] operatingSystemVersion].majorVersion;
@@ -9250,67 +9546,63 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
                 @"Running on iOS %ld: the upstream config-mutation path doesn't exist (AMUIInfographIconListLayout has no mutable configuration), so the iOS 26 path instead walks the live SBIconListView/SBIconView hierarchy and adjusts frames + iconImageInfo directly. One-shot at Run; iOS 26 may re-fit on a subsequent layout pass (rotation, page swipe).",
                 (long)major];
         }
-        return @"Adds extra padding and per-icon scaling on top of the stock home/dock layout. Defaults are zero padding and 100% scale (no change). Toggle Enable on and hit Run to apply; values aren't persisted across respring.";
+        return settings_l10n_text(@"Adds extra padding and per-icon scaling on top of the stock home/dock layout. Defaults are zero padding and 100% scale (no change). Toggle Enable on and hit Run to apply; values aren't persisted across respring.");
     }
     if (s == SectionOTA) {
-        return @"Edits launchd disabled.plist. A reboot or userspace restart is required for changes to take effect.";
+        return settings_l10n_text(@"Edits launchd disabled.plist. A reboot or userspace restart is required for changes to take effect.");
     }
     if (s == SectionNanoRegistry) {
-        return @"Changes the watchOS pairing range saved on this iPhone.\n\n"
-               @"Most people should tap Use watchOS Range 99/23/10/6, then Apply Pairing Override. "
-               @"These are pairing protocol generations, not Apple Watch model numbers. "
-               @"99 raises the watchOS pairing ceiling. 23 keeps the generation-23 setup protocol accepted. "
-               @"10 and 6 leave the legacy chip and multi-watch floors at their normal values.\n\n"
-               @"Apple Watch Ultra 3 cannot pair on iOS versions below 26 at this time.\n\n"
-               @"Respring or reboot after applying before you try to pair.";
+        return settings_l10n_text(@"Changes the watchOS pairing range saved on this iPhone.\n\nMost people should tap Use watchOS Range 99/23/10/6, then Apply Pairing Override. These are pairing protocol generations, not Apple Watch model numbers. 99 raises the watchOS pairing ceiling. 23 keeps the generation-23 setup protocol accepted. 10 and 6 leave the legacy chip and multi-watch floors at their normal values.\n\nApple Watch Ultra 3 cannot pair on iOS versions below 26 at this time.\n\nRespring or reboot after applying before you try to pair.");
     }
     if (s == SectionPowercuff) {
-        return @"Underclocks the CPU/GPU via thermalmonitord by simulating thermal pressure. Nominal is the daily-use default. Light, Moderate, and Heavy intentionally underclock the CPU more and can make the device feel laggy, especially on older hardware.";
+        return settings_l10n_text(@"Underclocks the CPU/GPU via thermalmonitord by simulating thermal pressure. Nominal is the daily-use default. Light, Moderate, and Heavy intentionally underclock the CPU more and can make the device feel laggy, especially on older hardware.");
     }
     if (s == SectionStatBar) {
-        return @"Live overlay. When enabled, StatBar keeps a SpringBoard RemoteCall session open. Refresh rate applies when Cyanide is minimized but the screen is still awake; StatBar pauses while the screen is locked or asleep.";
+        return settings_l10n_text(@"Live overlay. When enabled, StatBar keeps a SpringBoard RemoteCall session open. Refresh rate applies when Cyanide is minimized but the screen is still awake; StatBar pauses while the screen is locked or asleep.");
     }
     if (s == SectionNSBar) {
-        return @"Network speed overlay ported from d1y/cyanide-ios. When enabled, NSBar keeps a SpringBoard RemoteCall session open and refreshes roughly once per second.";
+        return settings_l10n_text(@"Network speed overlay ported from d1y/cyanide-ios. When enabled, NSBar keeps a SpringBoard RemoteCall session open and refreshes roughly once per second.");
     }
     if (s == SectionNiceBarLite) {
-        return @"Tap a box to choose what it shows. NiceBar Lite places plain text in the configured status-bar slots around the notch or Dynamic Island, including the bottom center position. Weather is fetched from your current location through Open-Meteo and follows the Celsius toggle.";
+        return settings_l10n_text(@"Tap a box to choose what it shows. NiceBar Lite places plain text in the configured status-bar slots around the notch or Dynamic Island, including the bottom center position. Weather is fetched from your current location through Open-Meteo and follows the Celsius toggle.");
     }
     if (s == SectionRSSI) {
-        return @"Adds a UILabel as a sibling of each STUI signal view (no new UIWindow), refreshed every second. Cellular shows live RSRP dBm (sign implicit). WiFi shows the bar count (0-4); the wifid XPC dBm path crashed SpringBoard in prior tests.";
+        return settings_l10n_text(@"Adds a UILabel as a sibling of each STUI signal view (no new UIWindow), refreshed every second. Cellular shows live RSRP dBm (sign implicit). WiFi shows the bar count (0-4); the wifid XPC dBm path crashed SpringBoard in prior tests.");
     }
     if (s == SectionAxonLite) {
-        return @"RemoteCall-only Axon port. It uses a live app-side loop rather than substrate hooks, so it lasts for the active Cyanide SpringBoard session.";
+        return settings_l10n_text(@"RemoteCall-only Axon port. It uses a live app-side loop rather than substrate hooks, so it lasts for the active Cyanide SpringBoard session.");
     }
     if (s == SectionTypeBanner) {
-        return @"Partial TypeMillennium port. Detection runs against imagent using original-thread RemoteCall probes, while SpringBoard renders a prewarmed banner window.";
+        return settings_l10n_text(@"Partial TypeMillennium port. Detection runs against imagent using original-thread RemoteCall probes, while SpringBoard renders a prewarmed banner window.");
     }
     if (s == SectionNotificationIsland) {
-        return @"Experimental Dynamic Island notification route. Cyanide polls SpringBoard's active banner request through the shared RemoteCall session, then mirrors it through the app's ActivityKit Live Activity.";
+        return settings_l10n_text(@"Experimental Dynamic Island notification route. Cyanide polls SpringBoard's active banner request through the shared RemoteCall session, then mirrors it through the app's ActivityKit Live Activity.");
     }
     if (s == SectionAppSwitcherGrid) {
-        return @"Runtime patch. It changes SpringBoard's app switcher style in memory, writes no system files, and a respring restores stock. Unsupported builds may glitch the app switcher or crash SpringBoard.";
+        return settings_l10n_text(@"Runtime patch. It changes SpringBoard's app switcher style in memory, writes no system files, and a respring restores stock. Unsupported builds may glitch the app switcher or crash SpringBoard.");
     }
     if (s == SectionGravityLite) {
-        return @"RemoteCall-only core port of Julio Verne's Gravity. Run applies UIDynamicAnimator gravity, collision, bounce, friction, optional dock physics, and accelerometer steering to SpringBoard icon snapshots. It can restore the icon layout or fire a manual explosion pulse while the SpringBoard session is active.\n\nNot included in this core port: Activator/Home-button hooks, drag gestures, automatic shake effects, and preference-daemon notifications.";
+        return settings_l10n_text(@"RemoteCall-only core port of Julio Verne's Gravity. Run applies UIDynamicAnimator gravity, collision, bounce, friction, optional dock physics, and accelerometer steering to SpringBoard icon snapshots. It can restore the icon layout or fire a manual explosion pulse while the SpringBoard session is active.\n\nNot included in this core port: Activator/Home-button hooks, drag gestures, automatic shake effects, and preference-daemon notifications.");
     }
     if (s == SectionLocationSim) {
-        return @"Beta CoreLocation simulation. Requires Apple Maps installed and set up — Maps is the RemoteCall host process that drives the simulation.\n\nThis is a manual tool, not an installable package. Use Simulate Current Target to start; use Restore Real Location to stop simulation and return CoreLocation to the device's real providers. Each run opens the activity log and marks completion when the request returns.\n\nNot all apps respect the simulated location. Apps that use their own location validation or additional signals may ignore it.\n\nCredits: kolbicz for the RemoteCall/CLSimulationManager GPS spoofer prototype, and ezzuldinSt's LSpoof for picker/route references.\n\nWarning: this can affect more than maps. Location-tied system behavior, including time zone and date/time handling, may behave unexpectedly. Only use this if you know what you're doing.";
+        return settings_l10n_text(@"Beta CoreLocation simulation. Requires Apple Maps installed and set up — Maps is the RemoteCall host process that drives the simulation.\n\nThis is a manual tool, not an installable package. Use Simulate Current Target to start; use Restore Real Location to stop simulation and return CoreLocation to the device's real providers. Each run opens the activity log and marks completion when the request returns.\n\nNot all apps respect the simulated location. Apps that use their own location validation or additional signals may ignore it.\n\nCredits: kolbicz for the RemoteCall/CLSimulationManager GPS spoofer prototype, and ezzuldinSt's LSpoof for picker/route references.\n\nWarning: this can affect more than maps. Location-tied system behavior, including time zone and date/time handling, may behave unexpectedly. Only use this if you know what you're doing.");
     }
     if (s == SectionIPADecryptor) {
-        return @"In-development local IPA decryptor. Current build discovers installed user apps, resolves pasted App Store links to bundle IDs, signs in for an App Store download token, and fetches the encrypted IPA to Documents. The fetched IPA still needs SINF/iTunesMetadata patching plus the KRW dump/rebuild stage before it becomes a decrypted IPA.";
+        return settings_l10n_text(@"In-development local IPA decryptor. Current build discovers installed user apps, resolves pasted App Store links to bundle IDs, signs in for an App Store download token, and fetches the encrypted IPA to Documents. The fetched IPA still needs SINF/iTunesMetadata patching plus the KRW dump/rebuild stage before it becomes a decrypted IPA.");
+    }
+    if (s == SectionMWLite) {
+        return [NSString stringWithFormat:@"%@\n\n%@",
+                NSLocalizedString(@"Experimental floating-window route. Activate MilkyWay Lite from Installer, then choose apps from the picker to open movable/resizable SpringBoard-hosted windows. It defaults to 2 concurrent windows and can be configured up to 8.", nil),
+                NSLocalizedString(@"Compatibility: MilkyWay Lite and Dynamic Stage Lite are mutually exclusive because both own SpringBoard floating-window/scene-host state.", nil)];
     }
     if (s == SectionThemer) {
-        return @"Legacy icon theme engine settings.\n\n"
-               @"Pick a theme before running the icon theme engine.\n\n"
-               @"Compatibility: when Dynamic Stage Lite is enabled, live icon repair is paused to avoid SpringBoard resprings. The selected theme still applies once.\n\n"
-               @"Custom themes can be a folder of PNG files named by bundle ID, such as com.apple.mobilesafari.png, or a binary plist mapping bundle IDs to PNG data. Import copies the theme into Cyanide's Documents/Themes folder. Theme Format Guide includes examples and plist exports.";
+        return settings_l10n_text(@"Legacy icon theme engine settings.\n\nPick a theme before running the icon theme engine.\n\nCompatibility: when Dynamic Stage Lite is enabled, live icon repair is paused to avoid SpringBoard resprings. The selected theme still applies once.\n\nCustom themes can be a folder of PNG files named by bundle ID, such as com.apple.mobilesafari.png, or a binary plist mapping bundle IDs to PNG data. Import copies the theme into Cyanide's Documents/Themes folder. Theme Format Guide includes examples and plist exports.");
     }
     if (s == SectionSnowBoardLite) {
-        return @"SnowBoard/IconBundles importer ported from d1y/cyanide-ios. Folder imports are copied into Cyanide's Documents/SnowBoardLite library and applied through the existing icon replacement pipeline.\n\nThe import copies theme assets into Cyanide's local storage so the original theme in Files is not changed.\n\nCompatibility: SnowBoard Lite keeps live icon repair active and reuses the SpringBoard RemoteCall channel between repair ticks. Re-run it after a respring if icons reset.";
+        return settings_l10n_text(@"SnowBoard/IconBundles importer ported from d1y/cyanide-ios. Folder imports are copied into Cyanide's Documents/SnowBoardLite library and applied through the existing icon replacement pipeline.\n\nThe import copies theme assets into Cyanide's local storage so the original theme in Files is not changed.\n\nCompatibility: SnowBoard Lite keeps live icon repair active and reuses the SpringBoard RemoteCall channel between repair ticks. Re-run it after a respring if icons reset.");
     }
     if (s == SectionLiveWP) {
-        return @"Video wallpaper ported from d1y/cyanide-ios. Select an MP4, MOV, or M4V; Cyanide copies it into Documents/LiveWP and plays it in SpringBoard while the RemoteCall session stays alive.";
+        return settings_l10n_text(@"Video wallpaper ported from d1y/cyanide-ios. Select an MP4, MOV, or M4V; Cyanide copies it into Documents/LiveWP and plays it in SpringBoard while the RemoteCall session stays alive.");
     }
     return nil;
 }
@@ -9366,7 +9658,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"bundle"];
     }
     cell.imageView.image = [SettingsViewController iconBadgeWithSymbol:row[@"icon"] color:row[@"color"] size:29.0];
-    cell.textLabel.text = row[@"title"];
+    cell.textLabel.text = settings_l10n_text(row[@"title"]);
     cell.textLabel.font = [UIFont systemFontOfSize:17.0];
     cell.textLabel.textColor = UIColor.labelColor;
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
@@ -9381,10 +9673,10 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"indev"];
     }
     cell.imageView.image = [SettingsViewController iconBadgeWithSymbol:row[@"icon"] color:[UIColor systemGrayColor] size:29.0];
-    cell.textLabel.text = row[@"title"];
+    cell.textLabel.text = settings_l10n_text(row[@"title"]);
     cell.textLabel.font = [UIFont systemFontOfSize:17.0];
     cell.textLabel.textColor = UIColor.tertiaryLabelColor;
-    cell.detailTextLabel.text = @"In Development";
+    cell.detailTextLabel.text = settings_l10n_text(@"In Development");
     cell.detailTextLabel.font = [UIFont systemFontOfSize:13.0];
     cell.detailTextLabel.textColor = UIColor.tertiaryLabelColor;
     cell.accessoryType = UITableViewCellAccessoryNone;
@@ -9491,7 +9783,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"changelog-footer"];
     }
     cell.imageView.image = nil;
-    cell.textLabel.text = @"See all releases on GitHub";
+    cell.textLabel.text = settings_l10n_text(@"See all releases on GitHub");
     cell.textLabel.font = [UIFont systemFontOfSize:15.0];
     cell.textLabel.textColor = self.view.tintColor;
     cell.detailTextLabel.text = nil;
@@ -9512,10 +9804,10 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     NSInteger count = 0;
     for (id c in first[@"changes"]) { if ([c isKindOfClass:[NSString class]]) count++; }
     cell.imageView.image = [SettingsViewController iconBadgeWithSymbol:@"sparkles" color:UIColor.systemYellowColor size:29.0];
-    cell.textLabel.text = [NSString stringWithFormat:@"What's New in v%@", version];
+    cell.textLabel.text = [NSString stringWithFormat:settings_l10n_text(@"What's New in v%@"), version];
     cell.textLabel.font = [UIFont systemFontOfSize:17.0];
     cell.textLabel.textColor = UIColor.labelColor;
-    cell.detailTextLabel.text = [NSString stringWithFormat:@"%ld change%@", (long)count, count == 1 ? @"" : @"s"];
+    cell.detailTextLabel.text = [NSString stringWithFormat:settings_l10n_text(count == 1 ? @"%ld change" : @"%ld changes"), (long)count];
     cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     cell.selectionStyle = UITableViewCellSelectionStyleDefault;
@@ -9529,7 +9821,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"changelog-collapse"];
     }
     cell.imageView.image = nil;
-    cell.textLabel.text = @"Show Less";
+    cell.textLabel.text = settings_l10n_text(@"Show Less");
     cell.textLabel.font = [UIFont systemFontOfSize:15.0];
     cell.textLabel.textColor = self.view.tintColor;
     cell.textLabel.textAlignment = NSTextAlignmentCenter;
@@ -9540,7 +9832,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 
 - (void)openReleasesPage
 {
-    NSURL *url = [NSURL URLWithString:@"https://github.com/zeroxjf/cyanide/releases"];
+    NSURL *url = [NSURL URLWithString:@"https://github.com/hxhlb/cyanide/releases"];
     if (url) [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
 }
 
@@ -9553,9 +9845,9 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     cell.imageView.image = [SettingsViewController iconBadgeWithSymbol:@"book.closed.fill" color:UIColor.systemPurpleColor size:29.0];
     cell.textLabel.font = [UIFont systemFontOfSize:17.0];
     cell.textLabel.textColor = UIColor.labelColor;
-    cell.textLabel.text = @"Tweak SDK";
+    cell.textLabel.text = settings_l10n_text(@"Tweak SDK");
     cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
-    cell.detailTextLabel.text = @"How to write Cyanide tweaks";
+    cell.detailTextLabel.text = settings_l10n_text(@"How to write Cyanide tweaks");
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     cell.selectionStyle = UITableViewCellSelectionStyleDefault;
     return cell;
@@ -9583,24 +9875,24 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
             break;
         case 1:
             cell.imageView.image = [SettingsViewController iconBadgeWithSymbol:@"book.closed.fill" color:UIColor.systemPurpleColor size:29.0];
-            cell.textLabel.text = @"Tweak SDK";
+            cell.textLabel.text = settings_l10n_text(@"Tweak SDK");
             break;
         case 2:
             cell.imageView.image = [SettingsViewController iconBadgeWithSymbol:@"app.fill" color:UIColor.systemTealColor size:29.0];
-            cell.textLabel.text = @"App Icon";
-            cell.detailTextLabel.text = [[self currentAppIconStyle] isEqualToString:@"classic"] ? @"Classic" : @"Modern";
+            cell.textLabel.text = settings_l10n_text(@"App Icon");
+            cell.detailTextLabel.text = settings_l10n_text([[self currentAppIconStyle] isEqualToString:@"classic"] ? @"Classic" : @"Modern");
             break;
         case 3:
             cell.imageView.image = [SettingsViewController iconBadgeWithSymbol:@"doc.text.magnifyingglass" color:UIColor.systemGrayColor size:29.0];
-            cell.textLabel.text = @"View Log";
+            cell.textLabel.text = settings_l10n_text(@"View Log");
             break;
         case 4:
             cell.imageView.image = [SettingsViewController iconBadgeWithSymbol:@"square.and.arrow.up" color:UIColor.systemGreenColor size:29.0];
-            cell.textLabel.text = @"Share Log";
+            cell.textLabel.text = settings_l10n_text(@"Share Log");
             break;
         default:
             cell.imageView.image = [SettingsViewController iconBadgeWithSymbol:@"icloud.and.arrow.up" color:UIColor.systemIndigoColor size:29.0];
-            cell.textLabel.text = @"Auto-Upload Logs";
+            cell.textLabel.text = settings_l10n_text(@"Auto-Upload Logs");
             cell.accessoryType = UITableViewCellAccessoryNone;
             cell.selectionStyle = UITableViewCellSelectionStyleNone;
             UISwitch *sw = [[UISwitch alloc] init];
@@ -9672,10 +9964,10 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 - (void)presentThemerImporter
 {
     UIAlertController *hint = [UIAlertController
-        alertControllerWithTitle:@"Import Theme Folder"
-                         message:@"Navigate into your theme folder so you can see the PNG files inside, then tap Open in the top-right corner to import the folder."
+        alertControllerWithTitle:settings_l10n_text(@"Import Theme Folder")
+                         message:settings_l10n_text(@"Navigate into your theme folder so you can see the PNG files inside, then tap Open in the top-right corner to import the folder.")
                   preferredStyle:UIAlertControllerStyleAlert];
-    [hint addAction:[UIAlertAction actionWithTitle:@"Continue" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+    [hint addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Continue") style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         (void)a;
         UIDocumentPickerViewController *picker =
             [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeFolder, UTTypePropertyList]];
@@ -9684,17 +9976,17 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         self.pendingThemeImportMode = @"themer";
         [self presentViewController:picker animated:YES completion:nil];
     }]];
-    [hint addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [hint addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
     [self presentViewController:hint animated:YES completion:nil];
 }
 
 - (void)presentSnowBoardLiteFolderImporter
 {
     UIAlertController *hint = [UIAlertController
-        alertControllerWithTitle:@"Import Theme Folder"
-                         message:@"Navigate into your theme folder so you can see IconBundles inside, then tap Open.\n\nIf tapping Open does nothing, your signing tool may need \"Match provisioning identifier\" enabled, or you can use Import Theme Archive instead."
+        alertControllerWithTitle:settings_l10n_text(@"Import Theme Folder")
+                         message:settings_l10n_text(@"Navigate into your theme folder so you can see IconBundles inside, then tap Open.\n\nIf tapping Open does nothing, your signing tool may need \"Match provisioning identifier\" enabled, or you can use Import Theme Archive instead.")
                   preferredStyle:UIAlertControllerStyleAlert];
-    [hint addAction:[UIAlertAction actionWithTitle:@"Continue" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+    [hint addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Continue") style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         (void)a;
         UIDocumentPickerViewController *picker =
             [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeFolder]];
@@ -9703,17 +9995,17 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         self.pendingThemeImportMode = @"snowboardlite";
         [self presentViewController:picker animated:YES completion:nil];
     }]];
-    [hint addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [hint addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
     [self presentViewController:hint animated:YES completion:nil];
 }
 
 - (void)presentSnowBoardLiteArchiveImporter
 {
     UIAlertController *hint = [UIAlertController
-        alertControllerWithTitle:@"Import Theme Archive"
-                         message:@"Pick a ZIP or DEB file that contains an IconBundles directory. Cyanide extracts and imports a local copy."
+        alertControllerWithTitle:settings_l10n_text(@"Import Theme Archive")
+                         message:settings_l10n_text(@"Pick a ZIP or DEB file that contains an IconBundles directory. Cyanide extracts and imports a local copy.")
                   preferredStyle:UIAlertControllerStyleAlert];
-    [hint addAction:[UIAlertAction actionWithTitle:@"Continue" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+    [hint addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Continue") style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         (void)a;
         NSArray<UTType *> *types = @[
             UTTypeZIP,
@@ -9726,28 +10018,28 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         self.pendingThemeImportMode = @"snowboardlite";
         [self presentViewController:picker animated:YES completion:nil];
     }]];
-    [hint addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [hint addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
     [self presentViewController:hint animated:YES completion:nil];
 }
 
 - (void)presentLiveWPVideoPicker
 {
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Choose Video"
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:settings_l10n_text(@"Choose Video")
                                                                    message:nil
                                                             preferredStyle:UIAlertControllerStyleActionSheet];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Photos"
+    [sheet addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Photos")
                                               style:UIAlertActionStyleDefault
                                             handler:^(UIAlertAction *a) {
         (void)a;
         [self presentLiveWPPhotosPicker];
     }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Files"
+    [sheet addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Files")
                                               style:UIAlertActionStyleDefault
                                             handler:^(UIAlertAction *a) {
         (void)a;
         [self presentLiveWPDocumentPicker];
     }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel"
+    [sheet addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel")
                                               style:UIAlertActionStyleCancel
                                             handler:nil]];
     UIPopoverPresentationController *pop = sheet.popoverPresentationController;
@@ -9810,7 +10102,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         if (error) {
             *error = [NSError errorWithDomain:@"LiveWP"
                                          code:1
-                                     userInfo:@{NSLocalizedDescriptionKey: @"Choose an MP4, MOV, or M4V video."}];
+                                     userInfo:@{NSLocalizedDescriptionKey: settings_l10n_text(@"Choose an MP4, MOV, or M4V video.")}];
         }
         return NO;
     }
@@ -9894,24 +10186,24 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     BOOL liveReady = settings_tweak_is_applied(kSettingsLiveWPEnabled) && g_springboard_rc_ready;
     NSString *name = displayName.length ? displayName : (url.lastPathComponent ?: @"Video");
     NSString *successMessage = liveReady
-        ? [NSString stringWithFormat:@"%@ was imported and will swap into the running LiveWP session.", name]
-        : [NSString stringWithFormat:@"%@ is ready. Toggle LiveWP on and tap Run to apply.", name];
+        ? [NSString stringWithFormat:settings_l10n_text(@"%@ was imported and will swap into the running LiveWP session."), name]
+        : [NSString stringWithFormat:settings_l10n_text(@"%@ is ready. Toggle LiveWP on and tap Run to apply."), name];
 
     dispatch_async(dispatch_get_main_queue(), ^{
         if (!ok) {
             NSString *msg = err.localizedDescription ?: @"The selected video could not be imported.";
-            UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Import Failed"
+            UIAlertController *ac = [UIAlertController alertControllerWithTitle:settings_l10n_text(@"Import Failed")
                                                                          message:msg
                                                                   preferredStyle:UIAlertControllerStyleAlert];
-            [ac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+            [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"OK") style:UIAlertActionStyleDefault handler:nil]];
             [self presentViewController:ac animated:YES completion:nil];
             return;
         }
         [self finishLiveWPVideoImportAndSwapIfRunning];
-        UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Video Selected"
+        UIAlertController *ac = [UIAlertController alertControllerWithTitle:settings_l10n_text(@"Video Selected")
                                                                      message:successMessage
                                                               preferredStyle:UIAlertControllerStyleAlert];
-        [ac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"OK") style:UIAlertActionStyleDefault handler:nil]];
         [self presentViewController:ac animated:YES completion:nil];
     });
 }
@@ -9926,10 +10218,10 @@ didFinishPicking:(NSArray<PHPickerResult *> *)results
     NSItemProvider *provider = result.itemProvider;
     NSString *identifier = [self liveWPPreferredTypeIdentifierForProvider:provider];
     if (identifier.length == 0) {
-        UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Import Failed"
-                                                                     message:@"Choose an MP4, MOV, or M4V video."
+        UIAlertController *ac = [UIAlertController alertControllerWithTitle:settings_l10n_text(@"Import Failed")
+                                                                     message:settings_l10n_text(@"Choose an MP4, MOV, or M4V video.")
                                                               preferredStyle:UIAlertControllerStyleAlert];
-        [ac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"OK") style:UIAlertActionStyleDefault handler:nil]];
         [self presentViewController:ac animated:YES completion:nil];
         return;
     }
@@ -9940,10 +10232,10 @@ didFinishPicking:(NSArray<PHPickerResult *> *)results
         if (!url || error) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 NSString *msg = error.localizedDescription ?: @"The selected video could not be opened.";
-                UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Import Failed"
+                UIAlertController *ac = [UIAlertController alertControllerWithTitle:settings_l10n_text(@"Import Failed")
                                                                              message:msg
                                                                       preferredStyle:UIAlertControllerStyleAlert];
-                [ac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"OK") style:UIAlertActionStyleDefault handler:nil]];
                 [self presentViewController:ac animated:YES completion:nil];
             });
             return;
@@ -10046,10 +10338,10 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
         if (scoped) [url stopAccessingSecurityScopedResource];
         log_user("[IMPORT] Cannot access selected file. Try a different location or file provider.\n");
         UIAlertController *ac = [UIAlertController
-            alertControllerWithTitle:@"Import Failed"
-                              message:@"The selected item could not be accessed. Try picking from a different location or file provider."
+            alertControllerWithTitle:settings_l10n_text(@"Import Failed")
+                              message:settings_l10n_text(@"The selected item could not be accessed. Try picking from a different location or file provider.")
                        preferredStyle:UIAlertControllerStyleAlert];
-        [ac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"OK") style:UIAlertActionStyleDefault handler:nil]];
         [self presentViewController:ac animated:YES completion:nil];
         return;
     }
@@ -10134,9 +10426,9 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
             successTitle = @"Video Selected";
             BOOL liveReady = settings_tweak_is_applied(kSettingsLiveWPEnabled) && g_springboard_rc_ready;
             successMessage = liveReady
-                ? [NSString stringWithFormat:@"%@ was imported and will swap into the running LiveWP session.",
+                ? [NSString stringWithFormat:settings_l10n_text(@"%@ was imported and will swap into the running LiveWP session."),
                                              url.lastPathComponent ?: @"Video"]
-                : [NSString stringWithFormat:@"%@ is ready. Toggle LiveWP on and tap Run to apply.",
+                : [NSString stringWithFormat:settings_l10n_text(@"%@ is ready. Toggle LiveWP on and tap Run to apply."),
                                              url.lastPathComponent ?: @"Video"];
         } else if ([mode isEqualToString:@"snowboardlite"]) {
             if (isDir) {
@@ -10156,22 +10448,22 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
             }
             successTitle = @"SnowBoard Theme Imported";
             NSString *name = settings_snowboardlite_selected_theme_display_name();
-            successMessage = [NSString stringWithFormat:@"\"%@\" is now selected. Toggle SnowBoard Lite on and tap Run to apply.", name];
+            successMessage = [NSString stringWithFormat:settings_l10n_text(@"\"%@\" is now selected. Toggle SnowBoard Lite on and tap Run to apply."), name];
         } else {
             ok = isDir ? [self importThemerFolderAtURL:url error:&err]
                        : [self importThemerPlistAtURL:url error:&err];
             NSString *name = settings_themer_selected_theme_display_name();
-            successMessage = [NSString stringWithFormat:@"\"%@\" is now selected. Toggle SnowBoard Lite on and tap Run to apply.", name];
+            successMessage = [NSString stringWithFormat:settings_l10n_text(@"\"%@\" is now selected. Toggle SnowBoard Lite on and tap Run to apply."), name];
         }
         if (scoped) [url stopAccessingSecurityScopedResource];
 
         dispatch_async(dispatch_get_main_queue(), ^{
             if (!ok) {
                 NSString *msg = err.localizedDescription ?: @"The selected item could not be imported.";
-                UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Import Failed"
+                UIAlertController *ac = [UIAlertController alertControllerWithTitle:settings_l10n_text(@"Import Failed")
                                                                              message:msg
                                                                       preferredStyle:UIAlertControllerStyleAlert];
-                [ac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"OK") style:UIAlertActionStyleDefault handler:nil]];
                 [self presentViewController:ac animated:YES completion:nil];
                 return;
             }
@@ -10193,7 +10485,7 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
                 alertControllerWithTitle:successTitle
                                  message:successMessage
                           preferredStyle:UIAlertControllerStyleAlert];
-            [ac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+            [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"OK") style:UIAlertActionStyleDefault handler:nil]];
             [self presentViewController:ac animated:YES completion:nil];
         });
     });
@@ -10278,7 +10570,7 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
 
 - (void)presentNSBarPositionPicker
 {
-    UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"NSBar Position"
+    UIAlertController *ac = [UIAlertController alertControllerWithTitle:settings_l10n_text(@"NSBar Position")
                                                                  message:nil
                                                           preferredStyle:UIAlertControllerStyleActionSheet];
     NSArray<NSNumber *> *positions = @[
@@ -10302,7 +10594,7 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
             [self reloadSectionOrAll:SectionNSBar];
         }]];
     }
-    [ac addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
     settings_present_controller(ac, self);
 }
 
@@ -10334,9 +10626,9 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
             return text.length ? text : @"Weather --";
         }
         case NiceBarLiteContentOff:
-            return @"Hidden";
+            return settings_l10n_text(@"Hidden");
     }
-    return @"Hidden";
+    return settings_l10n_text(@"Hidden");
 }
 
 - (UIButton *)nicebarSlotButton:(NSInteger)slot
@@ -10362,7 +10654,7 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
                        settings_nicebar_kind_name(kind),
                        [self nicebarSubtitleForSlot:slot]];
     [button setTitle:title forState:UIControlStateNormal];
-    button.accessibilityLabel = [NSString stringWithFormat:@"%@ %@", settings_nicebar_slot_name(slot), [self nicebarSubtitleForSlot:slot]];
+    button.accessibilityLabel = [NSString stringWithFormat:@"%@ %@", settings_l10n_text(settings_nicebar_slot_name(slot)), [self nicebarSubtitleForSlot:slot]];
     return button;
 }
 
@@ -10421,7 +10713,7 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
 {
     NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
     NSString *key = settings_nicebar_key(kSettingsNiceBarLiteSlotTextPrefix, slot);
-    UIAlertController *ac = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"%@ Text", settings_nicebar_slot_name(slot)]
+    UIAlertController *ac = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:settings_l10n_text(@"%@ Text"), settings_l10n_text(settings_nicebar_slot_name(slot))]
                                                                  message:nil
                                                           preferredStyle:UIAlertControllerStyleAlert];
     [ac addTextFieldWithConfigurationHandler:^(UITextField *field) {
@@ -10429,8 +10721,8 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
         field.text = [d stringForKey:key] ?: @"";
         field.clearButtonMode = UITextFieldViewModeWhileEditing;
     }];
-    [ac addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [ac addAction:[UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Save") style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
         NSString *value = ac.textFields.firstObject.text ?: @"";
         [d setInteger:NiceBarLiteContentCustomText forKey:settings_nicebar_key(kSettingsNiceBarLiteSlotKindPrefix, slot)];
         [d setObject:value forKey:key];
@@ -10469,7 +10761,7 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
     NSString *selectedFormat = [d stringForKey:settings_nicebar_key(kSettingsNiceBarLiteSlotTimePrefix, slot)] ?: @"HH:mm";
     __weak typeof(self) weakSelf = self;
     CyanideNiceBarTimePresetPickerViewController *picker =
-        [[CyanideNiceBarTimePresetPickerViewController alloc] initWithSlotTitle:[NSString stringWithFormat:@"%@ Date / Time", settings_nicebar_slot_name(slot)]
+        [[CyanideNiceBarTimePresetPickerViewController alloc] initWithSlotTitle:[NSString stringWithFormat:settings_l10n_text(@"%@ Date / Time"), settings_l10n_text(settings_nicebar_slot_name(slot))]
                                                                  selectedFormat:selectedFormat
                                                                       selection:^(NSString *format) {
         [weakSelf nicebarSetTimeFormat:format forSlot:slot];
@@ -10518,8 +10810,8 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
 - (void)presentNiceBarWeatherLanguagePickerForSlot:(NSInteger)slot
 {
     if (slot < 0 || slot >= NiceBarLiteSlotCount) return;
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"%@ Weather", settings_nicebar_slot_name(slot)]
-                                                                   message:@"Choose the weather display language."
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:settings_l10n_text(@"%@ Weather"), settings_l10n_text(settings_nicebar_slot_name(slot))]
+                                                                   message:settings_l10n_text(@"Choose the weather display language.")
                                                             preferredStyle:UIAlertControllerStyleActionSheet];
     [sheet addAction:[UIAlertAction actionWithTitle:@"English" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
         [self nicebarSetWeatherLanguage:@"en" forSlot:slot];
@@ -10527,7 +10819,7 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
     [sheet addAction:[UIAlertAction actionWithTitle:@"中文" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
         [self nicebarSetWeatherLanguage:@"zh" forSlot:slot];
     }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [sheet addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
     settings_present_controller(sheet, self);
 }
 
@@ -10539,7 +10831,7 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
     NSString *selectedLanguage = [d stringForKey:settings_nicebar_key(kSettingsNiceBarLiteSlotSystemLanguagePrefix, slot)] ?: @"en";
     __weak typeof(self) weakSelf = self;
     CyanideNiceBarSystemItemPickerViewController *picker =
-        [[CyanideNiceBarSystemItemPickerViewController alloc] initWithSlotTitle:[NSString stringWithFormat:@"%@ System Item", settings_nicebar_slot_name(slot)]
+        [[CyanideNiceBarSystemItemPickerViewController alloc] initWithSlotTitle:[NSString stringWithFormat:settings_l10n_text(@"%@ System Item"), settings_l10n_text(settings_nicebar_slot_name(slot))]
                                                                    selectedItem:selectedItem
                                                                selectedLanguage:selectedLanguage
                                                                       selection:^(NSInteger item, NSString *language) {
@@ -10565,25 +10857,25 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
     UIAlertController *ac = [UIAlertController alertControllerWithTitle:settings_nicebar_slot_name(slot)
                                                                  message:nil
                                                           preferredStyle:UIAlertControllerStyleActionSheet];
-    [ac addAction:[UIAlertAction actionWithTitle:@"Off" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+    [ac addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Off", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
         [d setInteger:NiceBarLiteContentOff forKey:settings_nicebar_key(kSettingsNiceBarLiteSlotKindPrefix, slot)];
         [d synchronize];
         settings_schedule_live_apply_for_key(settings_nicebar_key(kSettingsNiceBarLiteSlotKindPrefix, slot));
         [self reloadSectionOrAll:SectionNiceBarLite];
     }]];
-    [ac addAction:[UIAlertAction actionWithTitle:@"Custom Text" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Custom Text") style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
         [self presentNiceBarTextEditorForSlot:slot];
     }]];
-    [ac addAction:[UIAlertAction actionWithTitle:@"System Item" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"System Item") style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
         [self presentNiceBarSystemPickerForSlot:slot];
     }]];
-    [ac addAction:[UIAlertAction actionWithTitle:@"Date / Time" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Date / Time") style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
         [self presentNiceBarDateTimePickerForSlot:slot];
     }]];
-    [ac addAction:[UIAlertAction actionWithTitle:@"Weather" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Weather") style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
         [self presentNiceBarWeatherLanguagePickerForSlot:slot];
     }]];
-    [ac addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
     settings_present_controller(ac, self);
 }
 
@@ -10678,11 +10970,11 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
     cell.imageView.image = [SettingsViewController appIconPreviewForStyle:style];
 
     if (row == 0) {
-        cell.textLabel.text = @"Modern";
-        cell.detailTextLabel.text = @"Default — refreshed v2 mark.";
+        cell.textLabel.text = settings_l10n_text(@"Modern");
+        cell.detailTextLabel.text = settings_l10n_text(@"Default — refreshed v2 mark.");
     } else {
-        cell.textLabel.text = @"Classic";
-        cell.detailTextLabel.text = @"Original release artwork.";
+        cell.textLabel.text = settings_l10n_text(@"Classic");
+        cell.detailTextLabel.text = settings_l10n_text(@"Original release artwork.");
     }
 
     BOOL selected = [[self currentAppIconStyle] isEqualToString:style];
@@ -10697,10 +10989,10 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
 
     if (![UIApplication sharedApplication].supportsAlternateIcons) {
         UIAlertController *ac = [UIAlertController
-            alertControllerWithTitle:@"Can't Change Icon"
-                             message:@"This iOS build doesn't expose alternate icon switching."
+            alertControllerWithTitle:settings_l10n_text(@"Can't Change Icon")
+                             message:settings_l10n_text(@"This iOS build doesn't expose alternate icon switching.")
                       preferredStyle:UIAlertControllerStyleAlert];
-        [ac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+        [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"OK") style:UIAlertActionStyleCancel handler:nil]];
         [self presentViewController:ac animated:YES completion:nil];
         return;
     }
@@ -10725,16 +11017,16 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
 {
     if (![UIApplication sharedApplication].supportsAlternateIcons) {
         UIAlertController *ac = [UIAlertController
-            alertControllerWithTitle:@"Can't Change Icon"
-                             message:@"This iOS build doesn't expose alternate icon switching."
+            alertControllerWithTitle:settings_l10n_text(@"Can't Change Icon")
+                             message:settings_l10n_text(@"This iOS build doesn't expose alternate icon switching.")
                       preferredStyle:UIAlertControllerStyleAlert];
-        [ac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+        [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"OK") style:UIAlertActionStyleCancel handler:nil]];
         [self presentViewController:ac animated:YES completion:nil];
         return;
     }
     NSString *current = [self currentAppIconStyle];
     UIAlertController *ac = [UIAlertController
-        alertControllerWithTitle:@"App Icon"
+        alertControllerWithTitle:settings_l10n_text(@"App Icon")
                          message:nil
                   preferredStyle:UIAlertControllerStyleActionSheet];
     NSString *modernTitle = [current isEqualToString:@"modern"] ? @"Modern ✓" : @"Modern";
@@ -10745,7 +11037,7 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
     [ac addAction:[UIAlertAction actionWithTitle:classicTitle style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
         [self selectAppIconAtRow:1 inTableView:self.tableView];
     }]];
-    [ac addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
     ac.popoverPresentationController.sourceView = self.view;
     ac.popoverPresentationController.sourceRect = CGRectMake(self.view.bounds.size.width / 2, self.view.bounds.size.height / 2, 0, 0);
     [self presentViewController:ac animated:YES completion:nil];
@@ -10764,15 +11056,15 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
     NSString *logPath = log_most_recent_session_path();
     NSString *text;
     if (!logPath) {
-        text = @"No log yet. Run a chain at least once.";
+        text = settings_l10n_text(@"No log yet. Run a chain at least once.");
     } else {
         NSError *err = nil;
         text = [NSString stringWithContentsOfFile:logPath encoding:NSUTF8StringEncoding error:&err];
-        if (!text) text = [NSString stringWithFormat:@"Failed to read log: %@", err.localizedDescription];
+        if (!text) text = [NSString stringWithFormat:settings_l10n_text(@"Failed to read log: %@"), err.localizedDescription];
     }
 
     UIViewController *vc = [[UIViewController alloc] init];
-    vc.title = @"Log";
+    vc.title = settings_l10n_text(@"Log");
     vc.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
 
     UITextView *tv = [[UITextView alloc] init];
@@ -10797,10 +11089,10 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
 {
     NSString *logPath = log_most_recent_session_path();
     if (!logPath.length) {
-        UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"No Log Yet"
-                                                                     message:@"Run a chain once, then come back to share the latest diagnostic log."
+        UIAlertController *ac = [UIAlertController alertControllerWithTitle:settings_l10n_text(@"No Log Yet")
+                                                                     message:settings_l10n_text(@"Run a chain once, then come back to share the latest diagnostic log.")
                                                               preferredStyle:UIAlertControllerStyleAlert];
-        [ac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"OK") style:UIAlertActionStyleDefault handler:nil]];
         [self presentViewController:ac animated:YES completion:nil];
         return;
     }
@@ -11024,10 +11316,10 @@ void cyanide_present_contact(UIViewController *host)
     }
 
     UIAlertController *ac = [UIAlertController
-        alertControllerWithTitle:@"Mail Not Available"
-                         message:@"Set up Mail in iOS Settings to send feedback, or DM @zeroxjf on Twitter. View Log in Settings to copy the latest diagnostic log."
+        alertControllerWithTitle:settings_l10n_text(@"Mail Not Available")
+                         message:settings_l10n_text(@"Set up Mail in iOS Settings to send feedback, or DM @zeroxjf on Twitter. View Log in Settings to copy the latest diagnostic log.")
                   preferredStyle:UIAlertControllerStyleAlert];
-    [ac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"OK") style:UIAlertActionStyleDefault handler:nil]];
     [host presentViewController:ac animated:YES completion:nil];
 }
 
@@ -11109,8 +11401,8 @@ void cyanide_present_contact(UIViewController *host)
             BOOL running = g_settings_cleanup_running;
             symbol = @"xmark.circle.fill";
             color  = UIColor.systemRedColor;
-            cell.textLabel.text = running ? @"Cleaning Up…" : @"Clean Up";
-            cell.detailTextLabel.text = cleanupEnabled ? nil : @"No active session";
+            cell.textLabel.text = running ? settings_l10n_text(@"Cleaning Up…") : settings_l10n_text(@"Clean Up");
+            cell.detailTextLabel.text = cleanupEnabled ? nil : settings_l10n_text(@"No active session");
             if (running) {
                 UIActivityIndicatorView *spin = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
                 spin.color = color;
@@ -11121,7 +11413,7 @@ void cyanide_present_contact(UIViewController *host)
             BOOL running = g_settings_respring_cleanup_running;
             symbol = @"arrow.clockwise.circle.fill";
             color  = UIColor.systemOrangeColor;
-            cell.textLabel.text = running ? @"Preparing…" : @"Respring";
+            cell.textLabel.text = running ? settings_l10n_text(@"Preparing…") : settings_l10n_text(@"Respring");
             if (running) {
                 UIActivityIndicatorView *spin = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
                 spin.color = color;
@@ -11132,13 +11424,13 @@ void cyanide_present_contact(UIViewController *host)
             rowEnabled = anyInstalledOrQueued;
             symbol = @"trash.fill";
             color  = UIColor.systemRedColor;
-            cell.textLabel.text = @"Reset All Packages";
-            cell.detailTextLabel.text = anyInstalledOrQueued ? nil : @"Nothing active";
+            cell.textLabel.text = settings_l10n_text(@"Reset All Packages");
+            cell.detailTextLabel.text = anyInstalledOrQueued ? nil : settings_l10n_text(@"Nothing active");
         } else {
             rowEnabled = YES;
             symbol = @"arrow.down.circle.fill";
             color  = UIColor.systemBlueColor;
-            cell.textLabel.text = @"Check for Updates";
+            cell.textLabel.text = settings_l10n_text(@"Check for Updates");
         }
 
         UIColor *effectiveColor = rowEnabled ? color : UIColor.tertiaryLabelColor;
@@ -11171,10 +11463,10 @@ void cyanide_present_contact(UIViewController *host)
         cell.userInteractionEnabled = NO;
         cell.accessoryView = nil;
         cell.accessoryType = UITableViewCellAccessoryNone;
-        cell.textLabel.text = row[@"title"];
+        cell.textLabel.text = settings_l10n_text(row[@"title"]);
         cell.textLabel.textColor = UIColor.labelColor;
         cell.textLabel.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightSemibold];
-        cell.detailTextLabel.text = row[@"subtitle"];
+        cell.detailTextLabel.text = settings_l10n_text(row[@"subtitle"]);
         cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
         cell.detailTextLabel.font = [UIFont systemFontOfSize:13.0];
         return cell;
@@ -11193,7 +11485,7 @@ void cyanide_present_contact(UIViewController *host)
         cell.selectionStyle = rowSupported ? UITableViewCellSelectionStyleDefault : UITableViewCellSelectionStyleNone;
         cell.userInteractionEnabled = rowSupported;
         cell.accessoryView = nil;
-        cell.textLabel.text = row[@"title"];
+        cell.textLabel.text = settings_l10n_text(row[@"title"]);
         cell.textLabel.textAlignment = NSTextAlignmentCenter;
 
         BOOL prominent = [row[@"style"] isEqualToString:@"prominent"];
@@ -11211,14 +11503,59 @@ void cyanide_present_contact(UIViewController *host)
         return cell;
     }
 
+    if ([kind isEqualToString:@"mwlite-search"]) {
+        UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"mwlite-search"];
+        if (!cell) {
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"mwlite-search"];
+            UITextField *field = [[UITextField alloc] initWithFrame:CGRectMake(16, 7, tableView.bounds.size.width - 32, 34)];
+            field.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+            field.borderStyle = UITextBorderStyleRoundedRect;
+            field.clearButtonMode = UITextFieldViewModeWhileEditing;
+            field.returnKeyType = UIReturnKeySearch;
+            field.tag = 8301;
+            [field addTarget:self action:@selector(mwLiteSearchTextDidChange:) forControlEvents:UIControlEventEditingChanged];
+            [field addTarget:self action:@selector(mwLiteSearchEditingDidEnd:) forControlEvents:UIControlEventEditingDidEnd];
+            [field addTarget:self action:@selector(mwLiteSearchEditingDidEnd:) forControlEvents:UIControlEventEditingDidEndOnExit];
+            [cell.contentView addSubview:field];
+        }
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        UITextField *field = (UITextField *)[cell.contentView viewWithTag:8301];
+        field.placeholder = settings_l10n_text(row[@"title"]);
+        field.text = self.mwLiteSearchText ?: @"";
+        return cell;
+    }
+
+    if ([kind isEqualToString:@"mwlite-app"]) {
+        UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"mwlite-app"];
+        if (!cell) {
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"mwlite-app"];
+        }
+        BOOL rowSupported = supported;
+        BOOL selected = [row[@"selected"] boolValue];
+        cell.selectionStyle = rowSupported ? UITableViewCellSelectionStyleDefault : UITableViewCellSelectionStyleNone;
+        cell.userInteractionEnabled = rowSupported;
+        cell.accessoryView = nil;
+        cell.accessoryType = selected ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+        NSString *appName = [row[@"appName"] isKindOfClass:NSString.class] ? row[@"appName"] : nil;
+        NSString *bundleID = [row[@"bundleID"] isKindOfClass:NSString.class] ? row[@"bundleID"] : @"";
+        cell.textLabel.text = appName.length > 0 ? appName : bundleID;
+        cell.textLabel.textColor = rowSupported ? UIColor.labelColor : UIColor.tertiaryLabelColor;
+        cell.textLabel.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightRegular];
+        NSString *detail = [row[@"detail"] isKindOfClass:NSString.class] ? row[@"detail"] : bundleID;
+        cell.detailTextLabel.text = detail;
+        cell.detailTextLabel.textColor = rowSupported ? UIColor.secondaryLabelColor : UIColor.tertiaryLabelColor;
+        cell.detailTextLabel.font = [UIFont systemFontOfSize:12.0];
+        return cell;
+    }
+
     if ([kind isEqualToString:@"stepper"]) {
         UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"stepper" forIndexPath:dequeuePath];
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
         cell.textLabel.textAlignment = NSTextAlignmentNatural;
         cell.textLabel.textColor = supported ? UIColor.labelColor : UIColor.tertiaryLabelColor;
         NSInteger value = [d integerForKey:row[@"key"]];
-        NSString *combined = [NSString stringWithFormat:@"%@: %ld", row[@"title"], (long)value];
-        NSString *subtitle = row[@"subtitle"];
+        NSString *combined = [NSString stringWithFormat:@"%@: %ld", settings_l10n_text(row[@"title"]), (long)value];
+        NSString *subtitle = settings_l10n_text(row[@"subtitle"]);
         if (subtitle.length > 0) {
             UIListContentConfiguration *config = [UIListContentConfiguration cellConfiguration];
             config.text = combined;
@@ -11259,10 +11596,10 @@ void cyanide_present_contact(UIViewController *host)
 
         double value = settings_number_row_current_value(row, d);
         NSString *valueText = settings_number_row_value_string(row, value, YES);
-        cell.textLabel.text = [NSString stringWithFormat:@"%@: %@", row[@"title"], valueText];
+        cell.textLabel.text = [NSString stringWithFormat:@"%@: %@", settings_l10n_text(row[@"title"]), valueText];
         cell.textLabel.textAlignment = NSTextAlignmentNatural;
         cell.textLabel.textColor = supported ? UIColor.labelColor : UIColor.tertiaryLabelColor;
-        cell.detailTextLabel.text = row[@"subtitle"] ?: @"Tap to enter an exact value.";
+        cell.detailTextLabel.text = settings_l10n_text(row[@"subtitle"] ?: @"Tap to enter an exact value.");
         cell.detailTextLabel.textColor = supported ? UIColor.secondaryLabelColor : UIColor.tertiaryLabelColor;
         cell.detailTextLabel.font = [UIFont systemFontOfSize:12];
         return cell;
@@ -11286,7 +11623,7 @@ void cyanide_present_contact(UIViewController *host)
 
         UILabel *title = [[UILabel alloc] init];
         title.translatesAutoresizingMaskIntoConstraints = NO;
-        title.text = row[@"title"];
+        title.text = settings_l10n_text(row[@"title"]);
         title.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
         title.textColor = supported ? UIColor.labelColor : UIColor.tertiaryLabelColor;
 
@@ -11336,7 +11673,7 @@ void cyanide_present_contact(UIViewController *host)
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
         cell.textLabel.text = nil;
         for (UIView *v in [cell.contentView.subviews copy]) [v removeFromSuperview];
-        UISegmentedControl *seg = [[UISegmentedControl alloc] initWithItems:powercuff_levels()];
+        UISegmentedControl *seg = [[UISegmentedControl alloc] initWithItems:powercuff_level_titles()];
         seg.translatesAutoresizingMaskIntoConstraints = NO;
         NSString *cur = [d stringForKey:row[@"key"]] ?: @"nominal";
         NSUInteger idx = [powercuff_levels() indexOfObject:cur];
@@ -11363,11 +11700,11 @@ void cyanide_present_contact(UIViewController *host)
         config.imageProperties.reservedLayoutSize = CGSizeMake(36.0, 36.0);
         config.imageProperties.maximumSize = CGSizeMake(36.0, 36.0);
         config.imageToTextPadding = 14.0;
-        config.text = row[@"title"];
+        config.text = settings_l10n_text(row[@"title"]);
         config.textProperties.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold];
         config.secondaryText = active
-            ? [NSString stringWithFormat:@"%@ · Active", row[@"subtitle"]]
-            : row[@"subtitle"];
+            ? [NSString stringWithFormat:@"%@ · %@", settings_l10n_text(row[@"subtitle"]), settings_l10n_text(@"Active")]
+            : settings_l10n_text(row[@"subtitle"]);
         config.secondaryTextProperties.color = active ? UIColor.systemGreenColor : UIColor.secondaryLabelColor;
         config.textToSecondaryTextVerticalPadding = 2.0;
         NSDirectionalEdgeInsets m = config.directionalLayoutMargins;
@@ -11385,10 +11722,10 @@ void cyanide_present_contact(UIViewController *host)
         config.imageProperties.reservedLayoutSize = CGSizeMake(36.0, 36.0);
         config.imageProperties.maximumSize = CGSizeMake(36.0, 36.0);
         config.imageToTextPadding = 14.0;
-        config.text = @"No tweak loaded";
+        config.text = settings_l10n_text(@"No tweak loaded");
         config.textProperties.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightMedium];
         config.textProperties.color = UIColor.tertiaryLabelColor;
-        config.secondaryText = @"Select a .js file or install from Sources";
+        config.secondaryText = settings_l10n_text(@"Select a .js file or install from Sources");
         config.secondaryTextProperties.color = UIColor.tertiaryLabelColor;
         config.textToSecondaryTextVerticalPadding = 2.0;
         NSDirectionalEdgeInsets m = config.directionalLayoutMargins;
@@ -11404,7 +11741,7 @@ void cyanide_present_contact(UIViewController *host)
             cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"ql-param"];
         }
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
-        cell.textLabel.text = row[@"title"];
+        cell.textLabel.text = settings_l10n_text(row[@"title"]);
 
         NSString *varName = row[@"varName"];
         NSString *pType = row[@"paramType"];
@@ -11444,7 +11781,7 @@ void cyanide_present_contact(UIViewController *host)
 
             UIColorWell *colorWell = [[UIColorWell alloc] init];
             colorWell.translatesAutoresizingMaskIntoConstraints = NO;
-            colorWell.title = row[@"title"];
+            colorWell.title = settings_l10n_text(row[@"title"]);
 
             // if currentValue is null use red
             colorWell.selectedColor = colorFromHexString(currentValue ?: @"#FF0000");
@@ -11527,10 +11864,10 @@ void cyanide_present_contact(UIViewController *host)
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
     BOOL rowEnabled = supported && ![row[@"disabled"] boolValue];
     cell.userInteractionEnabled = rowEnabled;
-    NSString *subtitle = row[@"subtitle"];
+    NSString *subtitle = settings_l10n_text(row[@"subtitle"]);
     if (subtitle.length > 0) {
         UIListContentConfiguration *config = [UIListContentConfiguration cellConfiguration];
-        config.text = row[@"title"];
+        config.text = settings_l10n_text(row[@"title"]);
         config.secondaryText = subtitle;
         config.textToSecondaryTextVerticalPadding = 3;
         config.textProperties.color = rowEnabled ? UIColor.labelColor : UIColor.tertiaryLabelColor;
@@ -11540,7 +11877,7 @@ void cyanide_present_contact(UIViewController *host)
         cell.contentConfiguration = config;
     } else {
         cell.contentConfiguration = nil;
-        cell.textLabel.text = row[@"title"];
+        cell.textLabel.text = settings_l10n_text(row[@"title"]);
         cell.textLabel.textAlignment = NSTextAlignmentNatural;
         cell.textLabel.textColor = rowEnabled ? UIColor.labelColor : UIColor.tertiaryLabelColor;
     }
@@ -11680,14 +12017,15 @@ void cyanide_present_contact(UIViewController *host)
     double current = settings_number_row_current_value(row, d);
     NSString *minText = settings_number_row_value_string(row, [row[@"min"] doubleValue], YES);
     NSString *maxText = settings_number_row_value_string(row, [row[@"max"] doubleValue], YES);
-    NSString *message = [NSString stringWithFormat:@"Enter %@ to %@.%@%@",
+    NSString *subtitle = [row[@"subtitle"] isKindOfClass:NSString.class] ? row[@"subtitle"] : @"";
+    NSString *message = [NSString stringWithFormat:settings_l10n_text(@"Enter %@ to %@.%@%@"),
                          minText,
                          maxText,
-                         [row[@"subtitle"] length] > 0 ? @"\n\n" : @"",
-                         row[@"subtitle"] ?: @""];
+                         subtitle.length > 0 ? @"\n\n" : @"",
+                         settings_l10n_text(subtitle)];
 
     UIAlertController *ac = [UIAlertController
-        alertControllerWithTitle:row[@"title"]
+        alertControllerWithTitle:settings_l10n_text(row[@"title"])
                          message:message
                   preferredStyle:UIAlertControllerStyleAlert];
     [ac addTextFieldWithConfigurationHandler:^(UITextField *field) {
@@ -11701,8 +12039,8 @@ void cyanide_present_contact(UIViewController *host)
     }];
 
     __weak typeof(self) weakSelf = self;
-    [ac addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [ac addAction:[UIAlertAction actionWithTitle:@"Save"
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Save")
                                            style:UIAlertActionStyleDefault
                                          handler:^(__unused UIAlertAction *action) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
@@ -11719,10 +12057,10 @@ void cyanide_present_contact(UIViewController *host)
         [scanner scanCharactersFromSet:NSCharacterSet.whitespaceAndNewlineCharacterSet intoString:NULL];
         if (!ok || ![scanner isAtEnd] || !isfinite(parsed)) {
             UIAlertController *err = [UIAlertController
-                alertControllerWithTitle:@"Invalid Number"
-                                 message:@"Enter a plain number, then try again."
+                alertControllerWithTitle:settings_l10n_text(@"Invalid Number")
+                                 message:settings_l10n_text(@"Enter a plain number, then try again.")
                           preferredStyle:UIAlertControllerStyleAlert];
-            [err addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+            [err addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"OK") style:UIAlertActionStyleDefault handler:nil]];
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(250 * NSEC_PER_MSEC)),
                            dispatch_get_main_queue(), ^{
                 settings_present_controller(err, strongSelf);
@@ -11766,21 +12104,60 @@ void cyanide_present_contact(UIViewController *host)
                                                         object:[PackageQueue sharedQueue]];
 }
 
-- (void)presentIPADecryptorAppPicker
+- (void)reloadMWLiteUI
 {
-    NSArray<NSDictionary<NSString *, NSString *> *> *apps = ipadecryptor_installed_apps();
+    [self reloadSectionOrAll:SectionMWLite];
+    [[NSNotificationCenter defaultCenter] postNotificationName:PackageQueueDidChangeNotification
+                                                        object:[PackageQueue sharedQueue]];
+}
+
+- (void)startMWLiteAppListLoadForce:(BOOL)force
+{
+    if (self.mwLiteAppsLoading) return;
+    if (self.mwLiteInstalledApps && !force) return;
+    self.mwLiteAppsLoading = YES;
+    if (force) self.mwLiteInstalledApps = nil;
+    [self reloadSectionOrAll:SectionMWLite];
+
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSArray<NSDictionary<NSString *, NSString *> *> *apps = ipadecryptor_installed_apps_with_system_apps(YES);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
+            strongSelf.mwLiteInstalledApps = apps ?: @[];
+            strongSelf.mwLiteAppsLoading = NO;
+            [strongSelf reloadMWLiteUI];
+        });
+    });
+}
+
+- (void)mwLiteSearchTextDidChange:(UITextField *)field
+{
+    self.mwLiteSearchText = field.text ?: @"";
+}
+
+- (void)mwLiteSearchEditingDidEnd:(UITextField *)field
+{
+    self.mwLiteSearchText = field.text ?: @"";
+    [self reloadSectionOrAll:SectionMWLite];
+}
+
+- (void)presentMWLiteAppPicker
+{
+    NSArray<NSDictionary<NSString *, NSString *> *> *apps = ipadecryptor_installed_apps_with_system_apps(YES);
     if (apps.count == 0) {
         UIAlertController *ac = [UIAlertController
-            alertControllerWithTitle:@"No Apps Found"
-                             message:@"Cyanide could not list installed user apps yet. Run the chain once, then try again."
+            alertControllerWithTitle:NSLocalizedString(@"No Apps Found", nil)
+                             message:NSLocalizedString(@"Cyanide could not list installed user apps yet. Run the chain once, then try again.", nil)
                       preferredStyle:UIAlertControllerStyleAlert];
-        [ac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [ac addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"OK", nil) style:UIAlertActionStyleDefault handler:nil]];
         settings_present_controller(ac, self);
         return;
     }
 
-    UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Choose App"
-                                                                message:@"Select the installed app to probe/decrypt."
+    UIAlertController *ac = [UIAlertController alertControllerWithTitle:NSLocalizedString(@"Choose MilkyWay Lite App", nil)
+                                                                message:NSLocalizedString(@"Select the app MilkyWay Lite should open as a floating window.", nil)
                                                          preferredStyle:UIAlertControllerStyleActionSheet];
     __weak typeof(self) weakSelf = self;
     NSUInteger shown = 0;
@@ -11788,7 +12165,66 @@ void cyanide_present_contact(UIViewController *host)
         if (shown >= 60) break;
         NSString *bundleID = app[@"bundleID"];
         if (bundleID.length == 0) continue;
-        NSString *name = app[@"name"].length > 0 ? app[@"name"] : bundleID;
+        NSString *name = [app[@"name"] isKindOfClass:NSString.class] && [app[@"name"] length] > 0 ? app[@"name"] : bundleID;
+        NSString *title = [name isEqualToString:bundleID]
+            ? name
+            : [NSString stringWithFormat:@"%@ — %@", name, bundleID];
+        [ac addAction:[UIAlertAction actionWithTitle:title
+                                               style:UIAlertActionStyleDefault
+                                             handler:^(__unused UIAlertAction *action) {
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
+            NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+            [d setObject:bundleID forKey:kSettingsMWLiteTargetBundleID];
+            NSMutableArray<NSDictionary<NSString *, NSString *> *> *selected =
+                [settings_mwlite_selected_apps(d) mutableCopy];
+            if (!settings_mwlite_app_is_selected(d, bundleID)) {
+                [selected addObject:@{@"bundleID": bundleID, @"name": name}];
+                settings_mwlite_save_selected_apps(d, selected);
+            } else {
+                [d synchronize];
+            }
+            settings_mwlite_export_selected_apps(d);
+            log_user("[MWLITE] Selected %s (%s)\n", name.UTF8String, bundleID.UTF8String);
+            [strongSelf reloadMWLiteUI];
+        }]];
+        shown++;
+    }
+    if (apps.count > shown) {
+        [ac addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:settings_l10n_text(@"%lu more hidden — refine picker later"),
+                                                                             (unsigned long)(apps.count - shown)]
+                                               style:UIAlertActionStyleDefault
+                                             handler:nil]];
+    }
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+    ac.popoverPresentationController.sourceView = self.view;
+    ac.popoverPresentationController.sourceRect = self.view.bounds;
+    settings_present_controller(ac, self);
+}
+
+- (void)presentIPADecryptorAppPicker
+{
+    NSArray<NSDictionary<NSString *, NSString *> *> *apps = ipadecryptor_installed_apps();
+    if (apps.count == 0) {
+        UIAlertController *ac = [UIAlertController
+            alertControllerWithTitle:settings_l10n_text(@"No Apps Found")
+                             message:settings_l10n_text(@"Cyanide could not list installed user apps yet. Run the chain once, then try again.")
+                      preferredStyle:UIAlertControllerStyleAlert];
+        [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"OK") style:UIAlertActionStyleDefault handler:nil]];
+        settings_present_controller(ac, self);
+        return;
+    }
+
+    UIAlertController *ac = [UIAlertController alertControllerWithTitle:settings_l10n_text(@"Choose App")
+                                                                message:settings_l10n_text(@"Select the installed app to probe/decrypt.")
+                                                         preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak typeof(self) weakSelf = self;
+    NSUInteger shown = 0;
+    for (NSDictionary<NSString *, NSString *> *app in apps) {
+        if (shown >= 60) break;
+        NSString *bundleID = app[@"bundleID"];
+        if (bundleID.length == 0) continue;
+        NSString *name = [app[@"name"] isKindOfClass:NSString.class] && [app[@"name"] length] > 0 ? app[@"name"] : bundleID;
         NSString *title = name;
         if (![name isEqualToString:bundleID]) {
             title = [NSString stringWithFormat:@"%@ — %@", name, bundleID];
@@ -11807,12 +12243,12 @@ void cyanide_present_contact(UIViewController *host)
         shown++;
     }
     if (apps.count > shown) {
-        [ac addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"%lu more hidden — refine picker later",
+        [ac addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:settings_l10n_text(@"%lu more hidden — refine picker later"),
                                                                              (unsigned long)(apps.count - shown)]
                                                style:UIAlertActionStyleDefault
                                              handler:nil]];
     }
-    [ac addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
     ac.popoverPresentationController.sourceView = self.view;
     ac.popoverPresentationController.sourceRect = self.view.bounds;
     settings_present_controller(ac, self);
@@ -11830,7 +12266,7 @@ void cyanide_present_contact(UIViewController *host)
     [d setObject:meta[@"version"] ?: @"" forKey:kSettingsIPADecryptorAppStoreVersion];
     [d setObject:meta[@"trackURL"] ?: @"" forKey:kSettingsIPADecryptorAppStoreURL];
     [d setObject:@"" forKey:kSettingsIPADecryptorDownloadedIPAPath];
-    [d setObject:@"Resolved App Store metadata. Download not started yet."
+    [d setObject:settings_l10n_text(@"Resolved App Store metadata. Download not started yet.")
           forKey:kSettingsIPADecryptorDownloadStatus];
     if (bundleID.length > 0) {
         [d setObject:bundleID forKey:kSettingsIPADecryptorTargetBundleID];
@@ -11853,26 +12289,26 @@ void cyanide_present_contact(UIViewController *host)
 - (void)presentIPADecryptorSignInPrompt
 {
     UIAlertController *ac = [UIAlertController
-        alertControllerWithTitle:@"App Store Sign In"
-                         message:@"Sign in with the Apple ID that owns or can download the app. If Apple asks for two-factor authentication, Cyanide will prompt for the code next."
+        alertControllerWithTitle:settings_l10n_text(@"App Store Sign In")
+                         message:settings_l10n_text(@"Sign in with the Apple ID that owns or can download the app. If Apple asks for two-factor authentication, Cyanide will prompt for the code next.")
                   preferredStyle:UIAlertControllerStyleAlert];
     [ac addTextFieldWithConfigurationHandler:^(UITextField *field) {
-        field.placeholder = @"Apple ID email";
+        field.placeholder = settings_l10n_text(@"Apple ID email");
         field.keyboardType = UIKeyboardTypeEmailAddress;
         field.autocapitalizationType = UITextAutocapitalizationTypeNone;
         field.autocorrectionType = UITextAutocorrectionTypeNo;
         field.clearButtonMode = UITextFieldViewModeWhileEditing;
     }];
     [ac addTextFieldWithConfigurationHandler:^(UITextField *field) {
-        field.placeholder = @"Password";
+        field.placeholder = settings_l10n_text(@"Password");
         field.secureTextEntry = YES;
         field.autocapitalizationType = UITextAutocapitalizationTypeNone;
         field.autocorrectionType = UITextAutocorrectionTypeNo;
         field.clearButtonMode = UITextFieldViewModeWhileEditing;
     }];
     __weak typeof(self) weakSelf = self;
-    [ac addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [ac addAction:[UIAlertAction actionWithTitle:@"Sign In"
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Sign In")
                                            style:UIAlertActionStyleDefault
                                          handler:^(__unused UIAlertAction *action) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
@@ -11889,18 +12325,18 @@ void cyanide_present_contact(UIViewController *host)
     NSString *trimmedEmail = [email ?: @"" stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     NSString *shownEmail = trimmedEmail.length > 0 ? trimmedEmail : @"this Apple ID";
     UIAlertController *ac = [UIAlertController
-        alertControllerWithTitle:@"Two-Factor Code"
-                         message:[NSString stringWithFormat:@"Enter the 6-digit code Apple sent for %@.", shownEmail]
+        alertControllerWithTitle:settings_l10n_text(@"Two-Factor Code")
+                         message:[NSString stringWithFormat:settings_l10n_text(@"Enter the 6-digit code Apple sent for %@."), shownEmail]
                   preferredStyle:UIAlertControllerStyleAlert];
     [ac addTextFieldWithConfigurationHandler:^(UITextField *field) {
-        field.placeholder = @"2FA code";
+        field.placeholder = settings_l10n_text(@"2FA code");
         field.keyboardType = UIKeyboardTypeNumberPad;
         field.textContentType = UITextContentTypeOneTimeCode;
         field.clearButtonMode = UITextFieldViewModeWhileEditing;
     }];
     __weak typeof(self) weakSelf = self;
-    [ac addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [ac addAction:[UIAlertAction actionWithTitle:@"Verify"
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Verify")
                                            style:UIAlertActionStyleDefault
                                          handler:^(__unused UIAlertAction *action) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
@@ -11913,10 +12349,10 @@ void cyanide_present_contact(UIViewController *host)
         }
         if (code.length == 0) {
             UIAlertController *retry = [UIAlertController
-                alertControllerWithTitle:@"Code Required"
-                                 message:@"Enter the 6-digit Apple verification code."
+                alertControllerWithTitle:settings_l10n_text(@"Code Required")
+                                 message:settings_l10n_text(@"Enter the 6-digit Apple verification code.")
                           preferredStyle:UIAlertControllerStyleAlert];
-            [retry addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
+            [retry addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"OK") style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
                 [strongSelf presentIPADecryptorTwoFactorPromptForEmail:email password:password];
             }]];
             settings_present_controller(retry, strongSelf);
@@ -11999,11 +12435,11 @@ void cyanide_present_contact(UIViewController *host)
 {
     NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
     UIAlertController *ac = [UIAlertController
-        alertControllerWithTitle:@"App Store Link"
-                         message:@"Paste an App Store URL like https://apps.apple.com/us/app/name/id123456789, or enter the numeric app ID. Cyanide will resolve it, then attempt the IPA download path."
+        alertControllerWithTitle:settings_l10n_text(@"App Store Link")
+                         message:settings_l10n_text(@"Paste an App Store URL like https://apps.apple.com/us/app/name/id123456789, or enter the numeric app ID. Cyanide will resolve it, then attempt the IPA download path.")
                   preferredStyle:UIAlertControllerStyleAlert];
     [ac addTextFieldWithConfigurationHandler:^(UITextField *field) {
-        field.placeholder = @"App Store URL or app ID";
+        field.placeholder = settings_l10n_text(@"App Store URL or app ID");
         field.text = [d stringForKey:kSettingsIPADecryptorAppStoreInput] ?: @"";
         field.keyboardType = UIKeyboardTypeURL;
         field.autocapitalizationType = UITextAutocapitalizationTypeNone;
@@ -12011,8 +12447,8 @@ void cyanide_present_contact(UIViewController *host)
         field.clearButtonMode = UITextFieldViewModeWhileEditing;
     }];
     __weak typeof(self) weakSelf = self;
-    [ac addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [ac addAction:[UIAlertAction actionWithTitle:@"Resolve"
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Resolve")
                                            style:UIAlertActionStyleDefault
                                          handler:^(__unused UIAlertAction *action) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
@@ -12063,7 +12499,7 @@ void cyanide_present_contact(UIViewController *host)
                     if (downloadOK) {
                         completionMessage = downloadMessage ?: @"IPA downloaded.";
                     } else {
-                        completionMessage = [NSString stringWithFormat:@"Link resolved. %@",
+                        completionMessage = [NSString stringWithFormat:settings_l10n_text(@"Link resolved. %@"),
                                                                        downloadMessage ?: @"IPA download did not start."];
                     }
                 }
@@ -12447,27 +12883,27 @@ void cyanide_present_contact(UIViewController *host)
 
 - (void)presentLocationSimInvalidCoordinateAlert
 {
-    UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Invalid Coordinates"
-                                                                message:@"Use decimal degrees. Latitude must be between -90 and 90. Longitude must be between -180 and 180. Chinese labels like 北纬/南纬/东经/西经 and full-width punctuation are supported."
+    UIAlertController *ac = [UIAlertController alertControllerWithTitle:settings_l10n_text(@"Invalid Coordinates")
+                                                                message:settings_l10n_text(@"Use decimal degrees. Latitude must be between -90 and 90. Longitude must be between -180 and 180. Chinese labels like 北纬/南纬/东经/西经 and full-width punctuation are supported.")
                                                          preferredStyle:UIAlertControllerStyleAlert];
-    [ac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"OK") style:UIAlertActionStyleDefault handler:nil]];
     settings_present_controller(ac, self);
 }
 
 - (void)presentLocationSimExactCoordinatePrompt
 {
     NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
-    UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Exact Coordinates"
-                                                                message:@"Enter decimal degrees, or paste a pair like 40.7128, -74.0060 or 北纬39.9042，东经116.4074."
+    UIAlertController *ac = [UIAlertController alertControllerWithTitle:settings_l10n_text(@"Exact Coordinates")
+                                                                message:settings_l10n_text(@"Enter decimal degrees, or paste a pair like 40.7128, -74.0060 or 北纬39.9042，东经116.4074.")
                                                          preferredStyle:UIAlertControllerStyleAlert];
     [ac addTextFieldWithConfigurationHandler:^(UITextField *field) {
-        field.placeholder = @"Latitude or lat, lon";
+        field.placeholder = settings_l10n_text(@"Latitude or lat, lon");
         field.text = [NSString stringWithFormat:@"%.8f", [d doubleForKey:kSettingsLocationSimLatitude]];
         field.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
         field.clearButtonMode = UITextFieldViewModeWhileEditing;
     }];
     [ac addTextFieldWithConfigurationHandler:^(UITextField *field) {
-        field.placeholder = @"Longitude";
+        field.placeholder = settings_l10n_text(@"Longitude");
         field.text = [NSString stringWithFormat:@"%.8f", [d doubleForKey:kSettingsLocationSimLongitude]];
         field.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
         field.clearButtonMode = UITextFieldViewModeWhileEditing;
@@ -12496,13 +12932,13 @@ void cyanide_present_contact(UIViewController *host)
         }
     };
 
-    [ac addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [ac addAction:[UIAlertAction actionWithTitle:@"Set Target"
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Set Target")
                                            style:UIAlertActionStyleDefault
                                          handler:^(__unused UIAlertAction *action) {
         commit(NO);
     }]];
-    [ac addAction:[UIAlertAction actionWithTitle:@"Set & Simulate"
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Set & Simulate")
                                            style:UIAlertActionStyleDefault
                                          handler:^(__unused UIAlertAction *action) {
         commit(YES);
@@ -12525,7 +12961,7 @@ void cyanide_present_contact(UIViewController *host)
         @{ @"name": @"Singapore", @"lat": @1.3521, @"lon": @103.8198 },
     ];
 
-    UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Major Cities"
+    UIAlertController *ac = [UIAlertController alertControllerWithTitle:settings_l10n_text(@"Major Cities")
                                                                 message:nil
                                                          preferredStyle:UIAlertControllerStyleActionSheet];
     __weak typeof(self) weakSelf = self;
@@ -12542,7 +12978,7 @@ void cyanide_present_contact(UIViewController *host)
             [strongSelf runLocationSimApply:YES];
         }]];
     }
-    [ac addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
     ac.popoverPresentationController.sourceView = self.view;
     ac.popoverPresentationController.sourceRect = self.view.bounds;
     settings_present_controller(ac, self);
@@ -12576,8 +13012,8 @@ void cyanide_present_contact(UIViewController *host)
     while (v && ![v isKindOfClass:UITableViewCell.class]) v = v.superview;
     UITableViewCell *cell = (UITableViewCell *)v;
     if (cell) {
-        NSString *combined = [NSString stringWithFormat:@"%@: %ld", row[@"title"], (long)value];
-        NSString *subtitle = row[@"subtitle"];
+        NSString *combined = [NSString stringWithFormat:@"%@: %ld", settings_l10n_text(row[@"title"]), (long)value];
+        NSString *subtitle = settings_l10n_text(row[@"subtitle"]);
         if (subtitle.length > 0 && [cell.contentConfiguration isKindOfClass:UIListContentConfiguration.class]) {
             UIListContentConfiguration *config = (UIListContentConfiguration *)[(id<NSCopying>)cell.contentConfiguration copyWithZone:nil];
             config.text = combined;
@@ -12687,13 +13123,13 @@ void cyanide_present_contact(UIViewController *host)
     if (indexPath.section == SectionActions) {
         if (indexPath.row == 0) {
             UIAlertController *ac = [UIAlertController
-                alertControllerWithTitle:@"Clean Up?"
-                                 message:@"Stops live SpringBoard sessions and closes local KRW state. The next Run will try recovery first."
+                alertControllerWithTitle:settings_l10n_text(@"Clean Up?")
+                                 message:settings_l10n_text(@"Stops live SpringBoard sessions and closes local KRW state. The next Run will try recovery first.")
                           preferredStyle:UIAlertControllerStyleAlert];
-            [ac addAction:[UIAlertAction actionWithTitle:@"Cancel"
+            [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel")
                                                    style:UIAlertActionStyleCancel
                                                  handler:nil]];
-            [ac addAction:[UIAlertAction actionWithTitle:@"Clean Up"
+            [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Clean Up")
                                                    style:UIAlertActionStyleDestructive
                                                  handler:^(UIAlertAction *_) {
                 settings_queue_terminal_kexploit_cleanup("manual action");
@@ -12701,14 +13137,14 @@ void cyanide_present_contact(UIViewController *host)
             settings_present_controller(ac, self);
         } else if (indexPath.row == 1) {
             UIAlertController *ac = [UIAlertController
-                alertControllerWithTitle:@"Respring?"
-                                 message:@"Are you sure you want to respring? SpringBoard will restart."
+                alertControllerWithTitle:settings_l10n_text(@"Respring?")
+                                 message:settings_l10n_text(@"Are you sure you want to respring? SpringBoard will restart.")
                           preferredStyle:UIAlertControllerStyleAlert];
-            [ac addAction:[UIAlertAction actionWithTitle:@"Cancel"
+            [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel")
                                                    style:UIAlertActionStyleCancel
                                                  handler:nil]];
             __weak typeof(self) weakSelf = self;
-            [ac addAction:[UIAlertAction actionWithTitle:@"Respring"
+            [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Respring")
                                                    style:UIAlertActionStyleDestructive
                                                  handler:^(UIAlertAction *_) {
                 dispatch_async(dispatch_get_global_queue(0, 0), ^{
@@ -12737,13 +13173,13 @@ void cyanide_present_contact(UIViewController *host)
             settings_present_controller(ac, self);
         } else if (indexPath.row == 2) {
             UIAlertController *ac = [UIAlertController
-                alertControllerWithTitle:@"Reset All Packages?"
-                                 message:@"Deactivates every package and clears pending changes. Already-applied patches stay until respring or reboot. Per-tweak settings are not affected."
+                alertControllerWithTitle:settings_l10n_text(@"Reset All Packages?")
+                                 message:settings_l10n_text(@"Deactivates every package and clears pending changes. Already-applied patches stay until respring or reboot. Per-tweak settings are not affected.")
                           preferredStyle:UIAlertControllerStyleAlert];
-            [ac addAction:[UIAlertAction actionWithTitle:@"Cancel"
+            [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel")
                                                    style:UIAlertActionStyleCancel
                                                  handler:nil]];
-            [ac addAction:[UIAlertAction actionWithTitle:@"Reset"
+            [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Reset")
                                                    style:UIAlertActionStyleDestructive
                                                  handler:^(UIAlertAction *_) {
                 NSUInteger uninstalled = 0;
@@ -12823,11 +13259,11 @@ void cyanide_present_contact(UIViewController *host)
                           withRowAnimation:UITableViewRowAnimationNone];
         } else if ([action isEqualToString:@"nano-apply"]) {
             UIAlertController *ac = [UIAlertController
-                alertControllerWithTitle:@"Apply Pairing Override?"
-                                 message:@"Saves these watchOS pairing settings on this iPhone. Respring or reboot afterwards before trying to pair."
+                alertControllerWithTitle:settings_l10n_text(@"Apply Pairing Override?")
+                                 message:settings_l10n_text(@"Saves these watchOS pairing settings on this iPhone. Respring or reboot afterwards before trying to pair.")
                           preferredStyle:UIAlertControllerStyleAlert];
-            [ac addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-            [ac addAction:[UIAlertAction actionWithTitle:@"Apply" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+            [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+            [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Apply") style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
                 settings_run_nano_apply_action();
             }]];
             settings_present_controller(ac, self);
@@ -12837,21 +13273,21 @@ void cyanide_present_contact(UIViewController *host)
             settings_run_nano_steer_action();
         } else if ([action isEqualToString:@"nano-seed"]) {
             UIAlertController *ac = [UIAlertController
-                alertControllerWithTitle:@"Seed Compatibility Index?"
-                                 message:@"Adds this phone's product type to the local NanoRegistry compatibility-index MobileAsset and saves a .cyanide.bak backup beside the original file."
+                alertControllerWithTitle:settings_l10n_text(@"Seed Compatibility Index?")
+                                 message:settings_l10n_text(@"Adds this phone's product type to the local NanoRegistry compatibility-index MobileAsset and saves a .cyanide.bak backup beside the original file.")
                           preferredStyle:UIAlertControllerStyleAlert];
-            [ac addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-            [ac addAction:[UIAlertAction actionWithTitle:@"Seed" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+            [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+            [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Seed") style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
                 settings_run_nano_seed_action();
             }]];
             settings_present_controller(ac, self);
         } else if ([action isEqualToString:@"nano-clear"]) {
             UIAlertController *ac = [UIAlertController
-                alertControllerWithTitle:@"Remove Pairing Override?"
-                                 message:@"Removes the saved Watch Pairing Override without touching the rest of your watch data. Respring or reboot afterwards."
+                alertControllerWithTitle:settings_l10n_text(@"Remove Pairing Override?")
+                                 message:settings_l10n_text(@"Removes the saved Watch Pairing Override without touching the rest of your watch data. Respring or reboot afterwards.")
                           preferredStyle:UIAlertControllerStyleAlert];
-            [ac addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-            [ac addAction:[UIAlertAction actionWithTitle:@"Remove" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_) {
+            [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+            [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Remove") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_) {
                 settings_run_nano_clear_action();
             }]];
             settings_present_controller(ac, self);
@@ -12920,6 +13356,47 @@ void cyanide_present_contact(UIViewController *host)
                    [action isEqualToString:@"ipadec-start"] ||
                    [action isEqualToString:@"ipadec-download"]) {
             [self runIPADecryptorAction:action];
+        }
+        return;
+    }
+
+    if (indexPath.section == SectionMWLite) {
+        NSDictionary *row = [self rowsForSection:indexPath.section][indexPath.row];
+        NSString *kind = row[@"kind"] ?: @"";
+        NSString *action = row[@"action"];
+        if ([kind isEqualToString:@"button"] && [action isEqualToString:@"mwlite-refresh"]) {
+            [self startMWLiteAppListLoadForce:YES];
+            log_user("[MWLITE] Refreshing installed app list.\n");
+        } else if ([kind isEqualToString:@"mwlite-app"] && [action isEqualToString:@"mwlite-toggle-app"]) {
+            NSString *bundleID = row[@"bundleID"];
+            NSString *appName = [row[@"appName"] isKindOfClass:NSString.class] ? row[@"appName"] : @"";
+            NSString *name = appName.length > 0 ? appName : bundleID;
+            if (bundleID.length == 0) return;
+            NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+            NSMutableArray<NSDictionary<NSString *, NSString *> *> *selected =
+                [settings_mwlite_selected_apps(d) mutableCopy];
+            NSUInteger found = NSNotFound;
+            for (NSUInteger i = 0; i < selected.count; i++) {
+                if ([selected[i][@"bundleID"] isEqualToString:bundleID]) {
+                    found = i;
+                    break;
+                }
+            }
+            if (found == NSNotFound) {
+                [selected addObject:@{@"bundleID": bundleID, @"name": name}];
+                [d setObject:bundleID forKey:kSettingsMWLiteTargetBundleID];
+                log_user("[MWLITE] Preselected app: %s (%s).\n",
+                         name.UTF8String,
+                         bundleID.UTF8String);
+            } else {
+                [selected removeObjectAtIndex:found];
+                log_user("[MWLITE] Removed preselected app: %s (%s).\n",
+                         name.UTF8String,
+                         bundleID.UTF8String);
+            }
+            settings_mwlite_save_selected_apps(d, selected);
+            settings_mwlite_export_selected_apps(d);
+            [self reloadMWLiteUI];
         }
         return;
     }

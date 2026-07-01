@@ -110,8 +110,28 @@ static NSMutableDictionary<NSString *, NSString *> *ipadec_app_entry(NSString *b
     return entry;
 }
 
-static NSArray<NSDictionary<NSString *, NSString *> *> *ipadec_apps_from_launchservices(void)
+static NSMutableDictionary<NSString *, NSString *> *ipadec_launch_entry(NSString *bundleID,
+                                                                        NSString *name,
+                                                                        NSString *bundlePath)
 {
+    if (bundleID.length == 0) return nil;
+    NSMutableDictionary<NSString *, NSString *> *entry = [NSMutableDictionary dictionary];
+    entry[kIPADecryptorKeyBundleID] = bundleID;
+    entry[kIPADecryptorKeyName] = name.length > 0 ? name : bundleID;
+    entry[kIPADecryptorKeyBundlePath] = bundlePath.length > 0 ? bundlePath : @"";
+    return entry;
+}
+
+static BOOL ipadec_bundle_path_is_user_app(NSString *bundlePath)
+{
+    return [bundlePath rangeOfString:@"/Bundle/Application/"].location != NSNotFound ||
+           [bundlePath rangeOfString:@"/Containers/Bundle/Application/"].location != NSNotFound;
+}
+
+static NSArray<NSDictionary<NSString *, NSString *> *> *ipadec_apps_from_launchservices(BOOL includeSystemApps)
+{
+    dlopen("/System/Library/PrivateFrameworks/LaunchServices.framework/LaunchServices", RTLD_NOW);
+    dlopen("/System/Library/PrivateFrameworks/MobileCoreServices.framework/MobileCoreServices", RTLD_NOW);
     Class workspaceClass = NSClassFromString(@"LSApplicationWorkspace");
     id workspace = ipadec_perform0(workspaceClass, @selector(defaultWorkspace));
     NSArray *proxies = ipadec_perform0(workspace, @selector(allApplications));
@@ -124,18 +144,19 @@ static NSArray<NSDictionary<NSString *, NSString *> *> *ipadec_apps_from_launchs
         if (bundleID.length == 0 || [seen containsObject:bundleID]) continue;
 
         NSString *bundlePath = ipadec_bundle_path_from_proxy(proxy);
-        if (bundlePath.length == 0) continue;
+        if (bundlePath.length == 0 && !includeSystemApps) continue;
 
         // IPA decryption is only meaningful for user-installed app bundles.
-        // Keep the picker focused so system apps do not dominate the list.
-        if ([bundlePath rangeOfString:@"/Bundle/Application/"].location == NSNotFound &&
-            [bundlePath rangeOfString:@"/Containers/Bundle/Application/"].location == NSNotFound) {
+        // MWLite can opt into system apps because it only needs launchable apps.
+        if (!includeSystemApps && !ipadec_bundle_path_is_user_app(bundlePath)) {
             continue;
         }
 
         NSString *name = ipadec_nonempty_string(ipadec_perform0(proxy, @selector(localizedName)));
         if (name.length == 0) name = ipadec_nonempty_string(ipadec_perform0(proxy, @selector(itemName)));
-        NSMutableDictionary *entry = ipadec_app_entry(bundleID, name, bundlePath);
+        NSMutableDictionary *entry = includeSystemApps
+            ? ipadec_launch_entry(bundleID, name, bundlePath)
+            : ipadec_app_entry(bundleID, name, bundlePath);
         if (!entry) continue;
         [out addObject:entry];
         [seen addObject:bundleID];
@@ -145,39 +166,69 @@ static NSArray<NSDictionary<NSString *, NSString *> *> *ipadec_apps_from_launchs
 
 static NSArray<NSDictionary<NSString *, NSString *> *> *ipadec_apps_from_bundle_scan(void)
 {
-    NSString *root = @"/var/containers/Bundle/Application";
+    NSArray<NSString *> *roots = @[
+        @"/private/var/containers/Bundle/Application",
+        @"/var/containers/Bundle/Application",
+    ];
     NSFileManager *fm = NSFileManager.defaultManager;
-    NSArray<NSString *> *containers = [fm contentsOfDirectoryAtPath:root error:nil];
-    if (containers.count == 0) return @[];
 
     NSMutableArray<NSDictionary<NSString *, NSString *> *> *out = [NSMutableArray array];
-    for (NSString *container in containers) {
-        NSString *containerPath = [root stringByAppendingPathComponent:container];
-        BOOL isDir = NO;
-        if (![fm fileExistsAtPath:containerPath isDirectory:&isDir] || !isDir) continue;
-        NSArray<NSString *> *items = [fm contentsOfDirectoryAtPath:containerPath error:nil];
-        for (NSString *item in items) {
-            if (![item.pathExtension.lowercaseString isEqualToString:@"app"]) continue;
-            NSString *bundlePath = [containerPath stringByAppendingPathComponent:item];
-            NSString *infoPath = [bundlePath stringByAppendingPathComponent:@"Info.plist"];
-            NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:infoPath];
-            NSString *bundleID = ipadec_nonempty_string(info[@"CFBundleIdentifier"]);
-            NSString *name = ipadec_nonempty_string(info[@"CFBundleDisplayName"])
-                ?: ipadec_nonempty_string(info[@"CFBundleName"])
-                ?: bundleID;
-            NSMutableDictionary *entry = ipadec_app_entry(bundleID, name, bundlePath);
-            if (entry) [out addObject:entry];
+    NSMutableSet<NSString *> *seen = [NSMutableSet set];
+    for (NSString *root in roots) {
+        NSArray<NSString *> *containers = [fm contentsOfDirectoryAtPath:root error:nil];
+        if (containers.count == 0) continue;
+        for (NSString *container in containers) {
+            NSString *containerPath = [root stringByAppendingPathComponent:container];
+            BOOL isDir = NO;
+            if (![fm fileExistsAtPath:containerPath isDirectory:&isDir] || !isDir) continue;
+            NSArray<NSString *> *items = [fm contentsOfDirectoryAtPath:containerPath error:nil];
+            for (NSString *item in items) {
+                if (![item.pathExtension.lowercaseString isEqualToString:@"app"]) continue;
+                NSString *bundlePath = [containerPath stringByAppendingPathComponent:item];
+                NSString *infoPath = [bundlePath stringByAppendingPathComponent:@"Info.plist"];
+                NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:infoPath];
+                NSString *bundleID = ipadec_nonempty_string(info[@"CFBundleIdentifier"]);
+                if (bundleID.length == 0 || [seen containsObject:bundleID]) continue;
+                NSString *name = ipadec_nonempty_string(info[@"CFBundleDisplayName"])
+                    ?: ipadec_nonempty_string(info[@"CFBundleName"])
+                    ?: bundleID;
+                NSMutableDictionary *entry = ipadec_app_entry(bundleID, name, bundlePath);
+                if (entry) {
+                    [out addObject:entry];
+                    [seen addObject:bundleID];
+                }
+            }
         }
     }
     return out;
 }
 
-NSArray<NSDictionary<NSString *, NSString *> *> *ipadecryptor_installed_apps(void)
+NSArray<NSDictionary<NSString *, NSString *> *> *ipadecryptor_installed_apps_with_system_apps(BOOL includeSystemApps)
 {
     NSMutableDictionary<NSString *, NSDictionary<NSString *, NSString *> *> *byBundle = [NSMutableDictionary dictionary];
-    for (NSDictionary<NSString *, NSString *> *entry in ipadec_apps_from_launchservices()) {
+    for (NSDictionary<NSString *, NSString *> *entry in ipadec_apps_from_launchservices(includeSystemApps)) {
         NSString *bundleID = entry[kIPADecryptorKeyBundleID];
         if (bundleID.length > 0) byBundle[bundleID] = entry;
+    }
+    if (includeSystemApps) {
+        NSArray<NSDictionary<NSString *, NSString *> *> *fallbackSystemApps = @[
+            @{ kIPADecryptorKeyBundleID: @"com.apple.mobilesafari", kIPADecryptorKeyName: @"Safari", kIPADecryptorKeyBundlePath: @"" },
+            @{ kIPADecryptorKeyBundleID: @"com.apple.mobilephone", kIPADecryptorKeyName: @"Phone", kIPADecryptorKeyBundlePath: @"" },
+            @{ kIPADecryptorKeyBundleID: @"com.apple.MobileSMS", kIPADecryptorKeyName: @"Messages", kIPADecryptorKeyBundlePath: @"" },
+            @{ kIPADecryptorKeyBundleID: @"com.apple.Preferences", kIPADecryptorKeyName: @"Settings", kIPADecryptorKeyBundlePath: @"" },
+            @{ kIPADecryptorKeyBundleID: @"com.apple.mobileslideshow", kIPADecryptorKeyName: @"Photos", kIPADecryptorKeyBundlePath: @"" },
+            @{ kIPADecryptorKeyBundleID: @"com.apple.camera", kIPADecryptorKeyName: @"Camera", kIPADecryptorKeyBundlePath: @"" },
+            @{ kIPADecryptorKeyBundleID: @"com.apple.mobilemail", kIPADecryptorKeyName: @"Mail", kIPADecryptorKeyBundlePath: @"" },
+            @{ kIPADecryptorKeyBundleID: @"com.apple.mobilecal", kIPADecryptorKeyName: @"Calendar", kIPADecryptorKeyBundlePath: @"" },
+            @{ kIPADecryptorKeyBundleID: @"com.apple.reminders", kIPADecryptorKeyName: @"Reminders", kIPADecryptorKeyBundlePath: @"" },
+            @{ kIPADecryptorKeyBundleID: @"com.apple.mobilenotes", kIPADecryptorKeyName: @"Notes", kIPADecryptorKeyBundlePath: @"" },
+            @{ kIPADecryptorKeyBundleID: @"com.apple.Maps", kIPADecryptorKeyName: @"Maps", kIPADecryptorKeyBundlePath: @"" },
+            @{ kIPADecryptorKeyBundleID: @"com.apple.Music", kIPADecryptorKeyName: @"Music", kIPADecryptorKeyBundlePath: @"" },
+        ];
+        for (NSDictionary<NSString *, NSString *> *entry in fallbackSystemApps) {
+            NSString *bundleID = entry[kIPADecryptorKeyBundleID];
+            if (bundleID.length > 0 && !byBundle[bundleID]) byBundle[bundleID] = entry;
+        }
     }
     for (NSDictionary<NSString *, NSString *> *entry in ipadec_apps_from_bundle_scan()) {
         NSString *bundleID = entry[kIPADecryptorKeyBundleID];
@@ -192,6 +243,11 @@ NSArray<NSDictionary<NSString *, NSString *> *> *ipadecryptor_installed_apps(voi
         return [(a[kIPADecryptorKeyBundleID] ?: @"") compare:(b[kIPADecryptorKeyBundleID] ?: @"")];
     }];
     return sorted ?: @[];
+}
+
+NSArray<NSDictionary<NSString *, NSString *> *> *ipadecryptor_installed_apps(void)
+{
+    return ipadecryptor_installed_apps_with_system_apps(NO);
 }
 
 static NSDictionary<NSString *, NSString *> *ipadec_lookup_app(NSString *bundleID)

@@ -15,15 +15,20 @@
 static NSString * const kPkgCellID    = @"PkgCell";
 static NSString * const kSearchCellID = @"SearchPkgCell";
 
+static NSString *packages_l10n(NSString *text)
+{
+    return text.length ? NSLocalizedString(text, nil) : text;
+}
+
 static NSString *relative_time(NSTimeInterval timestamp)
 {
     if (timestamp <= 0) return nil;
     NSTimeInterval diff = [[NSDate date] timeIntervalSince1970] - timestamp;
-    if (diff < 60)          return @"Just now";
-    if (diff < 3600)        return [NSString stringWithFormat:@"%ldm ago", (long)(diff / 60)];
-    if (diff < 86400)       return [NSString stringWithFormat:@"%ldh ago", (long)(diff / 3600)];
-    if (diff < 86400 * 2)   return @"Yesterday";
-    if (diff < 86400 * 7)   return [NSString stringWithFormat:@"%ldd ago", (long)(diff / 86400)];
+    if (diff < 60)          return packages_l10n(@"Just now");
+    if (diff < 3600)        return [NSString stringWithFormat:packages_l10n(@"%ldm ago"), (long)(diff / 60)];
+    if (diff < 86400)       return [NSString stringWithFormat:packages_l10n(@"%ldh ago"), (long)(diff / 3600)];
+    if (diff < 86400 * 2)   return packages_l10n(@"Yesterday");
+    if (diff < 86400 * 7)   return [NSString stringWithFormat:packages_l10n(@"%ldd ago"), (long)(diff / 86400)];
     NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
     fmt.dateFormat = @"MMM d";
     return [fmt stringFromDate:[NSDate dateWithTimeIntervalSince1970:timestamp]];
@@ -59,8 +64,8 @@ typedef NS_ENUM(NSInteger, PackagesSection) {
 - (void)viewDidLoad
 {
     [super viewDidLoad];
-    self.title = @"Packages";
-    self.navigationItem.title = @"Packages";
+    self.title = packages_l10n(@"Packages");
+    self.navigationItem.title = packages_l10n(@"Packages");
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeAlways;
     self.navigationController.navigationBar.prefersLargeTitles = YES;
     self.searchText = @"";
@@ -78,7 +83,7 @@ typedef NS_ENUM(NSInteger, PackagesSection) {
     self.searchCtl = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchCtl.searchResultsUpdater = self;
     self.searchCtl.obscuresBackgroundDuringPresentation = NO;
-    self.searchCtl.searchBar.placeholder = @"Search all tweaks";
+    self.searchCtl.searchBar.placeholder = packages_l10n(@"Search all tweaks");
     self.navigationItem.searchController = self.searchCtl;
     self.navigationItem.hidesSearchBarWhenScrolling = NO;
 
@@ -196,8 +201,8 @@ typedef NS_ENUM(NSInteger, PackagesSection) {
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section
 {
     if ([self isSearchActive]) return nil;
-    if (section == PackagesSectionNew) return self.recentPackages.count > 0 ? CYSectionHeaderView(@"Recently Added") : nil;
-    return CYSectionHeaderView(@"All Packages");
+    if (section == PackagesSectionNew) return self.recentPackages.count > 0 ? CYSectionHeaderView(packages_l10n(@"Recently Added")) : nil;
+    return CYSectionHeaderView(packages_l10n(@"All Packages"));
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section
@@ -230,7 +235,7 @@ typedef NS_ENUM(NSInteger, PackagesSection) {
     config.imageProperties.reservedLayoutSize = CGSizeMake(32.0, 32.0);
     config.imageProperties.maximumSize = CGSizeMake(32.0, 32.0);
     config.imageToTextPadding = 12.0;
-    config.text = pkg.name;
+    config.text = packages_l10n(pkg.name);
     config.textProperties.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightSemibold];
     if (disabledForInstall) config.textProperties.color = UIColor.secondaryLabelColor;
 
@@ -238,27 +243,29 @@ typedef NS_ENUM(NSInteger, PackagesSection) {
     NSTimeInterval seen = (pkg.kind == PackageInstallKindRepoTweak && pkg.repoURL.length > 0)
         ? repotweaks_seen_timestamp(pkg.repoURL, pkg.repoTweakID) : 0;
     NSString *time = relative_time(seen);
+    NSString *shortDescription = packages_l10n(pkg.shortDescription);
+    NSString *installDisabledReason = packages_l10n(pkg.installDisabledReason);
     if (unsupported && installed && pkg.shortDescription.length > 0) {
-        config.secondaryText = [NSString stringWithFormat:@"Installed, unsupported here · %@ · %@",
-                                pkg.installDisabledReason,
-                                pkg.shortDescription];
+        config.secondaryText = [NSString stringWithFormat:packages_l10n(@"Installed, unsupported here · %@ · %@"),
+                                installDisabledReason,
+                                shortDescription];
     } else if (unsupported && installed) {
-        config.secondaryText = [NSString stringWithFormat:@"Installed, unsupported here · %@",
-                                pkg.installDisabledReason];
+        config.secondaryText = [NSString stringWithFormat:packages_l10n(@"Installed, unsupported here · %@"),
+                                installDisabledReason];
     } else if (unsupported && pkg.shortDescription.length > 0) {
-        config.secondaryText = [NSString stringWithFormat:@"%@ · %@", pkg.installDisabledReason, pkg.shortDescription];
+        config.secondaryText = [NSString stringWithFormat:@"%@ · %@", installDisabledReason, shortDescription];
     } else if (unsupported) {
-        config.secondaryText = pkg.installDisabledReason;
+        config.secondaryText = installDisabledReason;
     } else if (hasUpdate && time && pkg.shortDescription.length > 0) {
-        config.secondaryText = [NSString stringWithFormat:@"Update available · %@ · %@", time, pkg.shortDescription];
+        config.secondaryText = [NSString stringWithFormat:packages_l10n(@"Update available · %@ · %@"), time, shortDescription];
     } else if (hasUpdate && pkg.shortDescription.length > 0) {
-        config.secondaryText = [NSString stringWithFormat:@"Update available · %@", pkg.shortDescription];
+        config.secondaryText = [NSString stringWithFormat:packages_l10n(@"Update available · %@"), shortDescription];
     } else if (hasUpdate) {
-        config.secondaryText = @"Update available";
+        config.secondaryText = packages_l10n(@"Update available");
     } else if (time && pkg.shortDescription.length > 0) {
-        config.secondaryText = [NSString stringWithFormat:@"%@ · %@", time, pkg.shortDescription];
+        config.secondaryText = [NSString stringWithFormat:@"%@ · %@", time, shortDescription];
     } else {
-        config.secondaryText = pkg.shortDescription;
+        config.secondaryText = shortDescription;
     }
     config.secondaryTextProperties.font = [UIFont systemFontOfSize:14.0 weight:UIFontWeightRegular];
     config.secondaryTextProperties.color = unsupported
@@ -273,7 +280,7 @@ typedef NS_ENUM(NSInteger, PackagesSection) {
 
     if (unsupported && installed) {
         UILabel *pill = [[UILabel alloc] init];
-        pill.text = @"INSTALLED";
+        pill.text = packages_l10n(@"INSTALLED");
         pill.font = [UIFont systemFontOfSize:11.0 weight:UIFontWeightHeavy];
         pill.textColor = UIColor.systemGreenColor;
         pill.backgroundColor = [UIColor.systemGreenColor colorWithAlphaComponent:0.15];
@@ -289,7 +296,7 @@ typedef NS_ENUM(NSInteger, PackagesSection) {
         cell.accessoryView = pill;
     } else if (unsupported) {
         UILabel *pill = [[UILabel alloc] init];
-        pill.text = [pkg.category isEqualToString:@"In Development"] ? @"DISABLED" : @"UNSUPPORTED";
+        pill.text = [pkg.category isEqualToString:@"In Development"] ? packages_l10n(@"DISABLED") : packages_l10n(@"UNSUPPORTED");
         pill.font = [UIFont systemFontOfSize:11.0 weight:UIFontWeightHeavy];
         pill.textColor = UIColor.systemOrangeColor;
         pill.backgroundColor = [UIColor.systemOrangeColor colorWithAlphaComponent:0.15];
@@ -305,7 +312,7 @@ typedef NS_ENUM(NSInteger, PackagesSection) {
         cell.accessoryView = pill;
     } else if (hasUpdate) {
         UILabel *pill = [[UILabel alloc] init];
-        pill.text = @"UPDATE";
+        pill.text = packages_l10n(@"UPDATE");
         pill.font = [UIFont systemFontOfSize:11.0 weight:UIFontWeightHeavy];
         pill.textColor = UIColor.systemBlueColor;
         pill.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.15];

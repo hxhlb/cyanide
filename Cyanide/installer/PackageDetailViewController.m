@@ -21,6 +21,11 @@ static NSString *pkgdetail_string_or_empty(id value)
     return [value isKindOfClass:NSString.class] ? (NSString *)value : @"";
 }
 
+static NSString *pkgdetail_l10n(NSString *text)
+{
+    return text.length > 0 ? NSLocalizedString(text, nil) : text;
+}
+
 static BOOL pkgdetail_js_identifier_valid(NSString *name)
 {
     if (![name isKindOfClass:NSString.class] || name.length == 0) return NO;
@@ -96,14 +101,14 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     }
 
     UIAlertController *alert =
-        [UIAlertController alertControllerWithTitle:@"Call Recording Disclosure"
-                                            message:@"Silencing call-recording disclosure sounds may violate consent, notice, or privacy laws where you live or where the call participants are located. Only use this where you have permission and understand the rules that apply to you.\n\nCyanide modifies CallServices system files and keeps a backup when possible. You can restore the original sounds from this package."
+        [UIAlertController alertControllerWithTitle:pkgdetail_l10n(@"Call Recording Disclosure")
+                                            message:pkgdetail_l10n(@"Silencing call-recording disclosure sounds may violate consent, notice, or privacy laws where you live or where the call participants are located. Only use this where you have permission and understand the rules that apply to you.\n\nCyanide modifies CallServices system files and keeps a backup when possible. You can restore the original sounds from this package.")
                                      preferredStyle:UIAlertControllerStyleAlert];
 
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel"
+    [alert addAction:[UIAlertAction actionWithTitle:pkgdetail_l10n(@"Cancel")
                                               style:UIAlertActionStyleCancel
                                             handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"I Understand, Silence"
+    [alert addAction:[UIAlertAction actionWithTitle:pkgdetail_l10n(@"I Understand, Silence")
                                               style:UIAlertActionStyleDestructive
                                             handler:^(UIAlertAction *_) {
         [d setBool:YES forKey:kCallRecordingDisclosureAcceptedDefault];
@@ -304,10 +309,10 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
 
     BOOL hideHomeBarReason = [reason containsString:@"Hide Home Bar"];
     UIAlertController *alert =
-        [UIAlertController alertControllerWithTitle:(hideHomeBarReason ? @"Run Hide Home Bar Alone" : @"Cannot Queue Install")
-                                            message:reason ?: @"This package cannot be queued yet."
+        [UIAlertController alertControllerWithTitle:(hideHomeBarReason ? pkgdetail_l10n(@"Run Hide Home Bar Alone") : pkgdetail_l10n(@"Cannot Queue Install"))
+                                            message:pkgdetail_l10n(reason ?: @"This package cannot be queued yet.")
                                      preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"OK"
+    [alert addAction:[UIAlertAction actionWithTitle:pkgdetail_l10n(@"OK")
                                               style:UIAlertActionStyleDefault
                                             handler:nil]];
     [self presentViewController:alert animated:YES completion:nil];
@@ -344,14 +349,14 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
 - (UIMenu *)manualActionMenu
 {
     if (self.package.kind == PackageInstallKindNanoRegistry) {
-        UIAction *apply = [UIAction actionWithTitle:@"Apply Pairing Override"
+        UIAction *apply = [UIAction actionWithTitle:pkgdetail_l10n(@"Apply Pairing Override")
                                               image:[UIImage systemImageNamed:@"applewatch.radiowaves.left.and.right"]
                                          identifier:nil
                                             handler:^(__kindof UIAction *_) {
             [self queueManualIntent:PackageQueueIntentInstall];
         }];
 
-        UIAction *remove = [UIAction actionWithTitle:@"Remove Pairing Override"
+        UIAction *remove = [UIAction actionWithTitle:pkgdetail_l10n(@"Remove Pairing Override")
                                                image:[UIImage systemImageNamed:@"xmark.circle"]
                                           identifier:nil
                                              handler:^(__kindof UIAction *_) {
@@ -359,11 +364,11 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
         }];
         remove.attributes = UIMenuElementAttributesDestructive;
 
-        return [UIMenu menuWithTitle:@"Watch Pairing Override" children:@[apply, remove]];
+        return [UIMenu menuWithTitle:pkgdetail_l10n(@"Watch Pairing Override") children:@[apply, remove]];
     }
 
     if (self.package.kind == PackageInstallKindCallRecordingSound) {
-        UIAction *silence = [UIAction actionWithTitle:@"Silence Disclosure Sounds"
+        UIAction *silence = [UIAction actionWithTitle:pkgdetail_l10n(@"Silence Disclosure Sounds")
                                                 image:[UIImage systemImageNamed:@"speaker.slash.fill"]
                                            identifier:nil
                                               handler:^(__kindof UIAction *_) {
@@ -375,18 +380,18 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
         }];
         silence.attributes = UIMenuElementAttributesDestructive;
 
-        UIAction *restore = [UIAction actionWithTitle:@"Restore Original Sounds"
+        UIAction *restore = [UIAction actionWithTitle:pkgdetail_l10n(@"Restore Original Sounds")
                                                 image:[UIImage systemImageNamed:@"speaker.wave.2.fill"]
                                            identifier:nil
                                               handler:^(__kindof UIAction *_) {
             [self queueManualIntent:PackageQueueIntentUninstall];
         }];
 
-        return [UIMenu menuWithTitle:@"Call Recording Sound" children:@[silence, restore]];
+        return [UIMenu menuWithTitle:pkgdetail_l10n(@"Call Recording Sound") children:@[silence, restore]];
     }
 
     if (self.package.kind == PackageInstallKindHideHomeBar) {
-        UIAction *hide = [UIAction actionWithTitle:@"Hide Home Bar"
+        UIAction *hide = [UIAction actionWithTitle:pkgdetail_l10n(@"Hide Home Bar")
                                              image:[UIImage systemImageNamed:@"line.3.horizontal"]
                                         identifier:nil
                                            handler:^(__kindof UIAction *_) {
@@ -394,17 +399,17 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
         }];
         hide.attributes = UIMenuElementAttributesDestructive;
 
-        UIAction *restore = [UIAction actionWithTitle:@"Restore Home Bar"
+        UIAction *restore = [UIAction actionWithTitle:pkgdetail_l10n(@"Restore Home Bar")
                                                 image:[UIImage systemImageNamed:@"arrow.clockwise"]
                                            identifier:nil
                                               handler:^(__kindof UIAction *_) {
             [self queueManualIntent:PackageQueueIntentUninstall];
         }];
 
-        return [UIMenu menuWithTitle:@"Home Bar" children:@[hide, restore]];
+        return [UIMenu menuWithTitle:pkgdetail_l10n(@"Home Bar") children:@[hide, restore]];
     }
 
-    UIAction *disable = [UIAction actionWithTitle:@"Disable OTA Updates"
+    UIAction *disable = [UIAction actionWithTitle:pkgdetail_l10n(@"Disable OTA Updates")
                                             image:[UIImage systemImageNamed:@"icloud.slash"]
                                        identifier:nil
                                           handler:^(__kindof UIAction *_) {
@@ -412,14 +417,14 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     }];
     disable.attributes = UIMenuElementAttributesDestructive;
 
-    UIAction *enable = [UIAction actionWithTitle:@"Enable OTA Updates"
+    UIAction *enable = [UIAction actionWithTitle:pkgdetail_l10n(@"Enable OTA Updates")
                                            image:[UIImage systemImageNamed:@"icloud"]
                                       identifier:nil
                                          handler:^(__kindof UIAction *_) {
         [self queueManualIntent:PackageQueueIntentUninstall];
     }];
 
-    return [UIMenu menuWithTitle:@"OTA Updates" children:@[disable, enable]];
+    return [UIMenu menuWithTitle:pkgdetail_l10n(@"OTA Updates") children:@[disable, enable]];
 }
 
 - (instancetype)initWithPackage:(Package *)package
@@ -428,8 +433,8 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
         _package = package;
         [self reloadRepoOptions];
         _infoRows = @[
-            @[@"Author",   package.author],
-            @[@"Version",  package.version],
+            @[pkgdetail_l10n(@"Author"),   package.author],
+            @[pkgdetail_l10n(@"Version"),  package.version],
         ];
         NSMutableArray<NSNumber *> *sections = [NSMutableArray array];
         if (package.unstableWarning.length > 0) {
@@ -495,7 +500,7 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
 - (void)viewDidLoad
 {
     [super viewDidLoad];
-    self.title = self.package.name;
+    self.title = pkgdetail_l10n(self.package.name);
     self.tableView.tableHeaderView = [self buildHeaderView];
     [self updateActionButton];
 
@@ -551,7 +556,7 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     // Name
     UILabel *nameLabel = [[UILabel alloc] init];
     nameLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    nameLabel.text = self.package.name;
+    nameLabel.text = pkgdetail_l10n(self.package.name);
     nameLabel.font = [UIFont systemFontOfSize:22.0 weight:UIFontWeightBold];
     nameLabel.textColor = UIColor.labelColor;
     nameLabel.textAlignment = NSTextAlignmentCenter;
@@ -560,7 +565,7 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     // Subtitle: Category · Version
     UILabel *subLabel = [[UILabel alloc] init];
     subLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    subLabel.text = [NSString stringWithFormat:@"%@  ·  Version %@", self.package.category, self.package.version];
+    subLabel.text = [NSString stringWithFormat:@"%@  ·  %@ %@", pkgdetail_l10n(self.package.category), pkgdetail_l10n(@"Version"), self.package.version];
     subLabel.font = [UIFont systemFontOfSize:14.0 weight:UIFontWeightMedium];
     subLabel.textColor = [UIColor.labelColor colorWithAlphaComponent:0.45];
     subLabel.textAlignment = NSTextAlignmentCenter;
@@ -569,37 +574,37 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     // Status badge (optional)
     UIView *badge = nil;
     if (self.package.isInstallDisabled && !self.package.isInstalled) {
-        badge = [self badgeWithText:@"DISABLED"
+        badge = [self badgeWithText:pkgdetail_l10n(@"DISABLED")
                          background:[UIColor.systemRedColor colorWithAlphaComponent:0.16]
                           textColor:UIColor.systemRedColor];
     } else if ([self isDirectToolPackage]) {
-        badge = [self badgeWithText:@"MANUAL"
+        badge = [self badgeWithText:pkgdetail_l10n(@"MANUAL")
                          background:[UIColor.secondaryLabelColor colorWithAlphaComponent:0.16]
                           textColor:UIColor.secondaryLabelColor];
     } else if ([self isManualPackage]) {
         UIColor *color = [self manualStateColor];
-        badge = [self badgeWithText:[self manualStateText].uppercaseString
+        badge = [self badgeWithText:pkgdetail_l10n([self manualStateText].uppercaseString)
                          background:[color colorWithAlphaComponent:0.16]
                           textColor:color];
     } else if (intent != PackageQueueIntentNone || self.package.isInstalled) {
         UIColor *color = [self packageStateColor];
-        badge = [self badgeWithText:[self packageStateText].uppercaseString
+        badge = [self badgeWithText:pkgdetail_l10n([self packageStateText].uppercaseString)
                          background:[color colorWithAlphaComponent:0.16]
                           textColor:color];
     } else if (self.package.creatorOnly) {
-        badge = [self badgeWithText:@"IN DEVELOPMENT"
+        badge = [self badgeWithText:pkgdetail_l10n(@"IN DEVELOPMENT")
                          background:[UIColor.systemPurpleColor colorWithAlphaComponent:0.16]
                           textColor:UIColor.systemPurpleColor];
     } else if ([self.package.category caseInsensitiveCompare:@"Beta"] == NSOrderedSame) {
-        badge = [self badgeWithText:@"BETA"
+        badge = [self badgeWithText:pkgdetail_l10n(@"BETA")
                          background:[UIColor.systemPurpleColor colorWithAlphaComponent:0.16]
                           textColor:UIColor.systemPurpleColor];
     } else if (self.package.experimental) {
-        badge = [self badgeWithText:@"EXPERIMENTAL"
+        badge = [self badgeWithText:pkgdetail_l10n(@"EXPERIMENTAL")
                          background:[UIColor.systemRedColor colorWithAlphaComponent:0.16]
                           textColor:UIColor.systemRedColor];
     } else if (self.package.isInstallDisabled) {
-        badge = [self badgeWithText:@"DISABLED"
+        badge = [self badgeWithText:pkgdetail_l10n(@"DISABLED")
                          background:[UIColor.systemRedColor colorWithAlphaComponent:0.16]
                           textColor:UIColor.systemRedColor];
     }
@@ -686,10 +691,10 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     UIBarButtonItemStyle style = UIBarButtonItemStylePlain;
     UIColor *tint = nil;
     if (self.package.isInstallDisabled && !installed && intent == PackageQueueIntentNone) {
-        title = @"Disabled";
+        title = pkgdetail_l10n(@"Disabled");
         tint = UIColor.secondaryLabelColor;
     } else if (directTool) {
-        title = @"Open Controls";
+        title = pkgdetail_l10n(@"Open Controls");
         tint = self.view.tintColor;
         style = UIBarButtonItemStyleDone;
     } else if (manual) {
@@ -699,39 +704,39 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
             : self.view.tintColor;
         if (intent == PackageQueueIntentNone) style = UIBarButtonItemStyleDone;
     } else if (intent != PackageQueueIntentNone) {
-        title = @"Cancel";
+        title = pkgdetail_l10n(@"Cancel");
         tint = UIColor.secondaryLabelColor;
     } else if (installed && [self isLiveWPPackage] && [self hasSettingsBundle]) {
-        title = @"Change Video";
+        title = pkgdetail_l10n(@"Change Video");
         tint = self.view.tintColor;
         style = UIBarButtonItemStyleDone;
     } else if ([self repoTweakHasUpdate]) {
-        title = @"Update";
+        title = pkgdetail_l10n(@"Update");
         tint = self.view.tintColor;
         style = UIBarButtonItemStyleDone;
     } else if (installed && [self isRepoTweakPackage]) {
-        title = @"Remove";
+        title = pkgdetail_l10n(@"Remove");
         tint = UIColor.systemRedColor;
     } else if (installed) {
-        title = @"Deactivate";
+        title = pkgdetail_l10n(@"Deactivate");
         tint = UIColor.systemRedColor;
     } else if (self.package.creatorOnly) {
-        title = @"In Development";
+        title = pkgdetail_l10n(@"In Development");
         tint = UIColor.secondaryLabelColor;
     } else if (self.package.isInstallDisabled) {
-        title = @"Disabled";
+        title = pkgdetail_l10n(@"Disabled");
         tint = UIColor.secondaryLabelColor;
     } else if ([self needsThemeBeforeInstall]) {
-        title = @"Select Theme";
+        title = pkgdetail_l10n(@"Select Theme");
         style = UIBarButtonItemStyleDone;
     } else if ([self needsLiveWPVideoBeforeInstall]) {
-        title = @"Select Video";
+        title = pkgdetail_l10n(@"Select Video");
         style = UIBarButtonItemStyleDone;
     } else if ([self isRepoTweakPackage]) {
-        title = @"Install";
+        title = pkgdetail_l10n(@"Install");
         style = UIBarButtonItemStyleDone;
     } else {
-        title = @"Activate";
+        title = pkgdetail_l10n(@"Activate");
         style = UIBarButtonItemStyleDone;
     }
 
@@ -815,15 +820,15 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     NSString *message = snowBoardLite
         ? @"SnowBoard Lite needs a selected theme before it can be activated. Choose iOS 6 Theme or import a SnowBoard/IconBundles theme first."
         : @"Icon themes need a selected theme before they can be activated. Choose iOS 6 Theme or import a custom theme first.";
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Select a Theme"
-                                                                   message:message
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:pkgdetail_l10n(@"Select a Theme")
+                                                                   message:pkgdetail_l10n(message)
                                                             preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Open Theme Settings"
+    [alert addAction:[UIAlertAction actionWithTitle:pkgdetail_l10n(@"Open Theme Settings")
                                              style:UIAlertActionStyleDefault
                                            handler:^(UIAlertAction *_) {
         [self navigateToSettingsSection];
     }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel"
+    [alert addAction:[UIAlertAction actionWithTitle:pkgdetail_l10n(@"Cancel")
                                              style:UIAlertActionStyleCancel
                                            handler:nil]];
     [self presentViewController:alert animated:YES completion:nil];
@@ -831,25 +836,22 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
 
 - (void)promptConfigureBeforeInstall
 {
-    NSString *msg = [NSString stringWithFormat:
-        @"%@ has configurable options. Set them up first so the tweak applies with your preferences on the first activation.",
-        self.package.name];
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Customize Before Activating?"
-                                                                   message:msg
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:pkgdetail_l10n(@"Customize Before Activating?")
+                                                                   message:[NSString stringWithFormat:pkgdetail_l10n(@"%@ has configurable options. Set them up first so the tweak applies with your preferences on the first activation."), pkgdetail_l10n(self.package.name)]
                                                             preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Configure First"
+    [alert addAction:[UIAlertAction actionWithTitle:pkgdetail_l10n(@"Configure First")
                                              style:UIAlertActionStyleDefault
                                            handler:^(UIAlertAction *_) {
         [self navigateToSettingsSection];
     }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Activate Anyway"
+    [alert addAction:[UIAlertAction actionWithTitle:pkgdetail_l10n(@"Activate Anyway")
                                              style:UIAlertActionStyleDefault
                                            handler:^(UIAlertAction *_) {
         if ([self presentQueueConflictIfNeededForIntent:PackageQueueIntentInstall]) return;
         log_user("[INSTALLER] Pending activation: %s\n", self.package.name.UTF8String);
         [[PackageQueue sharedQueue] toggleForPackage:self.package];
     }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel"
+    [alert addAction:[UIAlertAction actionWithTitle:pkgdetail_l10n(@"Cancel")
                                              style:UIAlertActionStyleCancel
                                            handler:nil]];
     [self presentViewController:alert animated:YES completion:nil];
@@ -996,10 +998,10 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
 - (NSString *)detailSectionTitle:(NSInteger)section
 {
     switch ([self sectionAtIndex:section]) {
-        case PackageDetailSectionKnownIssues:  return @"Known Issues";
-        case PackageDetailSectionAction:       return @"Configure";
-        case PackageDetailSectionSettings:     return @"Current Settings";
-        case PackageDetailSectionRepoOptions:  return @"Options";
+        case PackageDetailSectionKnownIssues:  return pkgdetail_l10n(@"Known Issues");
+        case PackageDetailSectionAction:       return pkgdetail_l10n(@"Configure");
+        case PackageDetailSectionSettings:     return pkgdetail_l10n(@"Current Settings");
+        case PackageDetailSectionRepoOptions:  return pkgdetail_l10n(@"Options");
         default: return nil;
     }
 }
@@ -1018,12 +1020,12 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section
 {
     if ([self sectionAtIndex:section] == PackageDetailSectionAction) {
-        return @"Settings can be changed before or after activation.";
+        return pkgdetail_l10n(@"Settings can be changed before or after activation.");
     }
     if ([self sectionAtIndex:section] == PackageDetailSectionRepoOptions) {
         return self.package.repoTweakUsesQuickLoader
-            ? @"Saved here before install; QuickLoader applies these values when the queued package runs."
-            : @"Saved here before install; Cyanide applies these values through the native package backend.";
+            ? pkgdetail_l10n(@"Saved here before install; QuickLoader applies these values when the queued package runs.")
+            : pkgdetail_l10n(@"Saved here before install; Cyanide applies these values through the native package backend.");
     }
     return nil;
 }
@@ -1055,7 +1057,7 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
 
             UILabel *label = [[UILabel alloc] init];
             label.translatesAutoresizingMaskIntoConstraints = NO;
-            label.text = self.package.unstableWarning;
+            label.text = pkgdetail_l10n(self.package.unstableWarning);
             label.textColor = UIColor.systemRedColor;
             label.font = [UIFont systemFontOfSize:14.0 weight:UIFontWeightSemibold];
             label.numberOfLines = 0;
@@ -1119,7 +1121,7 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
             for (NSUInteger i = 0; i < issues.count; i++) {
                 if (i > 0) [body appendAttributedString:[[NSAttributedString alloc] initWithString:@"\n"]];
                 [body appendAttributedString:[[NSAttributedString alloc] initWithString:@"•  " attributes:bulletAttrs]];
-                [body appendAttributedString:[[NSAttributedString alloc] initWithString:issues[i] attributes:textAttrs]];
+                [body appendAttributedString:[[NSAttributedString alloc] initWithString:pkgdetail_l10n(issues[i]) attributes:textAttrs]];
             }
 
             UILabel *bodyLabel = [[UILabel alloc] init];
@@ -1155,7 +1157,7 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
             NSArray<NSString *> *row = indexPath.row < (NSInteger)rows.count ? rows[indexPath.row] : @[];
             NSString *label = row.count > 0 ? row[0] : @"";
             NSString *value = row.count > 1 ? row[1] : @"";
-            cell.textLabel.text = label;
+            cell.textLabel.text = pkgdetail_l10n(label);
             cell.textLabel.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightMedium];
             cell.detailTextLabel.text = value;
             cell.detailTextLabel.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightRegular];
@@ -1172,7 +1174,7 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
                 UILabel *note = [[UILabel alloc] init];
                 note.translatesAutoresizingMaskIntoConstraints = NO;
                 note.numberOfLines = 0;
-                note.text = @"Only install scripts from sources you trust.";
+                note.text = pkgdetail_l10n(@"Only install scripts from sources you trust.");
                 note.font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightMedium];
                 note.textColor = [UIColor.labelColor colorWithAlphaComponent:0.35];
                 [cell.contentView addSubview:note];
@@ -1206,7 +1208,7 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
             ps.lineSpacing = 4.0;
             ps.paragraphSpacing = 12.0;
             descLabel.attributedText = [[NSAttributedString alloc]
-                initWithString:self.package.longDescription ?: @""
+                initWithString:pkgdetail_l10n(self.package.longDescription ?: @"")
                     attributes:@{
                         NSFontAttributeName: descLabel.font,
                         NSForegroundColorAttributeName: descLabel.textColor,
@@ -1232,8 +1234,8 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
                 cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
             }
             NSDictionary *row = self.settingsSummary[indexPath.row];
-            cell.textLabel.text = row[@"title"];
-            cell.detailTextLabel.text = row[@"value"];
+            cell.textLabel.text = pkgdetail_l10n(row[@"title"]);
+            cell.detailTextLabel.text = pkgdetail_l10n(row[@"value"]);
             return cell;
         }
         case PackageDetailSectionRepoOptions: {
@@ -1249,13 +1251,13 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
                                               reuseIdentifier:@"ActionCell"];
             }
             cell.textLabel.text = [self isDirectToolPackage]
-                ? [NSString stringWithFormat:@"Open %@", self.package.name]
-                : [NSString stringWithFormat:@"Customize %@", self.package.name];
+                ? [NSString stringWithFormat:@"%@ %@", pkgdetail_l10n(@"Open"), pkgdetail_l10n(self.package.name)]
+                : [NSString stringWithFormat:@"%@ %@", pkgdetail_l10n(@"Customize"), pkgdetail_l10n(self.package.name)];
             cell.textLabel.textColor = self.view.tintColor;
             cell.textLabel.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold];
             cell.detailTextLabel.text = [self isDirectToolPackage]
-                ? @"Choose a target and run actions directly"
-                : @"Adjust options in the Settings tab";
+                ? pkgdetail_l10n(@"Choose a target and run actions directly")
+                : pkgdetail_l10n(@"Adjust options in the Settings tab");
             cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
             cell.imageView.image = [UIImage systemImageNamed:@"slider.horizontal.3"];
             cell.imageView.tintColor = self.view.tintColor;
@@ -1283,11 +1285,10 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     UINavigationController *settingsNav = nil;
     for (NSUInteger i = 0; i < tab.viewControllers.count; i++) {
         UIViewController *vc = tab.viewControllers[i];
-        if ([vc.tabBarItem.title isEqualToString:@"Settings"]) {
+        UINavigationController *nav = [vc isKindOfClass:UINavigationController.class] ? (UINavigationController *)vc : nil;
+        if ([nav.viewControllers.firstObject isKindOfClass:SettingsViewController.class]) {
             settingsIndex = i;
-            if ([vc isKindOfClass:UINavigationController.class]) {
-                settingsNav = (UINavigationController *)vc;
-            }
+            settingsNav = nav;
             break;
         }
     }

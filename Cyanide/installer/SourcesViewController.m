@@ -38,6 +38,23 @@ static NSString *sources_string_or_empty(id value)
     return [value isKindOfClass:NSString.class] ? (NSString *)value : @"";
 }
 
+static NSString *sources_l10n(NSString *text)
+{
+    return text.length ? NSLocalizedString(text, nil) : text;
+}
+
+static NSString *sources_package_count_text(NSUInteger count)
+{
+    return [NSString stringWithFormat:sources_l10n(count == 1 ? @"%lu package" : @"%lu packages"),
+            (unsigned long)count];
+}
+
+static NSString *sources_update_count_text(NSUInteger count)
+{
+    return [NSString stringWithFormat:sources_l10n(count == 1 ? @"%lu update" : @"%lu updates"),
+            (unsigned long)count];
+}
+
 static NSArray<NSString *> *sources_urls(void)
 {
     id raw = [NSUserDefaults.standardUserDefaults objectForKey:@"RepoTweaksURLs"];
@@ -190,7 +207,7 @@ static UIColor *category_color(NSString *cat)
     [super viewDidLoad];
     NSDictionary *repo = sources_repo_for_url(self.repoURL);
     NSString *name = sources_string_or_empty(repo[@"repoName"]);
-    self.title = name.length ? name : @"Source";
+    self.title = name.length ? name : sources_l10n(@"Source");
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeAlways;
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 68.0;
@@ -218,10 +235,10 @@ static UIColor *category_color(NSString *cat)
     config.imageProperties.reservedLayoutSize = CGSizeMake(32.0, 32.0);
     config.imageProperties.maximumSize = CGSizeMake(32.0, 32.0);
     config.imageToTextPadding = 12.0;
-    config.text = sources_string_or_empty(tweak[@"name"]);
+    config.text = sources_l10n(sources_string_or_empty(tweak[@"name"]));
     config.textProperties.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightSemibold];
     NSString *version = sources_string_or_empty(tweak[@"version"]);
-    NSString *desc = sources_string_or_empty(tweak[@"description"]);
+    NSString *desc = sources_l10n(sources_string_or_empty(tweak[@"description"]));
     NSString *unsupportedReason = repotweaks_unsupported_reason(tweak);
     NSString *compatibility = unsupportedReason.length ? unsupportedReason : repotweaks_compatibility_note(tweak);
     Package *pkg = sources_package_for_tweak(self.repoURL, tweak);
@@ -232,17 +249,17 @@ static UIColor *category_color(NSString *cat)
         config.textProperties.color = UIColor.secondaryLabelColor;
     }
     if (installed && unsupportedReason.length && desc.length) {
-        config.secondaryText = [NSString stringWithFormat:@"Installed, unsupported here · %@ · %@", unsupportedReason, desc];
+        config.secondaryText = [NSString stringWithFormat:sources_l10n(@"Installed, unsupported here · %@ · %@"), sources_l10n(unsupportedReason), desc];
     } else if (installed && unsupportedReason.length) {
-        config.secondaryText = [NSString stringWithFormat:@"Installed, unsupported here · %@", unsupportedReason];
+        config.secondaryText = [NSString stringWithFormat:sources_l10n(@"Installed, unsupported here · %@"), sources_l10n(unsupportedReason)];
     } else if (version.length && compatibility.length && desc.length) {
-        config.secondaryText = [NSString stringWithFormat:@"v%@ · %@ · %@", version, compatibility, desc];
+        config.secondaryText = [NSString stringWithFormat:sources_l10n(@"v%@ · %@ · %@"), version, sources_l10n(compatibility), desc];
     } else if (version.length && compatibility.length) {
-        config.secondaryText = [NSString stringWithFormat:@"v%@ · %@", version, compatibility];
+        config.secondaryText = [NSString stringWithFormat:sources_l10n(@"v%@ · %@"), version, sources_l10n(compatibility)];
     } else if (version.length) {
-        config.secondaryText = [NSString stringWithFormat:@"v%@ · %@", version, desc];
+        config.secondaryText = [NSString stringWithFormat:sources_l10n(@"v%@ · %@"), version, desc];
     } else if (compatibility.length && desc.length) {
-        config.secondaryText = [NSString stringWithFormat:@"%@ · %@", compatibility, desc];
+        config.secondaryText = [NSString stringWithFormat:@"%@ · %@", sources_l10n(compatibility), desc];
     } else {
         config.secondaryText = desc;
     }
@@ -259,7 +276,7 @@ static UIColor *category_color(NSString *cat)
 
     if (installed && unsupportedReason.length > 0) {
         UILabel *pill = [[UILabel alloc] init];
-        pill.text = @"INSTALLED";
+        pill.text = sources_l10n(@"INSTALLED");
         pill.font = [UIFont systemFontOfSize:11.0 weight:UIFontWeightHeavy];
         pill.textColor = UIColor.systemGreenColor;
         pill.backgroundColor = [UIColor.systemGreenColor colorWithAlphaComponent:0.15];
@@ -275,7 +292,7 @@ static UIColor *category_color(NSString *cat)
         cell.accessoryView = pill;
     } else if (unsupportedReason.length > 0) {
         UILabel *pill = [[UILabel alloc] init];
-        pill.text = @"UNSUPPORTED";
+        pill.text = sources_l10n(@"UNSUPPORTED");
         pill.font = [UIFont systemFontOfSize:11.0 weight:UIFontWeightHeavy];
         pill.textColor = UIColor.systemOrangeColor;
         pill.backgroundColor = [UIColor.systemOrangeColor colorWithAlphaComponent:0.15];
@@ -291,7 +308,7 @@ static UIColor *category_color(NSString *cat)
         cell.accessoryView = pill;
     } else if (sources_tweak_has_update(self.repoURL, tweak)) {
         UILabel *pill = [[UILabel alloc] init];
-        pill.text = @"UPDATE";
+        pill.text = sources_l10n(@"UPDATE");
         pill.font = [UIFont systemFontOfSize:11.0 weight:UIFontWeightHeavy];
         pill.textColor = UIColor.systemBlueColor;
         pill.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.15];
@@ -336,8 +353,8 @@ static UIColor *category_color(NSString *cat)
 - (void)viewDidLoad
 {
     [super viewDidLoad];
-    self.title = @"Sources";
-    self.navigationItem.title = @"Sources";
+    self.title = sources_l10n(@"Sources");
+    self.navigationItem.title = sources_l10n(@"Sources");
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeAlways;
     self.navigationController.navigationBar.prefersLargeTitles = YES;
     self.tableView.rowHeight = UITableViewAutomaticDimension;
@@ -380,8 +397,8 @@ static UIColor *category_color(NSString *cat)
     if (!tab) return;
     for (NSUInteger i = 0; i < tab.viewControllers.count; i++) {
         UIViewController *vc = tab.viewControllers[i];
-        if ([vc.tabBarItem.title isEqualToString:@"Settings"]) {
-            UINavigationController *nav = [vc isKindOfClass:UINavigationController.class] ? (UINavigationController *)vc : nil;
+        UINavigationController *nav = [vc isKindOfClass:UINavigationController.class] ? (UINavigationController *)vc : nil;
+        if ([nav.viewControllers.firstObject isKindOfClass:SettingsViewController.class]) {
             if (!nav) return;
             [nav popToRootViewControllerAnimated:NO];
             SettingsViewController *ql = [[SettingsViewController alloc] initWithUnderlyingSection:25 bundleTitle:@"QuickLoader"];
@@ -464,10 +481,9 @@ static UIColor *category_color(NSString *cat)
     config.imageProperties.reservedLayoutSize = CGSizeMake(32.0, 32.0);
     config.imageProperties.maximumSize = CGSizeMake(32.0, 32.0);
     config.imageToTextPadding = 12.0;
-    config.text = cat;
+    config.text = sources_l10n(cat);
     config.textProperties.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightSemibold];
-    config.secondaryText = [NSString stringWithFormat:@"%lu package%@",
-                            (unsigned long)count, count == 1 ? @"" : @"s"];
+    config.secondaryText = sources_package_count_text(count);
     config.secondaryTextProperties.font = [UIFont systemFontOfSize:14.0 weight:UIFontWeightRegular];
     config.secondaryTextProperties.color = [UIColor.labelColor colorWithAlphaComponent:0.55];
     config.textToSecondaryTextVerticalPadding = 2.0;
@@ -502,12 +518,12 @@ static UIColor *category_color(NSString *cat)
 
     if (row == 0) {
         config.image = CYIconBadgeImage(@"hammer.fill", UIColor.systemOrangeColor, 32.0);
-        config.text = @"Build Your Own JS Tweak";
-        config.secondaryText = @"Write scripts, declare parameters, use the RemoteCall API";
+        config.text = sources_l10n(@"Build Your Own JS Tweak");
+        config.secondaryText = sources_l10n(@"Write scripts, declare parameters, use the RemoteCall API");
     } else {
         config.image = CYIconBadgeImage(@"server.rack", UIColor.systemIndigoColor, 32.0);
-        config.text = @"Set Up a Tweak Repository";
-        config.secondaryText = @"Host a JSON feed on GitHub Pages or any HTTPS server";
+        config.text = sources_l10n(@"Set Up a Tweak Repository");
+        config.secondaryText = sources_l10n(@"Host a JSON feed on GitHub Pages or any HTTPS server");
     }
 
     cell.contentConfiguration = config;
@@ -519,8 +535,8 @@ static UIColor *category_color(NSString *cat)
 
 - (void)addSource
 {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Add Source"
-                                                                   message:@"Paste an HTTPS RepoTweaks JSON URL."
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:sources_l10n(@"Add Source")
+                                                                   message:sources_l10n(@"Paste an HTTPS RepoTweaks JSON URL.")
                                                             preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
         tf.placeholder = @"https://example.com/packages.json";
@@ -528,15 +544,15 @@ static UIColor *category_color(NSString *cat)
         tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
         tf.autocorrectionType = UITextAutocorrectionTypeNo;
     }];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Add" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+    [alert addAction:[UIAlertAction actionWithTitle:sources_l10n(@"Add") style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
         NSString *url = alert.textFields.firstObject.text ?: @"";
         repotweaks_refresh_repo(url, ^(BOOL success, NSString *message) {
             [self reloadSources];
             [[NSNotificationCenter defaultCenter] postNotificationName:RepoTweaksDidRefreshNotification object:nil];
-            if (!success) [self presentError:message ?: @"Could not refresh that source."];
+            if (!success) [self presentError:message ?: sources_l10n(@"Could not refresh that source.")];
         });
     }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:sources_l10n(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
     [self presentViewController:alert animated:YES completion:nil];
 }
 
@@ -567,10 +583,10 @@ static UIColor *category_color(NSString *cat)
 
 - (void)presentError:(NSString *)message
 {
-    UIAlertController *err = [UIAlertController alertControllerWithTitle:@"Source Failed"
-                                                                 message:message ?: @"Could not refresh source."
+    UIAlertController *err = [UIAlertController alertControllerWithTitle:sources_l10n(@"Source Failed")
+                                                                 message:message ?: sources_l10n(@"Could not refresh source.")
                                                           preferredStyle:UIAlertControllerStyleAlert];
-    [err addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    [err addAction:[UIAlertAction actionWithTitle:sources_l10n(@"OK") style:UIAlertActionStyleDefault handler:nil]];
     [self presentViewController:err animated:YES completion:nil];
 }
 
@@ -583,10 +599,10 @@ static UIColor *category_color(NSString *cat)
 
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section
 {
-    if (section == SourcesSectionRepos) return self.urls.count > 0 ? CYSectionHeaderView(@"Repositories") : nil;
-    if (section == SourcesSectionQuickLoader) return CYSectionHeaderView(@"QuickLoader");
-    if (section == SourcesSectionCategories) return self.categories.count > 0 ? CYSectionHeaderView(@"Categories") : nil;
-    return CYSectionHeaderView(@"Developer");
+    if (section == SourcesSectionRepos) return self.urls.count > 0 ? CYSectionHeaderView(sources_l10n(@"Repositories")) : nil;
+    if (section == SourcesSectionQuickLoader) return CYSectionHeaderView(sources_l10n(@"QuickLoader"));
+    if (section == SourcesSectionCategories) return self.categories.count > 0 ? CYSectionHeaderView(sources_l10n(@"Categories")) : nil;
+    return CYSectionHeaderView(sources_l10n(@"Developer"));
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section
@@ -599,8 +615,8 @@ static UIColor *category_color(NSString *cat)
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section
 {
     if (section == SourcesSectionRepos) {
-        if (self.urls.count == 0) return @"No sources added yet. Tap + to add an HTTPS RepoTweaks JSON URL.";
-        return @"Swipe left to remove a source.";
+        if (self.urls.count == 0) return sources_l10n(@"No sources added yet. Tap + to add an HTTPS RepoTweaks JSON URL.");
+        return sources_l10n(@"Swipe left to remove a source.");
     }
     return nil;
 }
@@ -625,9 +641,9 @@ static UIColor *category_color(NSString *cat)
     config.imageProperties.reservedLayoutSize = CGSizeMake(32.0, 32.0);
     config.imageProperties.maximumSize = CGSizeMake(32.0, 32.0);
     config.imageToTextPadding = 12.0;
-    config.text = @"Open QuickLoader";
+    config.text = sources_l10n(@"Open QuickLoader");
     config.textProperties.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightSemibold];
-    config.secondaryText = @"Run a local .js tweak file";
+    config.secondaryText = sources_l10n(@"Run a local .js tweak file");
     config.secondaryTextProperties.font = [UIFont systemFontOfSize:14.0 weight:UIFontWeightRegular];
     config.secondaryTextProperties.color = [UIColor.labelColor colorWithAlphaComponent:0.55];
     config.textToSecondaryTextVerticalPadding = 2.0;
@@ -661,14 +677,14 @@ static UIColor *category_color(NSString *cat)
     config.imageProperties.reservedLayoutSize = CGSizeMake(32.0, 32.0);
     config.imageProperties.maximumSize = CGSizeMake(32.0, 32.0);
     config.imageToTextPadding = 12.0;
-    config.text = repoName.length ? repoName : @"Unknown Source";
+    config.text = repoName.length ? repoName : sources_l10n(@"Unknown Source");
     config.textProperties.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightSemibold];
 
     NSUInteger updates = sources_update_count_for_url(url);
     NSMutableString *detail = [NSMutableString string];
     if (author.length) [detail appendFormat:@"%@ · ", author];
-    [detail appendFormat:@"%lu package%@", (unsigned long)tweaks.count, tweaks.count == 1 ? @"" : @"s"];
-    if (updates > 0) [detail appendFormat:@" · %lu update%@", (unsigned long)updates, updates == 1 ? @"" : @"s"];
+    [detail appendString:sources_package_count_text(tweaks.count)];
+    if (updates > 0) [detail appendFormat:@" · %@", sources_update_count_text(updates)];
     config.secondaryText = detail;
     config.secondaryTextProperties.font = [UIFont systemFontOfSize:14.0 weight:UIFontWeightRegular];
     config.secondaryTextProperties.color = updates > 0 ? UIColor.systemBlueColor : [UIColor.labelColor colorWithAlphaComponent:0.55];

@@ -37,6 +37,36 @@ static NSString *PackageMissingThemeReason(Package *package)
     return nil;
 }
 
+static BOOL PackageIsStageWindowPackage(Package *package)
+{
+    NSString *key = package.enabledKey;
+    return [key isEqualToString:kSettingsStageStripEnabled] ||
+           [key isEqualToString:kSettingsMWLiteEnabled];
+}
+
+static NSString *PackageStageWindowPeerKey(Package *package)
+{
+    if ([package.enabledKey isEqualToString:kSettingsStageStripEnabled]) return kSettingsMWLiteEnabled;
+    if ([package.enabledKey isEqualToString:kSettingsMWLiteEnabled]) return kSettingsStageStripEnabled;
+    return nil;
+}
+
+static NSString *PackageStageWindowPeerName(Package *package)
+{
+    if ([package.enabledKey isEqualToString:kSettingsStageStripEnabled]) return @"MWLite";
+    if ([package.enabledKey isEqualToString:kSettingsMWLiteEnabled]) return @"Dynamic Stage Lite";
+    return @"the other floating-window tweak";
+}
+
+static BOOL PackageArrayContainsEnabledKey(NSArray<Package *> *packages, NSString *enabledKey)
+{
+    if (enabledKey.length == 0) return NO;
+    for (Package *p in packages) {
+        if ([p.enabledKey isEqualToString:enabledKey]) return YES;
+    }
+    return NO;
+}
+
 static BOOL PackageCanQueueInstall(Package *package)
 {
     if (package.kind == PackageInstallKindDirectTool) return NO;
@@ -123,6 +153,16 @@ static BOOL PackageShouldAutoQueueForApply(Package *package)
         if ([self packageInArray:out matching:p]) continue;
         if ([self packageInArray:self.uninstalls matching:p]) continue;
         [out addObject:p];
+    }
+
+    if (PackageArrayContainsEnabledKey(out, kSettingsStageStripEnabled) &&
+        PackageArrayContainsEnabledKey(out, kSettingsMWLiteEnabled)) {
+        NSMutableArray<Package *> *filtered = [NSMutableArray arrayWithCapacity:out.count];
+        for (Package *p in out) {
+            if ([p.enabledKey isEqualToString:kSettingsMWLiteEnabled]) continue;
+            [filtered addObject:p];
+        }
+        out = filtered;
     }
 
     BOOL hasRepoTweakUsingQL = NO;
@@ -248,6 +288,19 @@ static BOOL PackageShouldAutoQueueForApply(Package *package)
         if (themeReason.length > 0) {
             if (reason) *reason = themeReason;
             return NO;
+        }
+        if (PackageIsStageWindowPackage(package)) {
+            NSString *peerKey = PackageStageWindowPeerKey(package);
+            BOOL peerEnabled = [[NSUserDefaults standardUserDefaults] boolForKey:peerKey];
+            BOOL peerQueuedForInstall = PackageArrayContainsEnabledKey(self.installs, peerKey);
+            BOOL peerQueuedForUninstall = PackageArrayContainsEnabledKey(self.uninstalls, peerKey);
+            if ((peerEnabled && !peerQueuedForUninstall) || peerQueuedForInstall) {
+                if (reason) {
+                    *reason = [NSString stringWithFormat:@"%@ is already active or queued. Dynamic Stage Lite and MWLite both own SpringBoard floating-window state; deactivate one before installing the other.",
+                               PackageStageWindowPeerName(package)];
+                }
+                return NO;
+            }
         }
     }
 

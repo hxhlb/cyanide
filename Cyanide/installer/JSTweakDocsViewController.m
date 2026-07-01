@@ -5,6 +5,11 @@
 
 #import "JSTweakDocsViewController.h"
 
+static NSString *jstweak_docs_l10n(NSString *text)
+{
+    return text.length ? NSLocalizedString(text, nil) : text;
+}
+
 @implementation JSTweakDocsViewController
 
 - (void)viewDidLoad
@@ -13,7 +18,7 @@
     self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
 
     BOOL repoMode = (self.docsMode == JSTweakDocsModeSetupRepo);
-    self.title = repoMode ? @"Set Up a Repo" : @"Build a JS Tweak";
+    self.title = jstweak_docs_l10n(repoMode ? @"Set Up a Repo" : @"Build a JS Tweak");
 
     UIBarButtonItem *done = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
                                                                          target:self action:@selector(dismiss)];
@@ -255,7 +260,7 @@
 {
     [UIPasteboard generalPasteboard].string = [self markdownString];
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:nil
-                                                                   message:@"Copied to clipboard"
+                                                                   message:jstweak_docs_l10n(@"Copied to clipboard")
                                                             preferredStyle:UIAlertControllerStyleAlert];
     [self presentViewController:alert animated:YES completion:nil];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -371,13 +376,13 @@
     UIStackView *s = [self stackInCard:card];
 
     UILabel *t = [[UILabel alloc] init];
-    t.text = title;
+    t.text = jstweak_docs_l10n(title);
     t.font = [UIFont systemFontOfSize:20.0 weight:UIFontWeightBold];
     t.textColor = UIColor.labelColor;
     [s addArrangedSubview:t];
 
     UILabel *b = [[UILabel alloc] init];
-    b.text = body;
+    b.text = jstweak_docs_l10n(body);
     b.font = [UIFont systemFontOfSize:14.0 weight:UIFontWeightRegular];
     b.textColor = UIColor.secondaryLabelColor;
     b.numberOfLines = 0;
@@ -385,7 +390,7 @@
 
     if (credit.length) {
         UILabel *c = [[UILabel alloc] init];
-        c.text = credit;
+        c.text = jstweak_docs_l10n(credit);
         c.font = [UIFont systemFontOfSize:12.0 weight:UIFontWeightMedium];
         c.textColor = UIColor.tertiaryLabelColor;
         [s addArrangedSubview:c];
@@ -399,7 +404,7 @@
     UIStackView *s = [self stackInCard:card];
 
     UILabel *h = [[UILabel alloc] init];
-    h.text = title;
+    h.text = jstweak_docs_l10n(title);
     h.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold];
     h.textColor = UIColor.labelColor;
     [s addArrangedSubview:h];

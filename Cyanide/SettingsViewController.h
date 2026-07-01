@@ -69,6 +69,7 @@ extern NSString * const kSettingsGravityLiteFrictionPct;
 extern NSString * const kSettingsGravityLiteResistancePct;
 
 extern NSString * const kSettingsStageStripEnabled;
+extern NSString * const kSettingsMWLiteEnabled;
 
 extern NSString * const kSettingsLocationSimLatitude;
 extern NSString * const kSettingsLocationSimLongitude;
