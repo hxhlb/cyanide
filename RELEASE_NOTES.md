@@ -32,12 +32,18 @@ activity, omit it.
 
 ### v1.3.7 - 2026-07-01
 
-- [x] Added MilkyWay Lite app preselection with a searchable Settings list.
-- [x] Kept MilkyWay Lite install fast by showing only recent apps plus the preselected picker list in SpringBoard.
-- [x] Allowed MilkyWay Lite to include common system apps such as Safari, Phone, Messages, Settings, Photos, and Camera.
-- [x] Added a configurable MilkyWay Lite floating-window limit, with multiple windows supported up to the selected maximum.
-- [x] Added Simplified Chinese and Traditional Chinese localizations for the app UI.
-- [x] Refreshed installer, package, source, and log UI text for the localized build.
+- [x] 为 MilkyWay Lite 添加可搜索的预选应用列表，可在设置中管理常用小窗应用。
+      Added MilkyWay Lite app preselection with a searchable Settings list.
+- [x] 优化 MilkyWay Lite 安装速度，SpringBoard 端只显示最近应用和用户预选应用。
+      Kept MilkyWay Lite install fast by showing only recent apps plus the preselected picker list in SpringBoard.
+- [x] MilkyWay Lite 现在可以包含常用系统应用，例如 Safari、电话、信息、设置、照片和相机。
+      Allowed MilkyWay Lite to include common system apps such as Safari, Phone, Messages, Settings, Photos, and Camera.
+- [x] 新增 MilkyWay Lite 小窗数量限制配置，支持在设定上限内同时打开多个小窗。
+      Added a configurable MilkyWay Lite floating-window limit, with multiple windows supported up to the selected maximum.
+- [x] 新增简体中文和繁体中文界面本地化。
+      Added Simplified Chinese and Traditional Chinese localizations for the app UI.
+- [x] 更新安装器、软件包、源和日志界面的本地化文本。
+      Refreshed installer, package, source, and log UI text for the localized build.
 
 ### v1.3.6 - 2026-06-27
 
