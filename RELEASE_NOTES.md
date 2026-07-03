@@ -27,11 +27,14 @@ activity, omit it.
 
 ## Pending
 
-- [ ] 新增 Metal Lock Light 锁屏金属光照效果，支持颜色、反射强度和多种渲染模式。 / Added Metal Lock Light for lock-screen lighting, with color intensity, reflect intensity, and multiple render modes.
-- [ ] 新增 Mood Wallpaper 趣味壁纸，可根据设备左右倾斜在最多 8 张静态壁纸之间切换。 / Added Mood Wallpaper, switching between up to 8 still wallpapers based on device tilt.
-- [ ] 改进界面本地化、软件包队列状态和源页面文案。 / Improved UI localization, package queue status, and source-page copy.
 
 ## Released
+
+### v1.3.8 - 2026-07-03
+
+- [x] 新增 Metal Lock Light 锁屏金属光照效果，支持颜色、反射强度和多种渲染模式。 / Added Metal Lock Light for lock-screen lighting, with color intensity, reflect intensity, and multiple render modes.
+- [x] 新增 Mood Wallpaper 趣味壁纸，可根据设备左右倾斜在最多 8 张静态壁纸之间切换。 / Added Mood Wallpaper, switching between up to 8 still wallpapers based on device tilt.
+- [x] 改进界面本地化、软件包队列状态和源页面文案。 / Improved UI localization, package queue status, and source-page copy.
 
 ### v1.3.7 - 2026-07-01
 
