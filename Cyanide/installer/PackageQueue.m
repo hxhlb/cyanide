@@ -34,6 +34,10 @@ static NSString *PackageMissingThemeReason(Package *package)
     if (PackageIsSnowBoardLite(package) && !settings_snowboardlite_has_selected_theme()) {
         return @"SnowBoard Lite needs a selected theme before it can be activated. Open SnowBoard Lite settings and choose iOS 6 Theme or import a SnowBoard/IconBundles theme first.";
     }
+    if ([package.enabledKey isEqualToString:kSettingsMoodWallpaperEnabled] &&
+        !settings_mood_wallpaper_has_selected_images()) {
+        return @"Mood Wallpaper needs at least 2 images before it can be activated. Open its settings and add 2 to 8 images first.";
+    }
     return nil;
 }
 
@@ -56,6 +60,27 @@ static NSString *PackageStageWindowPeerName(Package *package)
     if ([package.enabledKey isEqualToString:kSettingsStageStripEnabled]) return @"MWLite";
     if ([package.enabledKey isEqualToString:kSettingsMWLiteEnabled]) return @"Dynamic Stage Lite";
     return @"the other floating-window tweak";
+}
+
+static BOOL PackageIsWallpaperEffectPackage(Package *package)
+{
+    NSString *key = package.enabledKey;
+    return [key isEqualToString:kSettingsLiveWPEnabled] ||
+           [key isEqualToString:kSettingsMetalLockLightEnabled] ||
+           [key isEqualToString:kSettingsMoodWallpaperEnabled];
+}
+
+static NSArray<NSString *> *PackageWallpaperEffectKeys(void)
+{
+    return @[ kSettingsLiveWPEnabled, kSettingsMetalLockLightEnabled, kSettingsMoodWallpaperEnabled ];
+}
+
+static NSString *PackageWallpaperEffectNameForKey(NSString *key)
+{
+    if ([key isEqualToString:kSettingsLiveWPEnabled]) return @"LiveWP";
+    if ([key isEqualToString:kSettingsMetalLockLightEnabled]) return @"Metal Lock Light";
+    if ([key isEqualToString:kSettingsMoodWallpaperEnabled]) return @"Mood Wallpaper";
+    return @"another wallpaper effect";
 }
 
 static BOOL PackageArrayContainsEnabledKey(NSArray<Package *> *packages, NSString *enabledKey)
@@ -164,6 +189,17 @@ static BOOL PackageShouldAutoQueueForApply(Package *package)
         }
         out = filtered;
     }
+
+    NSMutableSet<NSString *> *seenWallpaperEffects = [NSMutableSet set];
+    NSMutableArray<Package *> *wallpaperFiltered = [NSMutableArray arrayWithCapacity:out.count];
+    for (Package *p in out) {
+        if (PackageIsWallpaperEffectPackage(p)) {
+            if (seenWallpaperEffects.count > 0) continue;
+            [seenWallpaperEffects addObject:p.enabledKey ?: @""];
+        }
+        [wallpaperFiltered addObject:p];
+    }
+    out = wallpaperFiltered;
 
     BOOL hasRepoTweakUsingQL = NO;
     for (Package *p in out) {
@@ -300,6 +336,22 @@ static BOOL PackageShouldAutoQueueForApply(Package *package)
                                PackageStageWindowPeerName(package)];
                 }
                 return NO;
+            }
+        }
+        if (PackageIsWallpaperEffectPackage(package)) {
+            NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+            for (NSString *peerKey in PackageWallpaperEffectKeys()) {
+                if ([peerKey isEqualToString:package.enabledKey]) continue;
+                BOOL peerEnabled = [d boolForKey:peerKey];
+                BOOL peerQueuedForInstall = PackageArrayContainsEnabledKey(self.installs, peerKey);
+                BOOL peerQueuedForUninstall = PackageArrayContainsEnabledKey(self.uninstalls, peerKey);
+                if ((peerEnabled && !peerQueuedForUninstall) || peerQueuedForInstall) {
+                    if (reason) {
+                        *reason = [NSString stringWithFormat:@"%@ is already active or queued. LiveWP, Metal Lock Light, and Mood Wallpaper all own SpringBoard wallpaper layers; deactivate one before installing another.",
+                                   PackageWallpaperEffectNameForKey(peerKey)];
+                    }
+                    return NO;
+                }
             }
         }
     }

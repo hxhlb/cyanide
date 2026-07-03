@@ -13,6 +13,7 @@ static NSString * const kGitHubIssuesURL = @"https://github.com/hxhlb/cyanide/is
 static NSString * const kGitHubRepoURL   = @"https://github.com/hxhlb/cyanide";
 
 static const CGFloat kMargin = 20.0;
+static const NSInteger kQuickLoaderSettingsSection = 27;
 
 static NSString *home_l10n(NSString *text)
 {
@@ -566,7 +567,7 @@ static NSString *home_l10n(NSString *text)
         if ([nav.viewControllers.firstObject isKindOfClass:SettingsViewController.class]) {
             if (!nav) return;
             [nav popToRootViewControllerAnimated:NO];
-            SettingsViewController *ql = [[SettingsViewController alloc] initWithUnderlyingSection:25 bundleTitle:@"QuickLoader"];
+            SettingsViewController *ql = [[SettingsViewController alloc] initWithUnderlyingSection:kQuickLoaderSettingsSection bundleTitle:@"QuickLoader"];
             ql.quickLoaderStandalone = YES;
             [nav pushViewController:ql animated:NO];
             tab.selectedIndex = i;

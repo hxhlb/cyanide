@@ -24,6 +24,7 @@
 static NSString * const kSourceCellID      = @"SourceCell";
 static NSString * const kSourcePkgCellID   = @"SourcePkgCell";
 static NSString * const kCategoryCellID    = @"CategoryCell";
+static const NSInteger kQuickLoaderSettingsSection = 27;
 
 typedef NS_ENUM(NSInteger, SourcesSection) {
     SourcesSectionRepos = 0,
@@ -401,7 +402,7 @@ static UIColor *category_color(NSString *cat)
         if ([nav.viewControllers.firstObject isKindOfClass:SettingsViewController.class]) {
             if (!nav) return;
             [nav popToRootViewControllerAnimated:NO];
-            SettingsViewController *ql = [[SettingsViewController alloc] initWithUnderlyingSection:25 bundleTitle:@"QuickLoader"];
+            SettingsViewController *ql = [[SettingsViewController alloc] initWithUnderlyingSection:kQuickLoaderSettingsSection bundleTitle:@"QuickLoader"];
             ql.quickLoaderStandalone = YES;
             [nav pushViewController:ql animated:NO];
             tab.selectedIndex = i;

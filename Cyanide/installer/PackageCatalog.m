@@ -119,14 +119,16 @@ static const NSInteger kSecLayoutExtras     = 15;
 static const NSInteger kSecNanoRegistry     = 16;
 static const NSInteger kSecSnowBoardLite    = 18;
 static const NSInteger kSecLiveWP           = 19;
-static const NSInteger kSecLocationSim      = 20;
-static const NSInteger kSecGravityLite      = 21;
-static const NSInteger kSecAppSwitcherGrid  = 22;
-static const NSInteger kSecIPADecryptor     = 23;
-static const NSInteger kSecMWLite           = 24;
-static const NSInteger kSecFastLockXLite    = 25;
-static const NSInteger kSecQuickLoader      = 26;
-static const NSInteger kSecRepoTweaks       = 27;
+static const NSInteger kSecMetalLockLight   = 20;
+static const NSInteger kSecLocationSim      = 21;
+static const NSInteger kSecGravityLite      = 22;
+static const NSInteger kSecAppSwitcherGrid  = 23;
+static const NSInteger kSecIPADecryptor     = 24;
+static const NSInteger kSecMWLite           = 25;
+static const NSInteger kSecFastLockXLite    = 26;
+static const NSInteger kSecQuickLoader      = 27;
+static const NSInteger kSecRepoTweaks       = 28;
+static const NSInteger kSecMoodWallpaper    = 29;
 
 + (NSArray<Package *> *)allPackages
 {
@@ -381,6 +383,34 @@ static const NSInteger kSecRepoTweaks       = 27;
                                           isNew:NO];
         liveWP.settingsSection = kSecLiveWP;
 
+        Package *metalLockLight = [[Package alloc] initWithIdentifier:@"com.banana.metal-lock-light"
+                                           name:NSLocalizedString(@"Metal Lock Light", nil)
+                               shortDescription:NSLocalizedString(@"Sticker-style Metal light on Lock Screen", nil)
+                                longDescription:NSLocalizedString(@"Experimental PoC that inserts a CAMetalLayer into SpringBoard's Lock Screen window and renders a bundled test image with Sticker-inspired Metal effects.\n\nThis validates source-texture rendering and gravity-driven light movement before wiring the effect to the real Lock Screen wallpaper.", nil)
+                                        version:version
+                                         author:@"banana"
+                                       category:@"Theming"
+                                     symbolName:@"sparkles"
+                                           kind:PackageInstallKindToggle
+                                     enabledKey:kSettingsMetalLockLightEnabled
+                                          isNew:YES];
+        metalLockLight.settingsSection = kSecMetalLockLight;
+        metalLockLight.unstableWarning = NSLocalizedString(@"Experimental: uses RemoteCall to create a CAMetalLayer inside SpringBoard. If the Lock Screen looks wrong, disable it or respring.", nil);
+
+        Package *moodWallpaper = [[Package alloc] initWithIdentifier:@"com.banana.mood-wallpaper"
+                                           name:NSLocalizedString(@"Mood Wallpaper", nil)
+                               shortDescription:NSLocalizedString(@"Tilt-based still wallpaper switcher", nil)
+                                longDescription:NSLocalizedString(@"Switches between two selected still images based on left/right device tilt. It inserts SpringBoard wallpaper layers through RemoteCall and keeps a lightweight motion loop alive while active.\n\nCompatibility: LiveWP, Metal Lock Light, and Mood Wallpaper all own the wallpaper layer space. Only one wallpaper effect can be active at a time.", nil)
+                                        version:version
+                                         author:@"banana"
+                                       category:@"Theming"
+                                     symbolName:@"photo.on.rectangle.angled"
+                                           kind:PackageInstallKindToggle
+                                     enabledKey:kSettingsMoodWallpaperEnabled
+                                          isNew:YES];
+        moodWallpaper.settingsSection = kSecMoodWallpaper;
+        moodWallpaper.unstableWarning = NSLocalizedString(@"Experimental: switches SpringBoard wallpaper layers by device tilt. Disable it or respring if the wallpaper layer looks wrong.", nil);
+
         Package *layoutExtras = [[Package alloc] initWithIdentifier:@"com.darksword.layoutextras"
                                            name:@"Home Layout Extras"
                                shortDescription:@"Extra home/dock padding and per-icon scaling"
@@ -626,6 +656,8 @@ static const NSInteger kSecRepoTweaks       = 27;
             locationSim,
             snowboardLite,
             liveWP,
+            metalLockLight,
+            moodWallpaper,
             appSwitcherGrid,
             quickLoader,
         ];

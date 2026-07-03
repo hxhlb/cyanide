@@ -87,6 +87,16 @@ extern NSString * const kSettingsSnowBoardLiteSelectedThemeID;
 
 extern NSString * const kSettingsLiveWPEnabled;
 extern NSString * const kSettingsLiveWPVideoPath;
+extern NSString * const kSettingsMetalLockLightEnabled;
+extern NSString * const kSettingsMetalLockLightColorPct;
+extern NSString * const kSettingsMetalLockLightReflectPct;
+extern NSString * const kSettingsMetalLockLightMode;
+extern NSString * const kSettingsMoodWallpaperEnabled;
+extern NSString * const kSettingsMoodWallpaperImagePaths;
+extern NSString * const kSettingsMoodWallpaperMainIndex;
+extern NSString * const kSettingsMoodWallpaperLeftPath;
+extern NSString * const kSettingsMoodWallpaperRightPath;
+extern NSString * const kSettingsMoodWallpaperLogOnly;
 
 extern NSString * const kSettingsQuickLoaderEnabled;
 
@@ -117,6 +127,7 @@ BOOL settings_themer_has_selected_theme(void);
 NSString *settings_themer_selected_theme_display_name(void);
 BOOL settings_snowboardlite_has_selected_theme(void);
 NSString *settings_snowboardlite_selected_theme_display_name(void);
+BOOL settings_mood_wallpaper_has_selected_images(void);
 
 // Synchronously runs kexploit and writes/clears the NanoRegistry pairing-
 // compatibility override using the four numbers currently in NSUserDefaults

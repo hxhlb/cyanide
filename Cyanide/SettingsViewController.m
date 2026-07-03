@@ -22,6 +22,8 @@
 #import "tweaks/themer.h"
 #import "tweaks/snowboardlite.h"
 #import "tweaks/livewp.h"
+#import "tweaks/metal_lock_light.h"
+#import "tweaks/mood_wallpaper.h"
 #import "tweaks/gravitylite.h"
 #import "tweaks/appswitchergrid.h"
 #import "tweaks/hide_home_bar.h"
@@ -1034,6 +1036,16 @@ NSString * const kSettingsSnowBoardLiteSelectedThemeID = @"SnowBoardLiteSelected
 
 NSString * const kSettingsLiveWPEnabled = @"LiveWPEnabled";
 NSString * const kSettingsLiveWPVideoPath = @"LiveWPVideoPath";
+NSString * const kSettingsMetalLockLightEnabled = @"MetalLockLightEnabled";
+NSString * const kSettingsMetalLockLightColorPct = @"MetalLockLightColorPct";
+NSString * const kSettingsMetalLockLightReflectPct = @"MetalLockLightReflectPct";
+NSString * const kSettingsMetalLockLightMode = @"MetalLockLightMode";
+NSString * const kSettingsMoodWallpaperEnabled = @"MoodWallpaperEnabled";
+NSString * const kSettingsMoodWallpaperImagePaths = @"MoodWallpaperImagePaths";
+NSString * const kSettingsMoodWallpaperMainIndex = @"MoodWallpaperMainIndex";
+NSString * const kSettingsMoodWallpaperLeftPath = @"MoodWallpaperLeftPath";
+NSString * const kSettingsMoodWallpaperRightPath = @"MoodWallpaperRightPath";
+NSString * const kSettingsMoodWallpaperLogOnly = @"MoodWallpaperLogOnly";
 
 NSString * const kSettingsQuickLoaderEnabled = @"QuickLoaderEnabled";
 
@@ -1063,6 +1075,7 @@ static BOOL settings_cleanup_in_progress(void);
 static BOOL settings_screen_awake_cached(void);
 static BOOL settings_screen_locked_cached(void);
 static void settings_restart_gravity_motion_if_active(const char *reason);
+static void settings_restart_metal_lock_light_motion_if_active(const char *reason);
 
 extern int  escape_sbx_demo2(void);
 extern int  escape_sbx_demo2_in_session(void);
@@ -1093,6 +1106,12 @@ static volatile int g_gravitylite_start_worker_running = 0;
 static volatile int g_gravity_motion_stop_requested = 1;
 static volatile uint64_t g_gravity_motion_generation = 0;
 static CMMotionManager *g_gravity_motion_manager = nil;
+static volatile int g_metal_lock_light_motion_stop_requested = 1;
+static volatile uint64_t g_metal_lock_light_motion_generation = 0;
+static CMMotionManager *g_metal_lock_light_motion_manager = nil;
+static volatile int g_mood_wallpaper_motion_stop_requested = 1;
+static volatile uint64_t g_mood_wallpaper_motion_generation = 0;
+static CMMotionManager *g_mood_wallpaper_motion_manager = nil;
 static volatile int g_themer_live_running = 0;
 static volatile int g_themer_live_stop_requested = 0;
 static volatile int g_themer_repair_running = 0;
@@ -1179,6 +1198,300 @@ static void settings_stop_gravity_motion(void)
     printf("[GRAVITY] Accelerometer stopped.\n");
 }
 
+static void settings_metal_lock_light_values_from_defaults(NSUserDefaults *d,
+                                                           double *colorIntensity,
+                                                           double *reflectIntensity,
+                                                           int *mode)
+{
+    NSInteger colorPct = [d integerForKey:kSettingsMetalLockLightColorPct];
+    if (colorPct < 0) colorPct = 0;
+    if (colorPct > 150) colorPct = 150;
+    NSInteger reflectPct = [d integerForKey:kSettingsMetalLockLightReflectPct];
+    if (reflectPct < 0) reflectPct = 0;
+    if (reflectPct > 150) reflectPct = 150;
+    if (colorIntensity) *colorIntensity = (double)colorPct / 100.0;
+    if (reflectIntensity) *reflectIntensity = (double)reflectPct / 100.0;
+    NSInteger modeValue = [d integerForKey:kSettingsMetalLockLightMode];
+    if (modeValue < 0) modeValue = 0;
+    if (modeValue > 3) modeValue = 3;
+    if (mode) *mode = (int)modeValue;
+}
+
+static BOOL settings_metal_lock_light_motion_can_remote_call(uint64_t generation,
+                                                             CMMotionManager *manager)
+{
+    return manager &&
+           manager == g_metal_lock_light_motion_manager &&
+           generation == g_metal_lock_light_motion_generation &&
+           g_metal_lock_light_motion_stop_requested == 0 &&
+           g_springboard_rc_ready != 0 &&
+           settings_screen_awake_cached() &&
+           !settings_cleanup_in_progress();
+}
+
+static void settings_metal_lock_light_motion_update(uint64_t generation,
+                                                    CMMotionManager *manager,
+                                                    double gx,
+                                                    double gy,
+                                                    double *lastX,
+                                                    double *lastY,
+                                                    int *logBudget)
+{
+    if (!settings_metal_lock_light_motion_can_remote_call(generation, manager)) {
+        if (logBudget && *logBudget > 0) {
+            (*logBudget)--;
+            log_user("[METAL-LIGHT] Motion update skipped: rc=%d awake=%d cleanup=%d stop=%d.\n",
+                     g_springboard_rc_ready ? 1 : 0,
+                     settings_screen_awake_cached() ? 1 : 0,
+                     settings_cleanup_in_progress() ? 1 : 0,
+                     g_metal_lock_light_motion_stop_requested);
+        }
+        return;
+    }
+
+    double lightX = 0.32 + gx * 0.32;
+    double lightY = 0.24 - gy * 0.32;
+    if (*lastX >= 0.0 && fabs(lightX - *lastX) < 0.006 && fabs(lightY - *lastY) < 0.006) {
+        return;
+    }
+    *lastX = lightX;
+    *lastY = lightY;
+
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    if (![d boolForKey:kSettingsMetalLockLightEnabled]) return;
+    double colorIntensity = 0.30;
+    double reflectIntensity = 0.30;
+    int mode = 0;
+    settings_metal_lock_light_values_from_defaults(d, &colorIntensity, &reflectIntensity, &mode);
+
+    bool ok = false;
+    @synchronized (settings_rc_lock()) {
+        if (!settings_metal_lock_light_motion_can_remote_call(generation, manager)) return;
+        ok = metal_lock_light_update_in_session(colorIntensity, reflectIntensity, lightX, lightY, mode);
+    }
+    if (logBudget && *logBudget > 0) {
+        (*logBudget)--;
+        log_user("[METAL-LIGHT] Motion update ok=%d gx=%.2f gy=%.2f light=(%.2f, %.2f).\n",
+                 ok ? 1 : 0, gx, gy, lightX, lightY);
+    }
+}
+
+static void settings_stop_metal_lock_light_motion(void)
+{
+    __sync_lock_test_and_set(&g_metal_lock_light_motion_stop_requested, 1);
+    __sync_add_and_fetch(&g_metal_lock_light_motion_generation, 1);
+    CMMotionManager *mm = g_metal_lock_light_motion_manager;
+    if (!mm) return;
+    g_metal_lock_light_motion_manager = nil;
+    [mm stopDeviceMotionUpdates];
+    [mm stopAccelerometerUpdates];
+    printf("[METAL-LIGHT] Motion loop stopped.\n");
+    log_user("[METAL-LIGHT] Motion loop stopped.\n");
+}
+
+static void settings_start_metal_lock_light_motion(void)
+{
+    settings_stop_metal_lock_light_motion();
+
+    CMMotionManager *mm = [[CMMotionManager alloc] init];
+    g_metal_lock_light_motion_manager = mm;
+    uint64_t generation = __sync_add_and_fetch(&g_metal_lock_light_motion_generation, 1);
+    __sync_lock_test_and_set(&g_metal_lock_light_motion_stop_requested, 0);
+    NSOperationQueue *q = [[NSOperationQueue alloc] init];
+    q.maxConcurrentOperationCount = 1;
+    __block double lastX = -1.0;
+    __block double lastY = -1.0;
+    __block int logBudget = 4;
+
+    if (mm.deviceMotionAvailable) {
+        mm.deviceMotionUpdateInterval = 1.0 / 30.0;
+        [mm startDeviceMotionUpdatesToQueue:q withHandler:^(CMDeviceMotion *motion, NSError *err) {
+            if (!motion || err) {
+                if (logBudget > 0) {
+                    logBudget--;
+                    log_user("[METAL-LIGHT] deviceMotion callback missing motion or has error.\n");
+                }
+                return;
+            }
+            settings_metal_lock_light_motion_update(generation, mm,
+                                                    motion.gravity.x,
+                                                    motion.gravity.y,
+                                                    &lastX,
+                                                    &lastY,
+                                                    &logBudget);
+        }];
+        printf("[METAL-LIGHT] Motion loop active (deviceMotion).\n");
+        log_user("[METAL-LIGHT] Motion loop active (deviceMotion).\n");
+    } else if (mm.accelerometerAvailable) {
+        mm.accelerometerUpdateInterval = 1.0 / 30.0;
+        [mm startAccelerometerUpdatesToQueue:q withHandler:^(CMAccelerometerData *data, NSError *err) {
+            if (!data || err) {
+                if (logBudget > 0) {
+                    logBudget--;
+                    log_user("[METAL-LIGHT] accelerometer callback missing data or has error.\n");
+                }
+                return;
+            }
+            settings_metal_lock_light_motion_update(generation, mm,
+                                                    data.acceleration.x,
+                                                    data.acceleration.y,
+                                                    &lastX,
+                                                    &lastY,
+                                                    &logBudget);
+        }];
+        printf("[METAL-LIGHT] Motion loop active (accelerometer).\n");
+        log_user("[METAL-LIGHT] Motion loop active (accelerometer).\n");
+    } else {
+        __sync_lock_test_and_set(&g_metal_lock_light_motion_stop_requested, 1);
+        g_metal_lock_light_motion_manager = nil;
+        printf("[METAL-LIGHT] Motion unavailable.\n");
+        log_user("[METAL-LIGHT] Motion unavailable.\n");
+    }
+}
+
+static BOOL settings_mood_wallpaper_motion_can_remote_call(uint64_t generation,
+                                                           CMMotionManager *manager)
+{
+    return manager &&
+           manager == g_mood_wallpaper_motion_manager &&
+           generation == g_mood_wallpaper_motion_generation &&
+           g_mood_wallpaper_motion_stop_requested == 0 &&
+           g_springboard_rc_ready != 0 &&
+           !settings_cleanup_in_progress();
+}
+
+static void settings_stop_mood_wallpaper_motion(void)
+{
+    __sync_lock_test_and_set(&g_mood_wallpaper_motion_stop_requested, 1);
+    __sync_add_and_fetch(&g_mood_wallpaper_motion_generation, 1);
+    CMMotionManager *mm = g_mood_wallpaper_motion_manager;
+    if (!mm) return;
+    g_mood_wallpaper_motion_manager = nil;
+    [mm stopDeviceMotionUpdates];
+    [mm stopAccelerometerUpdates];
+    printf("[MOOD-WP] Motion loop stopped.\n");
+    log_user("[MOOD-WP] Motion loop stopped.\n");
+}
+
+static void settings_start_mood_wallpaper_motion(void)
+{
+    settings_stop_mood_wallpaper_motion();
+    ds_keepalive_apply_enabled(YES);
+
+    CMMotionManager *mm = [[CMMotionManager alloc] init];
+    g_mood_wallpaper_motion_manager = mm;
+    uint64_t generation = __sync_add_and_fetch(&g_mood_wallpaper_motion_generation, 1);
+    __sync_lock_test_and_set(&g_mood_wallpaper_motion_stop_requested, 0);
+    NSOperationQueue *q = [[NSOperationQueue alloc] init];
+    q.maxConcurrentOperationCount = 1;
+    __block NSInteger lastMoodTarget = NSNotFound;
+    __block int logBudget = 24;
+
+    void (^update)(double, double) = ^(double gx, double gy) {
+        if (!settings_mood_wallpaper_motion_can_remote_call(generation, mm)) return;
+        double axis = gx;
+        if (axis < -1.0) axis = -1.0;
+        if (axis > 1.0) axis = 1.0;
+        NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+        if (![d boolForKey:kSettingsMoodWallpaperEnabled]) return;
+
+        NSArray *paths = [d arrayForKey:kSettingsMoodWallpaperImagePaths];
+        NSInteger count = paths.count;
+        if (count < 2) return;
+        id mainRaw = [d objectForKey:kSettingsMoodWallpaperMainIndex];
+        NSInteger mainIndex = mainRaw ? [d integerForKey:kSettingsMoodWallpaperMainIndex] : (count / 2);
+        if (mainIndex < 0) mainIndex = 0;
+        if (mainIndex >= count) mainIndex = count - 1;
+        if (lastMoodTarget == NSNotFound) lastMoodTarget = mainIndex;
+
+        NSInteger target = mainIndex;
+        if (count == 3 && mainIndex == 1) {
+            if (axis <= -0.18) target = 0;
+            else if (axis >= 0.18) target = 2;
+            else target = mainIndex;
+        } else {
+            double minAxis = -0.75;
+            double maxAxis = 0.75;
+            double normalized = (axis - minAxis) / (maxAxis - minAxis);
+            if (normalized < 0.0) normalized = 0.0;
+            if (normalized > 1.0) normalized = 1.0;
+            target = (NSInteger)floor(normalized * (double)count);
+            if (target < 0) target = 0;
+            if (target >= count) target = count - 1;
+        }
+        if (target == lastMoodTarget) {
+            return;
+        }
+        NSInteger previousTarget = lastMoodTarget;
+        lastMoodTarget = target;
+        uint64_t signalMS = (uint64_t)(CFAbsoluteTimeGetCurrent() * 1000.0);
+        log_user("[MOOD-WP][SIGNAL] rawX=%.2f rawY=%.2f prev=%ld target=%ld count=%ld main=%ld logOnly=%d appState=%ld.\n",
+                 gx,
+                 gy,
+                 (long)previousTarget,
+                 (long)target,
+                 (long)count,
+                 (long)mainIndex,
+                 [d boolForKey:kSettingsMoodWallpaperLogOnly] ? 1 : 0,
+                 (long)UIApplication.sharedApplication.applicationState);
+        if ([d boolForKey:kSettingsMoodWallpaperLogOnly]) {
+            log_user("[MOOD-WP][LOGONLY] rawX=%.2f rawY=%.2f prev=%ld target=%ld count=%ld main=%ld appState=%ld.\n",
+                     gx,
+                     gy,
+                     (long)previousTarget,
+                     (long)target,
+                     (long)count,
+                     (long)mainIndex,
+                     (long)UIApplication.sharedApplication.applicationState);
+            return;
+        }
+
+        bool ok = false;
+        @synchronized (settings_rc_lock()) {
+            if (!settings_mood_wallpaper_motion_can_remote_call(generation, mm)) return;
+            ok = mood_wallpaper_update_index_in_session((int)target);
+        }
+        uint64_t applyMS = (uint64_t)(CFAbsoluteTimeGetCurrent() * 1000.0);
+        if (logBudget > 0) {
+            logBudget--;
+            log_user("[MOOD-WP][APPLY] ok=%d elapsed=%llums rawX=%.2f rawY=%.2f prev=%ld target=%ld count=%ld main=%ld keepAlive=%d appState=%ld.\n",
+                     ok ? 1 : 0,
+                     (unsigned long long)(applyMS >= signalMS ? applyMS - signalMS : 0),
+                     gx,
+                     gy,
+                     (long)previousTarget,
+                     (long)target,
+                     (long)count,
+                     (long)mainIndex,
+                     ds_keepalive_is_running() ? 1 : 0,
+                     (long)UIApplication.sharedApplication.applicationState);
+        }
+    };
+
+    if (mm.deviceMotionAvailable) {
+        mm.deviceMotionUpdateInterval = 1.0 / 30.0;
+        [mm startDeviceMotionUpdatesToQueue:q withHandler:^(CMDeviceMotion *motion, NSError *err) {
+            if (!motion || err) return;
+            update(motion.gravity.x, motion.gravity.y);
+        }];
+        printf("[MOOD-WP] Motion loop active (deviceMotion).\n");
+        log_user("[MOOD-WP] Motion loop active (deviceMotion).\n");
+    } else if (mm.accelerometerAvailable) {
+        mm.accelerometerUpdateInterval = 1.0 / 30.0;
+        [mm startAccelerometerUpdatesToQueue:q withHandler:^(CMAccelerometerData *data, NSError *err) {
+            if (!data || err) return;
+            update(data.acceleration.x, data.acceleration.y);
+        }];
+        printf("[MOOD-WP] Motion loop active (accelerometer).\n");
+        log_user("[MOOD-WP] Motion loop active (accelerometer).\n");
+    } else {
+        __sync_lock_test_and_set(&g_mood_wallpaper_motion_stop_requested, 1);
+        g_mood_wallpaper_motion_manager = nil;
+        printf("[MOOD-WP] Motion unavailable.\n");
+        log_user("[MOOD-WP] Motion unavailable.\n");
+    }
+}
+
 typedef void (*SettingsTweakRequestStopFunc)(void);
 typedef bool (*SettingsTweakStopFunc)(BOOL springboardWillDie);
 typedef void (*SettingsTweakForgetFunc)(void);
@@ -1207,6 +1520,14 @@ static void settings_request_gravitylite_stop(void)
 {
     __sync_lock_test_and_set(&g_gravitylite_background_armed, 0);
     settings_stop_gravity_motion();
+}
+static void settings_request_metal_lock_light_stop(void)
+{
+    settings_stop_metal_lock_light_motion();
+}
+static void settings_request_mood_wallpaper_stop(void)
+{
+    settings_stop_mood_wallpaper_motion();
 }
 static void settings_request_stagestrip_stop(void) { stagestrip_stop_control_loop(); }
 static void settings_request_livewp_stop(void) { g_livewp_live_stop_requested = 1; }
@@ -1347,6 +1668,20 @@ static bool settings_stop_livewp_registered(BOOL springboardWillDie)
     return livewp_stop_in_session();
 }
 
+static bool settings_stop_metal_lock_light_registered(BOOL springboardWillDie)
+{
+    (void)springboardWillDie;
+    settings_stop_metal_lock_light_motion();
+    return metal_lock_light_stop_in_session();
+}
+
+static bool settings_stop_mood_wallpaper_registered(BOOL springboardWillDie)
+{
+    (void)springboardWillDie;
+    settings_stop_mood_wallpaper_motion();
+    return mood_wallpaper_stop_in_session();
+}
+
 static bool settings_stop_quickloader_registered(BOOL springboardWillDie)
 {
     (void)springboardWillDie;
@@ -1377,6 +1712,8 @@ static void settings_each_springboard_cleanup_entry(void (^block)(const Settings
         { kSettingsThemerEnabled, "Themer", settings_request_themer_stop, settings_stop_themer_registered, themer_forget_remote_state, settings_themer_running, YES, YES },
         { kSettingsSnowBoardLiteEnabled, "SnowBoard Lite", NULL, settings_stop_themer_registered, themer_forget_remote_state, NULL, YES, YES },
         { kSettingsLiveWPEnabled, "LiveWP", settings_request_livewp_stop, settings_stop_livewp_registered, livewp_forget_remote_state, settings_livewp_running, YES, YES },
+        { kSettingsMetalLockLightEnabled, "Metal Lock Light", settings_request_metal_lock_light_stop, settings_stop_metal_lock_light_registered, metal_lock_light_forget_remote_state, NULL, YES, YES },
+        { kSettingsMoodWallpaperEnabled, "Mood Wallpaper", settings_request_mood_wallpaper_stop, settings_stop_mood_wallpaper_registered, mood_wallpaper_forget_remote_state, NULL, YES, YES },
         { kSettingsStageStripEnabled, "Stage Strip", settings_request_stagestrip_stop, settings_stop_stagestrip_registered, stagestrip_forget_remote_state, NULL, YES, YES },
         { kSettingsMWLiteEnabled, "MilkyWay Lite", settings_request_stagestrip_stop, settings_stop_stagestrip_registered, stagestrip_forget_remote_state, NULL, YES, YES },
         { kSettingsFastLockXLiteEnabled, "FastLockX Lite", NULL, settings_stop_fastlockx_lite_registered, fastlockx_lite_forget_remote_state, NULL, NO, YES },
@@ -1684,6 +2021,13 @@ static NSArray<NSString *> *settings_rc_backed_tweak_keys(void)
             kSettingsDSDoubleTapToLock,
             kSettingsDSDragCoefficientEnabled,
             kSettingsLayoutExtrasEnabled,
+            kSettingsMetalLockLightColorPct,
+            kSettingsMetalLockLightReflectPct,
+            kSettingsMetalLockLightMode,
+            kSettingsMoodWallpaperImagePaths,
+            kSettingsMoodWallpaperMainIndex,
+            kSettingsMoodWallpaperLeftPath,
+            kSettingsMoodWallpaperRightPath,
         ]];
         settings_each_springboard_cleanup_entry(^(const SettingsSpringBoardTweakCleanupEntry *entry) {
             if (entry->key && ![allKeys containsObject:entry->key]) {
@@ -2241,6 +2585,7 @@ static void settings_install_screen_awake_observers(void)
                 settings_resume_livewp_after_wake_async("screen awake");
                 settings_schedule_themer_quiet_repair_burst("screen awake");
                 settings_restart_gravity_motion_if_active("screen awake");
+                settings_restart_metal_lock_light_motion_if_active("screen awake");
             }
         });
         if (status != NOTIFY_STATUS_OK) {
@@ -2261,6 +2606,7 @@ static void settings_install_screen_awake_observers(void)
                 settings_resume_livewp_after_wake_async("display awake");
                 settings_schedule_themer_quiet_repair_burst("display awake");
                 settings_restart_gravity_motion_if_active("display awake");
+                settings_restart_metal_lock_light_motion_if_active("display awake");
             }
         });
         if (status != NOTIFY_STATUS_OK) {
@@ -3188,6 +3534,81 @@ static NSString *settings_livewp_video_detail(void)
     return [NSString stringWithFormat:@"%@ (missing)", path.lastPathComponent ?: path];
 }
 
+static NSMutableArray<NSString *> *settings_mood_wallpaper_image_paths_mutable(NSUserDefaults *d)
+{
+    NSMutableArray<NSString *> *paths = [NSMutableArray arrayWithCapacity:8];
+    NSArray *raw = [d arrayForKey:kSettingsMoodWallpaperImagePaths];
+    for (id item in raw) {
+        if (paths.count >= 8) break;
+        if (![item isKindOfClass:NSString.class]) continue;
+        NSString *rel = (NSString *)item;
+        if (rel.length > 0) [paths addObject:rel];
+    }
+    if (paths.count == 0) {
+        NSString *left = [d stringForKey:kSettingsMoodWallpaperLeftPath];
+        NSString *right = [d stringForKey:kSettingsMoodWallpaperRightPath];
+        if (left.length > 0) [paths addObject:left];
+        if (right.length > 0 && paths.count < 8) [paths addObject:right];
+        if (paths.count > 0) [d setObject:paths forKey:kSettingsMoodWallpaperImagePaths];
+    }
+    return paths;
+}
+
+static NSInteger settings_mood_wallpaper_main_index(NSUserDefaults *d, NSInteger count)
+{
+    if (count <= 0) return 0;
+    id raw = [d objectForKey:kSettingsMoodWallpaperMainIndex];
+    NSInteger index = raw ? [d integerForKey:kSettingsMoodWallpaperMainIndex] : (count / 2);
+    if (index < 0) return 0;
+    if (index >= count) return count - 1;
+    return index;
+}
+
+static NSArray<NSString *> *settings_mood_wallpaper_image_paths(NSUserDefaults *d)
+{
+    return [settings_mood_wallpaper_image_paths_mutable(d) copy];
+}
+
+static NSString *settings_mood_wallpaper_image_detail_for_path(NSString *rel)
+{
+    NSString *path = mood_wallpaper_absolute_path(rel);
+    if (path.length == 0) return settings_l10n_text(@"No image selected.");
+    NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
+    if (attrs) {
+        unsigned long long bytes = [attrs fileSize];
+        NSByteCountFormatter *fmt = [[NSByteCountFormatter alloc] init];
+        fmt.allowedUnits = NSByteCountFormatterUseKB | NSByteCountFormatterUseMB;
+        fmt.countStyle = NSByteCountFormatterCountStyleFile;
+        return [NSString stringWithFormat:@"%@ (%@)", path.lastPathComponent, [fmt stringFromByteCount:(long long)bytes]];
+    }
+    return [NSString stringWithFormat:@"%@ (%@)", path.lastPathComponent ?: path, settings_l10n_text(@"missing")];
+}
+
+static UIImage *settings_mood_wallpaper_preview_image(NSString *rel)
+{
+    NSString *path = mood_wallpaper_absolute_path(rel);
+    if (path.length == 0) return nil;
+    UIImage *image = [UIImage imageWithContentsOfFile:path];
+    if (!image) {
+        NSData *data = [NSData dataWithContentsOfFile:path];
+        if (data) image = [UIImage imageWithData:data];
+    }
+    return image;
+}
+
+BOOL settings_mood_wallpaper_has_selected_images(void)
+{
+    NSArray<NSString *> *paths = settings_mood_wallpaper_image_paths(NSUserDefaults.standardUserDefaults);
+    NSInteger usable = 0;
+    NSFileManager *fm = NSFileManager.defaultManager;
+    for (NSString *rel in paths) {
+        NSString *path = mood_wallpaper_absolute_path(rel);
+        if (path.length > 0 && [fm fileExistsAtPath:path]) usable++;
+        if (usable >= 2) return YES;
+    }
+    return NO;
+}
+
 static NiceBarLiteConfig settings_nicebar_config_from_defaults(NSUserDefaults *d)
 {
     NiceBarLiteConfig cfg;
@@ -3640,6 +4061,20 @@ static void settings_restart_gravity_motion_if_active(const char *reason)
     GravityLiteConfig config = settings_gravitylite_config_from_defaults(d);
     settings_start_gravity_motion(config.magnitude, config.explosionForce);
     printf("[GRAVITY] accelerometer loop restarted%s%s\n",
+           reason ? ": " : "", reason ?: "");
+}
+
+static void settings_restart_metal_lock_light_motion_if_active(const char *reason)
+{
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    if (![d boolForKey:kSettingsMetalLockLightEnabled]) return;
+    if (!settings_tweak_is_applied(kSettingsMetalLockLightEnabled)) return;
+    if (!g_springboard_rc_ready || settings_cleanup_in_progress()) return;
+    if (!settings_screen_awake_cached()) return;
+    if (g_metal_lock_light_motion_stop_requested == 0 && g_metal_lock_light_motion_manager) return;
+
+    settings_start_metal_lock_light_motion();
+    printf("[METAL-LIGHT] motion loop restarted%s%s\n",
            reason ? ": " : "", reason ?: "");
 }
 
@@ -5574,6 +6009,7 @@ void settings_application_did_enter_background(void)
         ([d boolForKey:kSettingsGravityLiteEnabled] && g_springboard_rc_ready) ||
         themerLiveNeeded ||
         ([d boolForKey:kSettingsLiveWPEnabled]      && g_springboard_rc_ready) ||
+        ([d boolForKey:kSettingsMoodWallpaperEnabled] && g_springboard_rc_ready) ||
         (settings_notificationisland_install_allowed() && [d boolForKey:kSettingsNotificationIslandEnabled] && g_springboard_rc_ready) ||
         (settings_typebanner_install_allowed() && [d boolForKey:kSettingsTypeBannerEnabled]);
     if (anyLiveLoopNeeded) {
@@ -5788,6 +6224,24 @@ static BOOL settings_key_is_gravitylite(NSString *key)
            [key isEqualToString:kSettingsGravityLiteFrictionPct] ||
            [key isEqualToString:kSettingsGravityLiteResistancePct] ||
            [key isEqualToString:kSettingsGravityLiteAngularResistancePct];
+}
+
+static BOOL settings_key_is_metal_lock_light(NSString *key)
+{
+    return [key isEqualToString:kSettingsMetalLockLightEnabled] ||
+           [key isEqualToString:kSettingsMetalLockLightColorPct] ||
+           [key isEqualToString:kSettingsMetalLockLightReflectPct] ||
+           [key isEqualToString:kSettingsMetalLockLightMode];
+}
+
+static BOOL settings_key_is_mood_wallpaper(NSString *key)
+{
+    return [key isEqualToString:kSettingsMoodWallpaperEnabled] ||
+           [key isEqualToString:kSettingsMoodWallpaperImagePaths] ||
+           [key isEqualToString:kSettingsMoodWallpaperMainIndex] ||
+           [key isEqualToString:kSettingsMoodWallpaperLeftPath] ||
+           [key isEqualToString:kSettingsMoodWallpaperRightPath] ||
+           [key isEqualToString:kSettingsMoodWallpaperLogOnly];
 }
 
 static BOOL settings_key_is_location_sim(NSString *key)
@@ -6619,6 +7073,81 @@ static void settings_schedule_live_apply_for_key(NSString *key)
         return;
     }
 
+    if (settings_key_is_metal_lock_light(key)) {
+        if ([d boolForKey:kSettingsMetalLockLightEnabled] && g_springboard_rc_ready) {
+            dispatch_async(dispatch_get_global_queue(0, 0), ^{
+                bool ok = false;
+                @synchronized (settings_rc_lock()) {
+                    if (settings_cleanup_in_progress() ||
+                        ![d boolForKey:kSettingsMetalLockLightEnabled] ||
+                        !g_springboard_rc_ready) return;
+                    double colorIntensity = 0.30;
+                    double reflectIntensity = 0.30;
+                    int mode = 0;
+                    settings_metal_lock_light_values_from_defaults(d, &colorIntensity, &reflectIntensity, &mode);
+                    NSString *imagePath = [[NSBundle mainBundle] pathForResource:@"MetalLockLightBase" ofType:@"png"];
+                    ok = metal_lock_light_apply_in_session(colorIntensity, reflectIntensity, mode, imagePath.UTF8String);
+                    settings_mark_tweak_applied(kSettingsMetalLockLightEnabled, ok);
+                }
+                printf("[SETTINGS] live Metal Lock Light apply result=%d\n", ok);
+                if (ok) settings_start_metal_lock_light_motion();
+                settings_notify_package_queue_changed_async();
+                settings_post_actions_complete_async(ok, settings_l10n_text(ok ? @"Done" : @"Metal Lock Light did not start cleanly."));
+            });
+        } else if (![d boolForKey:kSettingsMetalLockLightEnabled]) {
+            settings_stop_metal_lock_light_motion();
+            settings_mark_tweak_applied(kSettingsMetalLockLightEnabled, NO);
+            settings_notify_package_queue_changed_async();
+            if (g_springboard_rc_ready) {
+                dispatch_async(dispatch_get_global_queue(0, 0), ^{
+                    @synchronized (settings_rc_lock()) {
+                        if (g_springboard_rc_ready) metal_lock_light_stop_in_session();
+                    }
+                });
+            } else {
+                metal_lock_light_forget_remote_state();
+            }
+        } else {
+            settings_notify_package_queue_changed_async();
+        }
+        return;
+    }
+
+    if (settings_key_is_mood_wallpaper(key)) {
+        if ([d boolForKey:kSettingsMoodWallpaperEnabled] && g_springboard_rc_ready) {
+            dispatch_async(dispatch_get_global_queue(0, 0), ^{
+                bool ok = false;
+                @synchronized (settings_rc_lock()) {
+                    if (settings_cleanup_in_progress() ||
+                        ![d boolForKey:kSettingsMoodWallpaperEnabled] ||
+                        !g_springboard_rc_ready) return;
+                    ok = mood_wallpaper_apply_in_session();
+                    settings_mark_tweak_applied(kSettingsMoodWallpaperEnabled, ok);
+                }
+                printf("[SETTINGS] live Mood Wallpaper apply result=%d\n", ok);
+                if (ok) settings_start_mood_wallpaper_motion();
+                settings_notify_package_queue_changed_async();
+                settings_post_actions_complete_async(ok, settings_l10n_text(ok ? @"Done" : @"Mood Wallpaper did not start cleanly."));
+            });
+        } else if (![d boolForKey:kSettingsMoodWallpaperEnabled]) {
+            settings_stop_mood_wallpaper_motion();
+            settings_mark_tweak_applied(kSettingsMoodWallpaperEnabled, NO);
+            settings_notify_package_queue_changed_async();
+            if (g_springboard_rc_ready) {
+                dispatch_async(dispatch_get_global_queue(0, 0), ^{
+                    @synchronized (settings_rc_lock()) {
+                        if (g_springboard_rc_ready) mood_wallpaper_stop_in_session();
+                    }
+                });
+            } else {
+                mood_wallpaper_forget_remote_state();
+            }
+        } else {
+            settings_notify_package_queue_changed_async();
+        }
+        return;
+    }
+
     if (settings_key_is_gravitylite(key)) {
         if ([d boolForKey:kSettingsGravityLiteEnabled] && g_springboard_rc_ready) {
             dispatch_async(dispatch_get_global_queue(0, 0), ^{
@@ -7045,6 +7574,15 @@ void settings_register_defaults(void)
 
         kSettingsLiveWPEnabled: @NO,
         kSettingsLiveWPVideoPath: @"",
+        kSettingsMetalLockLightEnabled: @NO,
+        kSettingsMetalLockLightColorPct: @30,
+        kSettingsMetalLockLightReflectPct: @30,
+        kSettingsMetalLockLightMode: @2,
+        kSettingsMoodWallpaperEnabled: @NO,
+        kSettingsMoodWallpaperImagePaths: @[],
+        kSettingsMoodWallpaperLeftPath: @"",
+        kSettingsMoodWallpaperRightPath: @"",
+        kSettingsMoodWallpaperLogOnly: @NO,
 
         kSettingsAppSwitcherGridEnabled: @NO,
 
@@ -7157,6 +7695,8 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             BOOL themerEnabled = [d boolForKey:kSettingsThemerEnabled];
             BOOL snowboardLiteEnabled = [d boolForKey:kSettingsSnowBoardLiteEnabled];
             BOOL liveWPEnabled = [d boolForKey:kSettingsLiveWPEnabled];
+            BOOL metalLockLightEnabled = [d boolForKey:kSettingsMetalLockLightEnabled];
+            BOOL moodWallpaperEnabled = [d boolForKey:kSettingsMoodWallpaperEnabled];
             BOOL layoutExtrasEnabled = [d boolForKey:kSettingsLayoutExtrasEnabled];
             BOOL stageStripEnabled = settings_stagestrip_install_allowed() && [d boolForKey:kSettingsStageStripEnabled];
             BOOL mwLiteEnabled = settings_stagestrip_install_allowed() && [d boolForKey:kSettingsMWLiteEnabled];
@@ -7174,6 +7714,8 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             BOOL runThemer = settings_enabled_tweak_should_run(d, kSettingsThemerEnabled, springBoardPendingOnly);
             BOOL runSnowBoardLite = settings_enabled_tweak_should_run(d, kSettingsSnowBoardLiteEnabled, springBoardPendingOnly);
             BOOL runLiveWP = settings_enabled_tweak_should_run(d, kSettingsLiveWPEnabled, springBoardPendingOnly);
+            BOOL runMetalLockLight = settings_enabled_tweak_should_run(d, kSettingsMetalLockLightEnabled, springBoardPendingOnly);
+            BOOL runMoodWallpaper = settings_enabled_tweak_should_run(d, kSettingsMoodWallpaperEnabled, springBoardPendingOnly);
             BOOL runLayoutExtras = settings_enabled_tweak_should_run(d, kSettingsLayoutExtrasEnabled, springBoardPendingOnly);
             BOOL runStageStrip = settings_stagestrip_install_allowed() && settings_enabled_tweak_should_run(d, kSettingsStageStripEnabled, springBoardPendingOnly);
             BOOL runMWLite = settings_stagestrip_install_allowed() && settings_enabled_tweak_should_run(d, kSettingsMWLiteEnabled, springBoardPendingOnly);
@@ -7191,7 +7733,18 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                 runMWLite = NO;
                 mwLiteEnabled = NO;
             }
-            BOOL needsSpringBoardWork = runSBC || runDarkTweaks || runStatBar || runNSBar || runNiceBarLite || runRSSI || runAxonLite || runGravityLite || runLayoutExtras || runTypeBanner || runNotificationIsland || runAppSwitcherGrid || runThemer || runSnowBoardLite || runLiveWP || runStageStrip || runMWLite || runFastLockXLite || runQuickLoader || runRepoTweaks || cleanupDisabledSpringBoardTweaks;
+            if (liveWPEnabled && (metalLockLightEnabled || moodWallpaperEnabled)) {
+                log_user("[COMPAT] LiveWP, Metal Lock Light, and Mood Wallpaper cannot be active together. Keeping LiveWP and skipping the other wallpaper effects.\n");
+                runMetalLockLight = NO;
+                runMoodWallpaper = NO;
+                metalLockLightEnabled = NO;
+                moodWallpaperEnabled = NO;
+            } else if (metalLockLightEnabled && moodWallpaperEnabled) {
+                log_user("[COMPAT] Metal Lock Light and Mood Wallpaper cannot be active together. Keeping Metal Lock Light and skipping Mood Wallpaper.\n");
+                runMoodWallpaper = NO;
+                moodWallpaperEnabled = NO;
+            }
+            BOOL needsSpringBoardWork = runSBC || runDarkTweaks || runStatBar || runNSBar || runNiceBarLite || runRSSI || runAxonLite || runGravityLite || runLayoutExtras || runTypeBanner || runNotificationIsland || runAppSwitcherGrid || runThemer || runSnowBoardLite || runLiveWP || runMetalLockLight || runMoodWallpaper || runStageStrip || runMWLite || runFastLockXLite || runQuickLoader || runRepoTweaks || cleanupDisabledSpringBoardTweaks;
             BOOL runSandboxEscape = [d boolForKey:kSettingsRunSandboxEscape] && (!pendingOnly || needsSpringBoardWork);
             // TypeBanner prewarms its hidden SpringBoard window during Apply
             // and reuses the open SpringBoard session for text-only updates.
@@ -7215,6 +7768,8 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             if (runThemer) total++;
             if (runSnowBoardLite) total++;
             if (runLiveWP) total++;
+            if (runMetalLockLight) total++;
+            if (runMoodWallpaper) total++;
             if (runStatBar) total++;
             if (runNSBar) total++;
             if (runNiceBarLite) total++;
@@ -7250,6 +7805,8 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             if (runThemer) [enabledTweaks addObject:@"themer"];
             if (runSnowBoardLite) [enabledTweaks addObject:@"snowboardlite"];
             if (runLiveWP) [enabledTweaks addObject:@"livewp"];
+            if (runMetalLockLight) [enabledTweaks addObject:@"metal-lock-light"];
+            if (runMoodWallpaper) [enabledTweaks addObject:@"mood-wallpaper"];
             if (runTypeBanner) [enabledTweaks addObject:@"typebanner"];
             if (runFastLockXLite) [enabledTweaks addObject:@"fastlockx"];
             if (runStageStrip) [enabledTweaks addObject:@"stagestrip"];
@@ -7276,6 +7833,8 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                 if (!notificationIslandEnabled) g_notificationisland_live_stop_requested = 1;
                 if (!themerEnabled && !snowboardLiteEnabled) g_themer_live_stop_requested = 1;
                 if (!liveWPEnabled) g_livewp_live_stop_requested = 1;
+                if (!metalLockLightEnabled) settings_stop_metal_lock_light_motion();
+                if (!moodWallpaperEnabled) settings_stop_mood_wallpaper_motion();
                 if (!gravityLiteEnabled) settings_request_gravitylite_stop();
                 if (!stageStripEnabled) settings_request_stagestrip_stop();
                 log_user("[DONE] No pending runtime changes to apply.\n");
@@ -7548,6 +8107,35 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         cyanide_upload_log_milestone(ok ? @"livewp-initial-applied" : @"livewp-initial-failed");
                     }
 
+                    if (runMetalLockLight) {
+                        settings_progress(&step, total, "Rendering Metal lock-screen light");
+                        double colorIntensity = 0.30;
+                        double reflectIntensity = 0.30;
+                        int mode = 0;
+                        settings_metal_lock_light_values_from_defaults(d, &colorIntensity, &reflectIntensity, &mode);
+                        NSString *imagePath = [[NSBundle mainBundle] pathForResource:@"MetalLockLightBase" ofType:@"png"];
+                        bool ok = metal_lock_light_apply_in_session(colorIntensity, reflectIntensity, mode, imagePath.UTF8String);
+                        settings_mark_tweak_applied(kSettingsMetalLockLightEnabled,
+                                                    ok && [d boolForKey:kSettingsMetalLockLightEnabled]);
+                        printf("[SETTINGS] Metal Lock Light result=%d\n", ok);
+                        log_user("%s Metal Lock Light %s.\n",
+                                 ok ? "[OK]" : "[WARN]",
+                                 ok ? "rendered on the lock screen" : "did not start cleanly");
+                        cyanide_upload_log_milestone(ok ? @"metal-lock-light-applied" : @"metal-lock-light-failed");
+                    }
+
+                    if (runMoodWallpaper) {
+                        settings_progress(&step, total, "Starting Mood Wallpaper");
+                        bool ok = mood_wallpaper_apply_in_session();
+                        settings_mark_tweak_applied(kSettingsMoodWallpaperEnabled,
+                                                    ok && [d boolForKey:kSettingsMoodWallpaperEnabled]);
+                        printf("[SETTINGS] Mood Wallpaper result=%d\n", ok);
+                        log_user("%s Mood Wallpaper %s.\n",
+                                 ok ? "[OK]" : "[WARN]",
+                                 ok ? "active" : "did not start cleanly");
+                        cyanide_upload_log_milestone(ok ? @"mood-wallpaper-applied" : @"mood-wallpaper-failed");
+                    }
+
                     if (runQuickLoader) {
                         settings_progress(&step, total, "Applying QuickLoader...");
                         bool ok = quickloader_apply_in_session();
@@ -7713,6 +8301,16 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                 } else if (!liveWPEnabled) {
                     g_livewp_live_stop_requested = 1;
                 }
+                if (runMetalLockLight && settings_tweak_is_applied(kSettingsMetalLockLightEnabled)) {
+                    settings_start_metal_lock_light_motion();
+                } else if (!metalLockLightEnabled) {
+                    settings_stop_metal_lock_light_motion();
+                }
+                if (runMoodWallpaper && settings_tweak_is_applied(kSettingsMoodWallpaperEnabled)) {
+                    settings_start_mood_wallpaper_motion();
+                } else if (!moodWallpaperEnabled) {
+                    settings_stop_mood_wallpaper_motion();
+                }
                 if (runAxonLite) {
                     settings_start_axonlite_live_loop();
                 } else if (!axonLiteEnabled) {
@@ -7778,7 +8376,9 @@ static void settings_run_actions_internal(BOOL pendingOnly)
 
             log_user("[DONE] All tweaks active in-session — live until respring.\n");
             runSucceeded = YES;
-            runCompletionMessage = @"Done. All tweaks applied in-session.";
+            runCompletionMessage = [NSString stringWithFormat:@"%@. %@",
+                                    settings_l10n_text(@"Done"),
+                                    settings_l10n_text(@"All tweaks applied in-session.")];
             cyanide_upload_log_milestone(@"run-complete");
         } @finally {
             // Close any legacy uploader state before the final snapshot.
@@ -7838,6 +8438,7 @@ typedef NS_ENUM(NSInteger, SettingsSection) {
     SectionThemer,
     SectionSnowBoardLite,
     SectionLiveWP,
+    SectionMetalLockLight,
     SectionLocationSim,
     SectionGravityLite,
     SectionAppSwitcherGrid,
@@ -7846,6 +8447,7 @@ typedef NS_ENUM(NSInteger, SettingsSection) {
     SectionFastLockXLite,
     SectionQuickLoader,
     SectionRepoTweaks,
+    SectionMoodWallpaper,
     SectionCount,
 };
 
@@ -7922,6 +8524,16 @@ static NSString *settings_pretty_date_for_iso(NSString *iso)
 @property (nonatomic, strong) NSArray<NSDictionary<NSString *, NSString *> *> *mwLiteInstalledApps;
 @property (nonatomic, assign) BOOL mwLiteAppsLoading;
 @property (nonatomic, copy) NSString *mwLiteSearchText;
+@property (nonatomic, strong) CMMotionManager *moodDebugMotionManager;
+@property (nonatomic, assign) double moodDebugX;
+@property (nonatomic, assign) double moodDebugY;
+@property (nonatomic, assign) double moodDebugMinX;
+@property (nonatomic, assign) double moodDebugMaxX;
+@property (nonatomic, assign) double moodDebugMinY;
+@property (nonatomic, assign) double moodDebugMaxY;
+@property (nonatomic, assign) NSUInteger moodDebugSampleCount;
+@property (nonatomic, assign) NSTimeInterval moodDebugStartTime;
+@property (nonatomic, assign) NSTimeInterval moodDebugLastReloadTime;
 - (void)startMWLiteAppListLoadForce:(BOOL)force;
 - (void)mwLiteSearchTextDidChange:(UITextField *)field;
 - (void)mwLiteSearchEditingDidEnd:(UITextField *)field;
@@ -8482,7 +9094,99 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 
 - (void)dealloc
 {
+    [self stopMoodWallpaperDebugMotion];
     [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+- (BOOL)isMoodWallpaperDetail
+{
+    return self.detailMode && self.underlyingSection == SectionMoodWallpaper;
+}
+
+- (void)reloadMoodWallpaperDebugRow
+{
+    if (![self isMoodWallpaperDetail] || !self.isViewLoaded || !self.tableView.window) return;
+    NSArray<NSDictionary *> *rows = [self rowsForSection:SectionMoodWallpaper];
+    NSUInteger idx = NSNotFound;
+    for (NSUInteger i = 0; i < rows.count; i++) {
+        if ([rows[i][@"kind"] isEqualToString:@"mood-motion-debug"]) {
+            idx = i;
+            break;
+        }
+    }
+    if (idx == NSNotFound) return;
+    NSIndexPath *path = [NSIndexPath indexPathForRow:(NSInteger)idx inSection:0];
+    if (![self.tableView.indexPathsForVisibleRows containsObject:path]) return;
+    [UIView performWithoutAnimation:^{
+        [self.tableView reloadRowsAtIndexPaths:@[path] withRowAnimation:UITableViewRowAnimationNone];
+    }];
+}
+
+- (void)updateMoodWallpaperDebugX:(double)x y:(double)y
+{
+    NSTimeInterval now = CFAbsoluteTimeGetCurrent();
+    self.moodDebugX = x;
+    self.moodDebugY = y;
+    if (self.moodDebugSampleCount == 0) {
+        self.moodDebugMinX = x;
+        self.moodDebugMaxX = x;
+        self.moodDebugMinY = y;
+        self.moodDebugMaxY = y;
+        self.moodDebugStartTime = now;
+    } else {
+        if (x < self.moodDebugMinX) self.moodDebugMinX = x;
+        if (x > self.moodDebugMaxX) self.moodDebugMaxX = x;
+        if (y < self.moodDebugMinY) self.moodDebugMinY = y;
+        if (y > self.moodDebugMaxY) self.moodDebugMaxY = y;
+    }
+    self.moodDebugSampleCount++;
+    if (now - self.moodDebugLastReloadTime < 0.10) return;
+    self.moodDebugLastReloadTime = now;
+    [self reloadMoodWallpaperDebugRow];
+}
+
+- (void)startMoodWallpaperDebugMotion
+{
+    if (![self isMoodWallpaperDetail] || self.moodDebugMotionManager) return;
+    CMMotionManager *mm = [[CMMotionManager alloc] init];
+    self.moodDebugMotionManager = mm;
+    self.moodDebugSampleCount = 0;
+    self.moodDebugStartTime = CFAbsoluteTimeGetCurrent();
+    self.moodDebugLastReloadTime = 0.0;
+
+    NSOperationQueue *q = [[NSOperationQueue alloc] init];
+    q.maxConcurrentOperationCount = 1;
+    __weak typeof(self) weakSelf = self;
+    if (mm.deviceMotionAvailable) {
+        mm.deviceMotionUpdateInterval = 1.0 / 30.0;
+        [mm startDeviceMotionUpdatesToQueue:q withHandler:^(CMDeviceMotion *motion, NSError *err) {
+            if (!motion || err) return;
+            double x = motion.gravity.x;
+            double y = motion.gravity.y;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [weakSelf updateMoodWallpaperDebugX:x y:y];
+            });
+        }];
+    } else if (mm.accelerometerAvailable) {
+        mm.accelerometerUpdateInterval = 1.0 / 30.0;
+        [mm startAccelerometerUpdatesToQueue:q withHandler:^(CMAccelerometerData *data, NSError *err) {
+            if (!data || err) return;
+            double x = data.acceleration.x;
+            double y = data.acceleration.y;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [weakSelf updateMoodWallpaperDebugX:x y:y];
+            });
+        }];
+    }
+}
+
+- (void)stopMoodWallpaperDebugMotion
+{
+    CMMotionManager *mm = self.moodDebugMotionManager;
+    if (!mm) return;
+    [mm stopDeviceMotionUpdates];
+    [mm stopAccelerometerUpdates];
+    self.moodDebugMotionManager = nil;
 }
 
 - (void)viewWillAppear:(BOOL)animated
@@ -8504,10 +9208,17 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 - (void)viewDidAppear:(BOOL)animated
 {
     [super viewDidAppear:animated];
+    if ([self isMoodWallpaperDetail]) [self startMoodWallpaperDebugMotion];
     [self presentPowercuffNominalNoticeIfNeeded];
     if (!self.pendingManualActionsReload) return;
     self.pendingManualActionsReload = NO;
     [self reloadManualActions];
+}
+
+- (void)viewWillDisappear:(BOOL)animated
+{
+    [super viewWillDisappear:animated];
+    [self stopMoodWallpaperDebugMotion];
 }
 
 - (void)presentPowercuffNominalNoticeIfNeeded
@@ -9197,6 +9908,78 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     return rows;
 }
 
+- (NSArray<NSDictionary *> *)metalLockLightRows
+{
+    return @[
+        @{ @"kind": @"slider",
+           @"key": kSettingsMetalLockLightColorPct,
+           @"title": @"Color",
+           @"min": @0,
+           @"max": @150,
+           @"step": @1,
+           @"unit": @"%",
+           @"default": @30 },
+        @{ @"kind": @"slider",
+           @"key": kSettingsMetalLockLightReflectPct,
+           @"title": @"Reflect",
+           @"min": @0,
+           @"max": @150,
+           @"step": @1,
+           @"unit": @"%",
+           @"default": @30 },
+        @{ @"kind": @"segmented",
+           @"key": kSettingsMetalLockLightMode,
+           @"titles": @[ @"Spot", @"Linear", @"Ink", @"Ink Spot" ],
+           @"values": @[ @0, @1, @2, @3 ] },
+    ];
+}
+
+- (NSArray<NSDictionary *> *)moodWallpaperRows
+{
+    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    NSArray<NSString *> *paths = settings_mood_wallpaper_image_paths(d);
+    NSInteger mainIndex = settings_mood_wallpaper_main_index(d, paths.count);
+    NSMutableArray<NSDictionary *> *rows = [NSMutableArray arrayWithArray:@[
+        @{ @"kind": @"info",
+           @"title": @"Selected Images",
+           @"subtitle": [NSString stringWithFormat:settings_l10n_text(@"%lu selected. Set one image as the main wallpaper. Level uses the main image; left/right tilt uses images on each side."),
+                         (unsigned long)paths.count] },
+        @{ @"kind": @"mood-motion-debug",
+           @"title": @"Motion Debug" },
+        @{ @"key": kSettingsMoodWallpaperLogOnly,
+           @"title": @"Log Only Mode",
+           @"subtitle": @"Only log gravity target changes. The main wallpaper stays visible and SpringBoard images are not switched." },
+    ]];
+    if (paths.count < 8) {
+        [rows addObject:@{ @"kind": @"button",
+                           @"title": @"Add Image…",
+                           @"action": @"mood-wallpaper-add" }];
+    }
+    for (NSUInteger i = 0; i < paths.count; i++) {
+        NSString *rel = paths[i];
+        BOOL isMain = ((NSInteger)i == mainIndex);
+        NSString *title = [NSString stringWithFormat:settings_l10n_text(@"Image %lu"), (unsigned long)(i + 1)];
+        if (isMain) title = [title stringByAppendingFormat:@" · %@", settings_l10n_text(@"Main")];
+        [rows addObject:@{ @"kind": @"mood-wallpaper-image",
+                           @"title": title,
+                           @"subtitle": settings_mood_wallpaper_image_detail_for_path(rel),
+                           @"path": rel,
+                           @"index": @(i),
+                           @"action": @"mood-wallpaper-edit-image" }];
+    }
+    [rows addObject:
+        @{ @"kind": @"info",
+           @"title": @"Compatibility",
+           @"subtitle": @"LiveWP, Metal Lock Light, and Mood Wallpaper all own SpringBoard wallpaper layers. Only one can be installed at a time." }];
+    if (paths.count > 0) {
+        [rows addObject:@{ @"kind": @"button",
+                           @"title": @"Clear Selected Images",
+                           @"action": @"mood-wallpaper-clear",
+                           @"destructive": @YES }];
+    }
+    return rows;
+}
+
 - (NSArray<NSDictionary *> *)appSwitcherGridRows
 {
     BOOL applied = settings_tweak_is_applied(kSettingsAppSwitcherGridEnabled);
@@ -9316,6 +10099,10 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         [out addObject:@{@"title": @"Theme", @"value": settings_snowboardlite_selected_theme_display_name()}];
     } else if (section == SectionLiveWP) {
         [out addObject:@{@"title": @"Video", @"value": settings_livewp_video_detail()}];
+    } else if (section == SectionMoodWallpaper) {
+        NSArray<NSString *> *paths = settings_mood_wallpaper_image_paths(d);
+        [out addObject:@{@"title": @"Selected Images",
+                         @"value": [NSString stringWithFormat:@"%lu", (unsigned long)paths.count]}];
     } else if (section == SectionLocationSim) {
         [out addObject:@{@"title": @"Target", @"value": settings_location_sim_target_summary(d)}];
     } else if (section == SectionIPADecryptor) {
@@ -9367,6 +10154,8 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         case SectionMWLite: return self.mwLiteRows;
         case SectionSnowBoardLite: return self.snowboardLiteRows;
         case SectionLiveWP: return self.liveWPRows;
+        case SectionMetalLockLight: return self.metalLockLightRows;
+        case SectionMoodWallpaper: return self.moodWallpaperRows;
         case SectionQuickLoader: return self.quickLoaderRows;
         case SectionRepoTweaks: return self.repoTweaksRows;
         default: return @[];
@@ -9403,6 +10192,8 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         @{ @"title": @"Location Simulator", @"icon": @"location.fill",                       @"color": [UIColor systemGreenColor],  @"section": @(SectionLocationSim) },
         @{ @"title": @"SnowBoard Lite",     @"icon": @"square.stack.3d.up.fill",             @"color": [UIColor systemCyanColor],   @"section": @(SectionSnowBoardLite) },
         @{ @"title": @"LiveWP",             @"icon": @"play.rectangle.fill",                 @"color": [UIColor systemPurpleColor], @"section": @(SectionLiveWP) },
+        @{ @"title": @"Metal Lock Light",    @"icon": @"sparkles",                            @"color": [UIColor systemYellowColor], @"section": @(SectionMetalLockLight) },
+        @{ @"title": @"Mood Wallpaper",      @"icon": @"photo.on.rectangle.angled",            @"color": [UIColor systemPinkColor],   @"section": @(SectionMoodWallpaper) },
         @{ @"title": @"QuickLoader",        @"icon": @"bolt.fill",                           @"color": [UIColor systemYellowColor], @"section": @(SectionQuickLoader) },
         @{ @"title": @"RepoTweaks",         @"icon": @"tray.and.arrow.down.fill",            @"color": [UIColor systemBlueColor],   @"section": @(SectionRepoTweaks) },
         @{ @"title": @"Powercuff",          @"icon": @"bolt.slash.fill",                     @"color": [UIColor systemOrangeColor], @"section": @(SectionPowercuff) },
@@ -9603,6 +10394,9 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     }
     if (s == SectionLiveWP) {
         return settings_l10n_text(@"Video wallpaper ported from d1y/cyanide-ios. Select an MP4, MOV, or M4V; Cyanide copies it into Documents/LiveWP and plays it in SpringBoard while the RemoteCall session stays alive.");
+    }
+    if (s == SectionMoodWallpaper) {
+        return settings_l10n_text(@"Mood Wallpaper switches between 2 to 8 selected images based on left/right device tilt. It owns the same SpringBoard wallpaper layer space as LiveWP and Metal Lock Light, so only one wallpaper effect can be active at a time.");
     }
     return nil;
 }
@@ -10060,6 +10854,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 
     PHPickerViewController *picker = [[PHPickerViewController alloc] initWithConfiguration:config];
     picker.delegate = self;
+    self.pendingThemeImportMode = @"livewp-photos";
     [self presentViewController:picker animated:YES completion:nil];
 }
 
@@ -10084,6 +10879,147 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     picker.allowsMultipleSelection = NO;
     self.pendingThemeImportMode = @"livewp";
     [self presentViewController:picker animated:YES completion:nil];
+}
+
+- (void)presentMoodWallpaperImagePicker
+{
+    NSArray<NSString *> *paths = settings_mood_wallpaper_image_paths(NSUserDefaults.standardUserDefaults);
+    if (paths.count >= 8) {
+        UIAlertController *ac = [UIAlertController alertControllerWithTitle:settings_l10n_text(@"Image List Full")
+                                                                     message:settings_l10n_text(@"Mood Wallpaper supports up to 8 images.")
+                                                              preferredStyle:UIAlertControllerStyleAlert];
+        [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"OK") style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:ac animated:YES completion:nil];
+        return;
+    }
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:settings_l10n_text(@"Choose Image")
+                                                                   message:nil
+                                                            preferredStyle:UIAlertControllerStyleActionSheet];
+    [sheet addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Photos")
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(UIAlertAction *a) {
+        (void)a;
+        [self presentMoodWallpaperPhotosPicker];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Files")
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(UIAlertAction *a) {
+        (void)a;
+        [self presentMoodWallpaperDocumentPicker];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel")
+                                              style:UIAlertActionStyleCancel
+                                            handler:nil]];
+    UIPopoverPresentationController *pop = sheet.popoverPresentationController;
+    if (pop) {
+        pop.sourceView = self.view;
+        pop.sourceRect = CGRectMake(CGRectGetMidX(self.view.bounds), CGRectGetMidY(self.view.bounds), 1, 1);
+        pop.permittedArrowDirections = 0;
+    }
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+
+- (void)presentMoodWallpaperPhotosPicker
+{
+    NSArray<NSString *> *paths = settings_mood_wallpaper_image_paths(NSUserDefaults.standardUserDefaults);
+    NSInteger remaining = MAX(8 - (NSInteger)paths.count, 1);
+    PHPickerConfiguration *config = [[PHPickerConfiguration alloc] init];
+    config.filter = [PHPickerFilter imagesFilter];
+    config.selectionLimit = remaining;
+    config.preferredAssetRepresentationMode = PHPickerConfigurationAssetRepresentationModeCurrent;
+
+    PHPickerViewController *picker = [[PHPickerViewController alloc] initWithConfiguration:config];
+    picker.delegate = self;
+    self.pendingThemeImportMode = @"mood-wallpaper-photos";
+    [self presentViewController:picker animated:YES completion:nil];
+}
+
+- (void)presentMoodWallpaperDocumentPicker
+{
+    UIDocumentPickerViewController *picker =
+        [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[ UTTypeImage ] asCopy:YES];
+    picker.delegate = self;
+    picker.allowsMultipleSelection = NO;
+    self.pendingThemeImportMode = @"mood-wallpaper-add";
+    [self presentViewController:picker animated:YES completion:nil];
+}
+
+- (BOOL)importMoodWallpaperImageAtURL:(NSURL *)url error:(NSError **)error
+{
+    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    NSMutableArray<NSString *> *paths = settings_mood_wallpaper_image_paths_mutable(d);
+    if (paths.count >= 8) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"MoodWallpaper"
+                                         code:2
+                                     userInfo:@{NSLocalizedDescriptionKey: settings_l10n_text(@"Mood Wallpaper supports up to 8 images.")}];
+        }
+        return NO;
+    }
+
+    NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+    if (docs.length == 0) return NO;
+    NSString *wallpaperDir = [docs stringByAppendingPathComponent:@"MoodWallpaper"];
+    NSFileManager *fm = NSFileManager.defaultManager;
+    if (![fm createDirectoryAtPath:wallpaperDir withIntermediateDirectories:YES attributes:nil error:error]) {
+        return NO;
+    }
+
+    NSString *ext = url.pathExtension.length ? url.pathExtension.lowercaseString : @"png";
+    NSSet<NSString *> *allowed = [NSSet setWithArray:@[@"png", @"jpg", @"jpeg", @"heic", @"heif"]];
+    if (![allowed containsObject:ext]) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"MoodWallpaper"
+                                         code:1
+                                    userInfo:@{NSLocalizedDescriptionKey: settings_l10n_text(@"Choose a PNG, JPEG, or HEIC image.")}];
+        }
+        return NO;
+    }
+
+    NSString *base = url.URLByDeletingPathExtension.lastPathComponent;
+    if (base.length == 0) base = @"MoodWallpaper";
+    NSCharacterSet *bad = [[NSCharacterSet alphanumericCharacterSet] invertedSet];
+    NSString *safeBase = [[base componentsSeparatedByCharactersInSet:bad] componentsJoinedByString:@"-"];
+    if (safeBase.length == 0) safeBase = @"MoodWallpaper";
+    NSString *fileName = [NSString stringWithFormat:@"%@-%llu.%@",
+                          safeBase,
+                          (unsigned long long)(NSDate.date.timeIntervalSince1970 * 1000.0),
+                          ext];
+    NSString *dest = [wallpaperDir stringByAppendingPathComponent:fileName];
+    if (![fm copyItemAtURL:url toURL:[NSURL fileURLWithPath:dest] error:error]) {
+        return NO;
+    }
+
+    NSString *relative = [@"MoodWallpaper" stringByAppendingPathComponent:fileName];
+    [paths addObject:relative];
+    [d setObject:paths forKey:kSettingsMoodWallpaperImagePaths];
+    [d synchronize];
+    log_user("[MOOD-WP] Added image %lu: %s\n", (unsigned long)paths.count, fileName.UTF8String);
+    return YES;
+}
+
+- (void)finishMoodWallpaperImportAndReloadIfRunning
+{
+    [self reloadSectionOrAll:SectionMoodWallpaper];
+    settings_mark_tweak_needs_apply(kSettingsMoodWallpaperEnabled);
+    settings_notify_package_queue_changed_async();
+
+    BOOL applied = settings_tweak_is_applied(kSettingsMoodWallpaperEnabled);
+    if (!applied || !g_springboard_rc_ready || !settings_mood_wallpaper_has_selected_images()) return;
+
+    dispatch_async(dispatch_get_global_queue(0, 0), ^{
+        bool ok = false;
+        @synchronized (settings_rc_lock()) {
+            if (settings_cleanup_in_progress() || !g_springboard_rc_ready) return;
+            ok = mood_wallpaper_apply_in_session();
+            settings_mark_tweak_applied(kSettingsMoodWallpaperEnabled, ok);
+        }
+        log_user("%s Mood Wallpaper reload %s.\n",
+                 ok ? "[OK]" : "[WARN]",
+                 ok ? "completed" : "did not complete");
+        if (ok) settings_start_mood_wallpaper_motion();
+        settings_notify_package_queue_changed_async();
+    });
 }
 
 - (BOOL)importLiveWPVideoAtURL:(NSURL *)url error:(NSError **)error
@@ -10178,6 +11114,20 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     return nil;
 }
 
+- (NSString *)moodWallpaperPreferredImageTypeIdentifierForProvider:(NSItemProvider *)provider
+{
+    NSMutableArray<NSString *> *identifiers = [NSMutableArray arrayWithArray:@[
+        @"public.png",
+        @"public.jpeg",
+        @"public.heic",
+        @"public.heif",
+    ]];
+    for (NSString *identifier in identifiers) {
+        if ([provider hasItemConformingToTypeIdentifier:identifier]) return identifier;
+    }
+    return nil;
+}
+
 - (void)finishLiveWPVideoImportFromURL:(NSURL *)url
                            displayName:(NSString *)displayName
 {
@@ -10208,13 +11158,93 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     });
 }
 
+- (void)finishMoodWallpaperImageImportFromURL:(NSURL *)url
+                                  displayName:(NSString *)displayName
+{
+    NSError *err = nil;
+    BOOL ok = [self importMoodWallpaperImageAtURL:url error:&err];
+    NSString *name = displayName.length ? displayName : (url.lastPathComponent ?: @"Image");
+    NSString *successMessage = settings_mood_wallpaper_has_selected_images()
+        ? [NSString stringWithFormat:settings_l10n_text(@"%@ was added to Mood Wallpaper. Toggle Mood Wallpaper on and tap Run to apply."), name]
+        : [NSString stringWithFormat:settings_l10n_text(@"%@ was added. Add at least 2 images before applying."), name];
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!ok) {
+            NSString *msg = err.localizedDescription ?: @"The selected image could not be imported.";
+            UIAlertController *ac = [UIAlertController alertControllerWithTitle:settings_l10n_text(@"Import Failed")
+                                                                         message:msg
+                                                                  preferredStyle:UIAlertControllerStyleAlert];
+            [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"OK") style:UIAlertActionStyleDefault handler:nil]];
+            [self presentViewController:ac animated:YES completion:nil];
+            return;
+        }
+        [self finishMoodWallpaperImportAndReloadIfRunning];
+        UIAlertController *ac = [UIAlertController alertControllerWithTitle:settings_l10n_text(@"Image Selected")
+                                                                     message:successMessage
+                                                              preferredStyle:UIAlertControllerStyleAlert];
+        [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"OK") style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:ac animated:YES completion:nil];
+    });
+}
+
+- (void)finishMoodWallpaperPhotosImportWithSuccessCount:(NSInteger)successCount
+                                             firstError:(NSString *)firstError
+{
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (successCount > 0) {
+            [self finishMoodWallpaperImportAndReloadIfRunning];
+        }
+        NSString *title = successCount > 0 ? settings_l10n_text(@"Images Selected") : settings_l10n_text(@"Import Failed");
+        NSString *message = successCount > 0
+            ? [NSString stringWithFormat:settings_l10n_text(@"%ld image(s) were added to Mood Wallpaper."), (long)successCount]
+            : (firstError ?: settings_l10n_text(@"The selected image could not be imported."));
+        UIAlertController *ac = [UIAlertController alertControllerWithTitle:title
+                                                                     message:message
+                                                              preferredStyle:UIAlertControllerStyleAlert];
+        [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"OK") style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:ac animated:YES completion:nil];
+    });
+}
+
 - (void)picker:(PHPickerViewController *)picker
 didFinishPicking:(NSArray<PHPickerResult *> *)results
 {
     [picker dismissViewControllerAnimated:YES completion:nil];
-    PHPickerResult *result = results.firstObject;
-    if (!result) return;
 
+    NSString *mode = self.pendingThemeImportMode ?: @"livewp-photos";
+    self.pendingThemeImportMode = nil;
+    if (results.count == 0) return;
+
+    if ([mode isEqualToString:@"mood-wallpaper-photos"]) {
+        dispatch_group_t group = dispatch_group_create();
+        NSObject *lock = [NSObject new];
+        __block NSInteger successCount = 0;
+        __block NSString *firstError = nil;
+        for (PHPickerResult *result in results) {
+            NSItemProvider *provider = result.itemProvider;
+            NSString *identifier = [self moodWallpaperPreferredImageTypeIdentifierForProvider:provider];
+            if (identifier.length == 0) continue;
+            NSString *displayName = provider.suggestedName ?: @"Image";
+            dispatch_group_enter(group);
+            [provider loadFileRepresentationForTypeIdentifier:identifier
+                                            completionHandler:^(NSURL *url, NSError *error) {
+                NSError *err = error;
+                BOOL ok = NO;
+                if (url && !err) ok = [self importMoodWallpaperImageAtURL:url error:&err];
+                @synchronized (lock) {
+                    if (ok) successCount++;
+                    else if (!firstError) firstError = err.localizedDescription ?: settings_l10n_text(@"The selected image could not be imported.");
+                }
+                dispatch_group_leave(group);
+            }];
+        }
+        dispatch_group_notify(group, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            [self finishMoodWallpaperPhotosImportWithSuccessCount:successCount firstError:firstError];
+        });
+        return;
+    }
+
+    PHPickerResult *result = results.firstObject;
     NSItemProvider *provider = result.itemProvider;
     NSString *identifier = [self liveWPPreferredTypeIdentifierForProvider:provider];
     if (identifier.length == 0) {
@@ -10430,6 +11460,14 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
                                              url.lastPathComponent ?: @"Video"]
                 : [NSString stringWithFormat:settings_l10n_text(@"%@ is ready. Toggle LiveWP on and tap Run to apply."),
                                              url.lastPathComponent ?: @"Video"];
+        } else if ([mode isEqualToString:@"mood-wallpaper-add"]) {
+            ok = [self importMoodWallpaperImageAtURL:url error:&err];
+            successTitle = @"Image Selected";
+            successMessage = settings_mood_wallpaper_has_selected_images()
+                ? [NSString stringWithFormat:settings_l10n_text(@"%@ was added to Mood Wallpaper. Toggle Mood Wallpaper on and tap Run to apply."),
+                                             url.lastPathComponent ?: @"Image"]
+                : [NSString stringWithFormat:settings_l10n_text(@"%@ was added. Add at least 2 images before applying."),
+                                             url.lastPathComponent ?: @"Image"];
         } else if ([mode isEqualToString:@"snowboardlite"]) {
             if (isDir) {
                 ok = settings_sbl_import_folder_theme(url, &err);
@@ -10478,6 +11516,8 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
                 }
             } else if ([mode isEqualToString:@"livewp"]) {
                 [self finishLiveWPVideoImportAndSwapIfRunning];
+            } else if ([mode isEqualToString:@"mood-wallpaper-add"]) {
+                [self finishMoodWallpaperImportAndReloadIfRunning];
             } else {
                 [self reloadThemerSectionAndQueue];
             }
@@ -10922,6 +11962,108 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
     [d synchronize];
     settings_schedule_live_apply_for_key(kSettingsLiveWPEnabled);
     [self reloadSectionOrAll:SectionLiveWP];
+}
+
+- (void)clearMoodWallpaperImages
+{
+    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    [d setObject:@[] forKey:kSettingsMoodWallpaperImagePaths];
+    [d removeObjectForKey:@"MoodWallpaperReversePaths"];
+    [d setInteger:0 forKey:kSettingsMoodWallpaperMainIndex];
+    [d setObject:@"" forKey:kSettingsMoodWallpaperLeftPath];
+    [d setObject:@"" forKey:kSettingsMoodWallpaperRightPath];
+    if ([d boolForKey:kSettingsMoodWallpaperEnabled]) {
+        [d setBool:NO forKey:kSettingsMoodWallpaperEnabled];
+    }
+    [d synchronize];
+    settings_stop_mood_wallpaper_motion();
+    settings_schedule_live_apply_for_key(kSettingsMoodWallpaperEnabled);
+    [self reloadSectionOrAll:SectionMoodWallpaper];
+}
+
+- (void)saveMoodWallpaperImagePaths:(NSArray<NSString *> *)paths
+{
+    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    [d setObject:paths ?: @[] forKey:kSettingsMoodWallpaperImagePaths];
+    NSInteger mainIndex = settings_mood_wallpaper_main_index(d, paths.count);
+    [d setInteger:mainIndex forKey:kSettingsMoodWallpaperMainIndex];
+    [d synchronize];
+    [self finishMoodWallpaperImportAndReloadIfRunning];
+}
+
+- (void)moveMoodWallpaperImageAtIndex:(NSUInteger)index delta:(NSInteger)delta
+{
+    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    NSMutableArray<NSString *> *paths = settings_mood_wallpaper_image_paths_mutable(NSUserDefaults.standardUserDefaults);
+    NSInteger newIndex = (NSInteger)index + delta;
+    if (index >= paths.count || newIndex < 0 || newIndex >= (NSInteger)paths.count) return;
+    NSInteger mainIndex = settings_mood_wallpaper_main_index(d, paths.count);
+    NSString *item = paths[index];
+    [paths removeObjectAtIndex:index];
+    [paths insertObject:item atIndex:(NSUInteger)newIndex];
+    if (mainIndex == (NSInteger)index) mainIndex = newIndex;
+    else if (delta < 0 && mainIndex == newIndex) mainIndex++;
+    else if (delta > 0 && mainIndex == newIndex) mainIndex--;
+    [d setInteger:mainIndex forKey:kSettingsMoodWallpaperMainIndex];
+    [self saveMoodWallpaperImagePaths:paths];
+}
+
+- (void)deleteMoodWallpaperImageAtIndex:(NSUInteger)index
+{
+    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    NSMutableArray<NSString *> *paths = settings_mood_wallpaper_image_paths_mutable(d);
+    if (index >= paths.count) return;
+    [paths removeObjectAtIndex:index];
+    NSInteger mainIndex = settings_mood_wallpaper_main_index(d, paths.count + 1);
+    if ((NSInteger)index < mainIndex) mainIndex--;
+    else if ((NSInteger)index == mainIndex && mainIndex >= (NSInteger)paths.count) mainIndex = MAX((NSInteger)paths.count - 1, 0);
+    [d setInteger:mainIndex forKey:kSettingsMoodWallpaperMainIndex];
+    [self saveMoodWallpaperImagePaths:paths];
+}
+
+- (void)setMoodWallpaperMainImageAtIndex:(NSUInteger)index
+{
+    NSArray<NSString *> *paths = settings_mood_wallpaper_image_paths(NSUserDefaults.standardUserDefaults);
+    if (index >= paths.count) return;
+    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    [d setInteger:(NSInteger)index forKey:kSettingsMoodWallpaperMainIndex];
+    [d synchronize];
+    [self finishMoodWallpaperImportAndReloadIfRunning];
+}
+
+- (void)presentMoodWallpaperImageActionsAtIndex:(NSUInteger)index
+{
+    NSArray<NSString *> *paths = settings_mood_wallpaper_image_paths(NSUserDefaults.standardUserDefaults);
+    if (index >= paths.count) return;
+    UIAlertController *ac = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:settings_l10n_text(@"Image %lu"), (unsigned long)(index + 1)]
+                                                                 message:settings_mood_wallpaper_image_detail_for_path(paths[index])
+                                                          preferredStyle:UIAlertControllerStyleActionSheet];
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Set as Main Wallpaper")
+                                           style:UIAlertActionStyleDefault
+                                         handler:^(__unused UIAlertAction *action) {
+        [self setMoodWallpaperMainImageAtIndex:index];
+    }]];
+    if (index > 0) {
+        [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Move Up")
+                                               style:UIAlertActionStyleDefault
+                                             handler:^(__unused UIAlertAction *action) {
+            [self moveMoodWallpaperImageAtIndex:index delta:-1];
+        }]];
+    }
+    if (index + 1 < paths.count) {
+        [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Move Down")
+                                               style:UIAlertActionStyleDefault
+                                             handler:^(__unused UIAlertAction *action) {
+            [self moveMoodWallpaperImageAtIndex:index delta:1];
+        }]];
+    }
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Delete Image")
+                                           style:UIAlertActionStyleDestructive
+                                         handler:^(__unused UIAlertAction *action) {
+        [self deleteMoodWallpaperImageAtIndex:index];
+    }]];
+    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:ac animated:YES completion:nil];
 }
 
 // "Classic" alternate icon is registered in Info.plist with CFBundleIconFiles
@@ -11472,6 +12614,115 @@ void cyanide_present_contact(UIViewController *host)
         return cell;
     }
 
+    if ([kind isEqualToString:@"mood-wallpaper-image"]) {
+        UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"mood-wallpaper-image"];
+        if (!cell) {
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"mood-wallpaper-image"];
+        }
+        cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+        cell.userInteractionEnabled = YES;
+        cell.accessoryView = nil;
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+
+        UIListContentConfiguration *config = [UIListContentConfiguration subtitleCellConfiguration];
+        UIImage *preview = settings_mood_wallpaper_preview_image(row[@"path"]);
+        config.image = preview ?: [SettingsViewController iconBadgeWithSymbol:@"photo" color:UIColor.systemPinkColor size:52.0];
+        config.imageProperties.reservedLayoutSize = CGSizeMake(52.0, 52.0);
+        config.imageProperties.maximumSize = CGSizeMake(52.0, 52.0);
+        config.imageToTextPadding = 14.0;
+        config.text = settings_l10n_text(row[@"title"]);
+        config.textProperties.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightSemibold];
+        config.secondaryText = settings_l10n_text(row[@"subtitle"]);
+        config.secondaryTextProperties.color = UIColor.secondaryLabelColor;
+        config.secondaryTextProperties.font = [UIFont systemFontOfSize:12.0];
+        config.secondaryTextProperties.numberOfLines = 2;
+        cell.contentConfiguration = config;
+        return cell;
+    }
+
+    if ([kind isEqualToString:@"mood-motion-debug"]) {
+        UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"mood-motion-debug"];
+        if (!cell) {
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"mood-motion-debug"];
+        }
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        cell.accessoryView = nil;
+        cell.accessoryType = UITableViewCellAccessoryNone;
+        cell.contentConfiguration = nil;
+        for (UIView *v in [cell.contentView.subviews copy]) [v removeFromSuperview];
+
+        NSTimeInterval elapsed = CFAbsoluteTimeGetCurrent() - self.moodDebugStartTime;
+        double hz = (elapsed > 0.05) ? ((double)self.moodDebugSampleCount / elapsed) : 0.0;
+        NSString *current = [NSString stringWithFormat:@"X %.3f    Y %.3f    %.1f Hz    #%lu",
+                             self.moodDebugX,
+                             self.moodDebugY,
+                             hz,
+                             (unsigned long)self.moodDebugSampleCount];
+        NSArray<NSString *> *labels = @[
+            [NSString stringWithFormat:@"Max X  %.3f", self.moodDebugMaxX],
+            [NSString stringWithFormat:@"Min X  %.3f", self.moodDebugMinX],
+            [NSString stringWithFormat:@"Max Y  %.3f", self.moodDebugMaxY],
+            [NSString stringWithFormat:@"Min Y  %.3f", self.moodDebugMinY],
+        ];
+
+        UILabel *title = [[UILabel alloc] init];
+        title.translatesAutoresizingMaskIntoConstraints = NO;
+        title.text = settings_l10n_text(row[@"title"]);
+        title.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightSemibold];
+        title.textColor = UIColor.labelColor;
+
+        UILabel *value = [[UILabel alloc] init];
+        value.translatesAutoresizingMaskIntoConstraints = NO;
+        value.text = current;
+        value.font = [UIFont monospacedDigitSystemFontOfSize:13.0 weight:UIFontWeightRegular];
+        value.textColor = UIColor.secondaryLabelColor;
+        value.numberOfLines = 1;
+        value.adjustsFontSizeToFitWidth = YES;
+        value.minimumScaleFactor = 0.70;
+
+        UIStackView *grid = [[UIStackView alloc] init];
+        grid.translatesAutoresizingMaskIntoConstraints = NO;
+        grid.axis = UILayoutConstraintAxisVertical;
+        grid.spacing = 6.0;
+
+        for (NSInteger rowIndex = 0; rowIndex < 2; rowIndex++) {
+            UIStackView *line = [[UIStackView alloc] init];
+            line.axis = UILayoutConstraintAxisHorizontal;
+            line.distribution = UIStackViewDistributionFillEqually;
+            line.spacing = 8.0;
+            for (NSInteger col = 0; col < 2; col++) {
+                NSInteger labelIndex = rowIndex * 2 + col;
+                UILabel *metric = [[UILabel alloc] init];
+                metric.text = labels[labelIndex];
+                metric.font = [UIFont monospacedDigitSystemFontOfSize:13.0 weight:UIFontWeightMedium];
+                metric.textColor = UIColor.labelColor;
+                metric.adjustsFontSizeToFitWidth = YES;
+                metric.minimumScaleFactor = 0.70;
+                [line addArrangedSubview:metric];
+            }
+            [grid addArrangedSubview:line];
+        }
+
+        [cell.contentView addSubview:title];
+        [cell.contentView addSubview:value];
+        [cell.contentView addSubview:grid];
+
+        UILayoutGuide *m = cell.contentView.layoutMarginsGuide;
+        [NSLayoutConstraint activateConstraints:@[
+            [title.leadingAnchor constraintEqualToAnchor:m.leadingAnchor],
+            [title.trailingAnchor constraintEqualToAnchor:m.trailingAnchor],
+            [title.topAnchor constraintEqualToAnchor:m.topAnchor],
+            [value.leadingAnchor constraintEqualToAnchor:m.leadingAnchor],
+            [value.trailingAnchor constraintEqualToAnchor:m.trailingAnchor],
+            [value.topAnchor constraintEqualToAnchor:title.bottomAnchor constant:4.0],
+            [grid.leadingAnchor constraintEqualToAnchor:m.leadingAnchor],
+            [grid.trailingAnchor constraintEqualToAnchor:m.trailingAnchor],
+            [grid.topAnchor constraintEqualToAnchor:value.bottomAnchor constant:8.0],
+            [grid.bottomAnchor constraintEqualToAnchor:m.bottomAnchor],
+        ]];
+        return cell;
+    }
+
     if ([kind isEqualToString:@"button"]) {
         BOOL rowSupported = supported ||
                             indexPath.section == SectionOTA ||
@@ -11673,14 +12924,37 @@ void cyanide_present_contact(UIViewController *host)
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
         cell.textLabel.text = nil;
         for (UIView *v in [cell.contentView.subviews copy]) [v removeFromSuperview];
-        UISegmentedControl *seg = [[UISegmentedControl alloc] initWithItems:powercuff_level_titles()];
+
+        NSArray *values = [row[@"values"] isKindOfClass:NSArray.class] ? row[@"values"] : powercuff_levels();
+        NSArray *rawTitles = [row[@"titles"] isKindOfClass:NSArray.class] ? row[@"titles"] : powercuff_level_titles();
+        NSMutableArray<NSString *> *titles = [NSMutableArray arrayWithCapacity:rawTitles.count];
+        for (id item in rawTitles) {
+            NSString *title = [item isKindOfClass:NSString.class] ? item : [item description];
+            [titles addObject:settings_l10n_text(title ?: @"")];
+        }
+
+        UISegmentedControl *seg = [[UISegmentedControl alloc] initWithItems:titles];
         seg.translatesAutoresizingMaskIntoConstraints = NO;
-        NSString *cur = [d stringForKey:row[@"key"]] ?: @"nominal";
-        NSUInteger idx = [powercuff_levels() indexOfObject:cur];
-        if (idx == NSNotFound) idx = [powercuff_levels() indexOfObject:@"nominal"];
+        NSString *key = row[@"key"];
+        NSUInteger idx = NSNotFound;
+        if (values.count > 0 && [values.firstObject isKindOfClass:NSString.class]) {
+            NSString *cur = [d stringForKey:key] ?: @"nominal";
+            idx = [values indexOfObject:cur];
+            if (idx == NSNotFound) idx = [values indexOfObject:@"nominal"];
+        } else {
+            NSInteger cur = [d integerForKey:key];
+            for (NSUInteger i = 0; i < values.count; i++) {
+                if ([values[i] integerValue] == cur) {
+                    idx = i;
+                    break;
+                }
+            }
+        }
+        if (idx == NSNotFound) idx = 0;
         seg.selectedSegmentIndex = (NSInteger)idx;
         seg.enabled = supported;
-        [seg addTarget:self action:@selector(powercuffSegChanged:) forControlEvents:UIControlEventValueChanged];
+        seg.tag = (indexPath.section << 16) | indexPath.row;
+        [seg addTarget:self action:@selector(segmentedChanged:) forControlEvents:UIControlEventValueChanged];
         [cell.contentView addSubview:seg];
         [NSLayoutConstraint activateConstraints:@[
             [seg.leadingAnchor  constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.leadingAnchor],
@@ -12001,7 +13275,9 @@ void cyanide_present_contact(UIViewController *host)
         }];
     } else {
         settings_schedule_live_apply_for_key(key);
-        [self presentApplyLogIfRunning];
+        if (!settings_key_is_metal_lock_light(key)) {
+            [self presentApplyLogIfRunning];
+        }
     }
     if (settings_key_is_location_sim(key)) {
         [self.tableView reloadData];
@@ -13037,6 +14313,37 @@ void cyanide_present_contact(UIViewController *host)
                                               forKey:kSettingsPowercuffLevel];
 }
 
+- (void)segmentedChanged:(UISegmentedControl *)sender
+{
+    if (!settings_device_supported()) {
+        printf("[SETTINGS] segmented blocked: %s\n", settings_unsupported_message().UTF8String);
+        return;
+    }
+
+    NSDictionary *row = [self rowForTag:sender.tag];
+    NSString *key = row[@"key"];
+    if (key.length == 0) return;
+
+    NSArray *values = [row[@"values"] isKindOfClass:NSArray.class] ? row[@"values"] : powercuff_levels();
+    if (sender.selectedSegmentIndex < 0 || sender.selectedSegmentIndex >= (NSInteger)values.count) return;
+
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    id value = values[(NSUInteger)sender.selectedSegmentIndex];
+    if ([value isKindOfClass:NSString.class]) {
+        [d setObject:value forKey:key];
+    } else {
+        [d setInteger:[value integerValue] forKey:key];
+    }
+
+    settings_note_package_configuration_changed(key);
+    if ([key isEqualToString:kSettingsPowercuffLevel]) return;
+
+    settings_schedule_live_apply_for_key(key);
+    if (!settings_key_is_metal_lock_light(key)) {
+        [self presentApplyLogIfRunning];
+    }
+}
+
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
@@ -13810,6 +15117,60 @@ void cyanide_present_contact(UIViewController *host)
             [self presentLiveWPVideoPicker];
         } else if ([action isEqualToString:@"livewp-clear"]) {
             [self clearLiveWPVideo];
+        }
+        return;
+    }
+
+    if (indexPath.section == SectionMetalLockLight) {
+        NSDictionary *row = [self rowsForSection:indexPath.section][indexPath.row];
+        if (![row[@"kind"] isEqualToString:@"button"]) return;
+        NSString *action = row[@"action"];
+        if ([action isEqualToString:@"metal-lock-light-wallpaper-retry"] ||
+            [action isEqualToString:@"metal-lock-light-wallpaper-probe"]) {
+            dispatch_async(dispatch_get_global_queue(0, 0), ^{
+                BOOL actionLockAcquired = NO;
+                BOOL ok = NO;
+                BOOL retry = [action isEqualToString:@"metal-lock-light-wallpaper-retry"];
+                NSString *message = retry ? @"Wallpaper source retry failed." : @"Wallpaper layer dump failed.";
+                @try {
+                    actionLockAcquired = settings_try_claim_actions_lock(retry ? "Metal Lock Light wallpaper retry" : "Metal Lock Light wallpaper probe",
+                                                                         "[METAL-LIGHT][WP] Another action is already running.");
+                    if (!actionLockAcquired) {
+                        message = @"Another action is already running.";
+                        return;
+                    }
+                    if (!g_springboard_rc_ready) {
+                        log_user("[METAL-LIGHT][WP] SpringBoard RemoteCall is not ready. Run/Apply Metal Lock Light first.\n");
+                        message = @"SpringBoard RemoteCall is not ready.";
+                        return;
+                    }
+                    @synchronized (settings_rc_lock()) {
+                        ok = retry
+                            ? metal_lock_light_retry_wallpaper_source_in_session()
+                            : metal_lock_light_probe_wallpaper_layers_in_session();
+                    }
+                    message = ok ? @"Done" : (retry ? @"Wallpaper source retry failed." : @"Wallpaper layer dump failed.");
+                } @finally {
+                    if (actionLockAcquired) settings_release_actions_lock();
+                    settings_post_actions_complete_async(ok, settings_l10n_text(message));
+                }
+            });
+        }
+        return;
+    }
+
+    if (indexPath.section == SectionMoodWallpaper) {
+        NSDictionary *row = [self rowsForSection:indexPath.section][indexPath.row];
+        if ([row[@"kind"] isEqualToString:@"mood-wallpaper-image"]) {
+            [self presentMoodWallpaperImageActionsAtIndex:[row[@"index"] unsignedIntegerValue]];
+            return;
+        }
+        if (![row[@"kind"] isEqualToString:@"button"]) return;
+        NSString *action = row[@"action"];
+        if ([action isEqualToString:@"mood-wallpaper-add"]) {
+            [self presentMoodWallpaperImagePicker];
+        } else if ([action isEqualToString:@"mood-wallpaper-clear"]) {
+            [self clearMoodWallpaperImages];
         }
         return;
     }

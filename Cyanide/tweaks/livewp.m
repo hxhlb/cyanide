@@ -328,6 +328,8 @@ bool livewp_swap_video_in_session(NSString *videoPath)
     if (r_is_objc_ptr(looperCls)) {
         g_livewp_looper = r_msg2_main(looperCls, "playerLooperWithPlayer:templateItem:",
                                        g_livewp_player, newItem, 0, 0);
+    } else {
+        g_livewp_looper = 0;
     }
     g_livewp_player_item = newItem;
 
