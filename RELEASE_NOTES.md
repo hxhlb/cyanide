@@ -14,6 +14,9 @@ Good bullets describe the behavior users will notice:
 Use one bullet per user-facing tweak or fix. Do not combine unrelated tweak
 changes into the same bullet.
 
+For bilingual notes, put the Chinese text in the bullet and the English text
+on the following indented line. Do not join the two languages with `/`.
+
 Avoid vague bullets like "Update settings", "Change project files", or
 "Misc fixes".
 
@@ -32,10 +35,14 @@ activity, omit it.
 
 ### v1.3.9 - 2026-07-11
 
-- [x] 新增 IPA Decryptor（Beta）：可对本机已安装应用解密主可执行文件并导出 IPA；加密的 framework、扩展与 dylib 仍保持加密。 / Added IPA Decryptor (Beta) for installed apps: decrypt the main executable and export an IPA; encrypted frameworks, extensions, and dylibs remain encrypted.
-- [x] 重组设置和软件包页面：IPA Decryptor 位于 Tools，QuickLoader/RepoTweaks 位于 JavaScript；软件包按 JavaScript 与其他软件包分组。 / Reorganized Settings and Packages: IPA Decryptor is under Tools, QuickLoader/RepoTweaks are under JavaScript, and packages are grouped into JavaScript and other packages.
-- [x] 改进中简/中繁本地化，包括 Tweak SDK 写作指南；移除自动日志上传，仅保留本地查看和分享日志。 / Improved Simplified Chinese and Traditional Chinese localization, including the Tweak SDK writing guide; removed automatic log uploads while retaining local log viewing and sharing.
-- [x] 将主题格式说明和仓库 tweak 设置拆分为独立页面，便于浏览和配置。 / Moved theme format guidance and repository tweak settings into dedicated pages for clearer browsing and configuration.
+- [x] 新增 IPA Decryptor（Beta）：可对本机已安装应用解密主可执行文件并导出 IPA；加密的 framework、扩展与 dylib 仍保持加密。
+  Added IPA Decryptor (Beta) for installed apps: decrypt the main executable and export an IPA; encrypted frameworks, extensions, and dylibs remain encrypted.
+- [x] 重组设置和软件包页面：IPA Decryptor 位于 Tools，QuickLoader/RepoTweaks 位于 JavaScript；软件包按 JavaScript 与其他软件包分组。
+  Reorganized Settings and Packages: IPA Decryptor is under Tools, QuickLoader/RepoTweaks are under JavaScript, and packages are grouped into JavaScript and other packages.
+- [x] 改进中简/中繁本地化，包括 Tweak SDK 写作指南；移除自动日志上传，仅保留本地查看和分享日志。
+  Improved Simplified Chinese and Traditional Chinese localization, including the Tweak SDK writing guide; removed automatic log uploads while retaining local log viewing and sharing.
+- [x] 将主题格式说明和仓库 tweak 设置拆分为独立页面，便于浏览和配置。
+  Moved theme format guidance and repository tweak settings into dedicated pages for clearer browsing and configuration.
 
 ### v1.3.8 - 2026-07-03
 

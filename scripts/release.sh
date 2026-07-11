@@ -217,6 +217,20 @@ pending_release_note_bullets() {
         | sed -nE 's/^-+[[:space:]]+\[[[:space:]]\][[:space:]]+(.+[^[:space:]])[[:space:]]*$/\1/p'
 }
 
+pending_release_notes_markdown() {
+    [ -f "$RELEASE_NOTES_FILE" ] || return 0
+    awk '
+        /^##[[:space:]]+Pending[[:space:]]*$/ { pending = 1; next }
+        pending && /^##[[:space:]]+/ { exit }
+        pending && /^-[[:space:]]+\[[[:space:]]\][[:space:]]+/ {
+            sub(/^-[[:space:]]+\[[[:space:]]\][[:space:]]+/, "- ")
+            print
+            next
+        }
+        pending && /^[[:space:]]{2,}[^[:space:]]/ { print; next }
+    ' "$RELEASE_NOTES_FILE"
+}
+
 combine_release_bullets() {
     printf '%s\n%s\n' "${1:-}" "${2:-}" \
         | sed -e '/^[[:space:]]*$/d' \
@@ -250,7 +264,10 @@ for line in lines:
     if in_pending:
         match = re.match(r"^-\s+\[\s\]\s+(.+?)\s*$", line)
         if match:
-            pending.append(match.group(1))
+            pending.append([match.group(1)])
+            continue
+        if pending and re.match(r"^\s{2,}\S", line):
+            pending[-1].append(line.strip())
             continue
     out.append(line)
 
@@ -270,7 +287,9 @@ if released_index is None:
     released_index = len(out) - 1
 
 entry = [f"### v{version} - {release_date}", ""]
-entry.extend(f"- [x] {bullet}" for bullet in pending)
+for bullet in pending:
+    entry.append(f"- [x] {bullet[0]}")
+    entry.extend(f"  {continuation}" for continuation in bullet[1:])
 entry.append("")
 
 insert_at = released_index + 1
@@ -439,6 +458,7 @@ compute_extra_bullets() {
 }
 
 MANUAL_RELEASE_BULLETS="$(pending_release_note_bullets)"
+MANUAL_RELEASE_NOTES="$(pending_release_notes_markdown)"
 AUTO_RELEASE_BULLETS=""
 if [ -z "$MANUAL_RELEASE_BULLETS" ] &&
    [ "$TREE_WAS_DIRTY" = "1" ] &&
@@ -596,7 +616,9 @@ if [ -n "${NOTES_FILE:-}" ] && [ -f "${NOTES_FILE}" ]; then
     NOTES_FROM_FILE=$(cat "${NOTES_FILE}")
 fi
 NOTES_DEFAULT="$SUBJECT"
-if [ -n "$EXTRA_BULLETS" ]; then
+if [ -n "$MANUAL_RELEASE_NOTES" ]; then
+    NOTES_DEFAULT="$MANUAL_RELEASE_NOTES"
+elif [ -n "$EXTRA_BULLETS" ]; then
     NOTES_DEFAULT="$(printf '%s' "$EXTRA_BULLETS" \
         | sed -e '/^[[:space:]]*$/d' -e 's/^/- /')"
 fi
