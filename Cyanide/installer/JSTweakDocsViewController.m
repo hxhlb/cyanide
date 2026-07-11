@@ -414,7 +414,7 @@ static NSString *jstweak_docs_l10n(NSString *text)
     NSMutableParagraphStyle *ps = [[NSMutableParagraphStyle alloc] init];
     ps.lineSpacing = 2.5;
     b.attributedText = [[NSAttributedString alloc]
-        initWithString:body attributes:@{
+        initWithString:jstweak_docs_l10n(body) attributes:@{
             NSFontAttributeName: [UIFont fontWithName:@"Menlo" size:12.5] ?: [UIFont monospacedSystemFontOfSize:12.5 weight:UIFontWeightRegular],
             NSForegroundColorAttributeName: UIColor.secondaryLabelColor,
             NSParagraphStyleAttributeName: ps,

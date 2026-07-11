@@ -20,20 +20,6 @@ static NSString *packages_l10n(NSString *text)
     return text.length ? NSLocalizedString(text, nil) : text;
 }
 
-static NSString *relative_time(NSTimeInterval timestamp)
-{
-    if (timestamp <= 0) return nil;
-    NSTimeInterval diff = [[NSDate date] timeIntervalSince1970] - timestamp;
-    if (diff < 60)          return packages_l10n(@"Just now");
-    if (diff < 3600)        return [NSString stringWithFormat:packages_l10n(@"%ldm ago"), (long)(diff / 60)];
-    if (diff < 86400)       return [NSString stringWithFormat:packages_l10n(@"%ldh ago"), (long)(diff / 3600)];
-    if (diff < 86400 * 2)   return packages_l10n(@"Yesterday");
-    if (diff < 86400 * 7)   return [NSString stringWithFormat:packages_l10n(@"%ldd ago"), (long)(diff / 86400)];
-    NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
-    fmt.dateFormat = @"MMM d";
-    return [fmt stringFromDate:[NSDate dateWithTimeIntervalSince1970:timestamp]];
-}
-
 static BOOL package_has_repo_update(Package *pkg)
 {
     if (pkg.kind != PackageInstallKindRepoTweak) return NO;
@@ -46,13 +32,20 @@ static BOOL package_has_repo_update(Package *pkg)
 }
 
 typedef NS_ENUM(NSInteger, PackagesSection) {
-    PackagesSectionNew = 0,
-    PackagesSectionAll,
+    PackagesSectionJavaScript = 0,
+    PackagesSectionOther,
     PackagesSectionCount,
 };
 
+static BOOL package_is_javascript(Package *package)
+{
+    return package.repoTweakUsesQuickLoader ||
+           [package.identifier isEqualToString:@"com.darksword.quickloader"];
+}
+
 @interface PackagesViewController () <UISearchResultsUpdating>
-@property (nonatomic, copy) NSArray<Package *> *recentPackages;
+@property (nonatomic, copy) NSArray<Package *> *javaScriptPackages;
+@property (nonatomic, copy) NSArray<Package *> *otherPackages;
 @property (nonatomic, copy) NSArray<Package *> *allPackagesSorted;
 @property (nonatomic, copy) NSArray<Package *> *searchResults;
 @property (nonatomic, copy) NSString *searchText;
@@ -124,25 +117,16 @@ typedef NS_ENUM(NSInteger, PackagesSection) {
             return [a.name caseInsensitiveCompare:b.name];
         }];
 
-    NSMutableArray<Package *> *recentPkgs = [NSMutableArray array];
-    NSMutableArray<Package *> *filtered = [NSMutableArray array];
+    NSMutableArray<Package *> *javaScriptPackages = [NSMutableArray array];
+    NSMutableArray<Package *> *otherPackages = [NSMutableArray array];
     for (Package *p in all) {
-        [filtered addObject:p];
-        if (p.kind == PackageInstallKindRepoTweak && p.repoURL.length > 0 && p.repoTweakID.length > 0) {
-            NSTimeInterval seen = repotweaks_seen_timestamp(p.repoURL, p.repoTweakID);
-            if (seen > 0) [recentPkgs addObject:p];
-        }
+        if (package_is_javascript(p)) [javaScriptPackages addObject:p];
+        else [otherPackages addObject:p];
     }
 
-    [recentPkgs sortUsingComparator:^NSComparisonResult(Package *a, Package *b) {
-        NSTimeInterval ta = repotweaks_seen_timestamp(a.repoURL, a.repoTweakID);
-        NSTimeInterval tb = repotweaks_seen_timestamp(b.repoURL, b.repoTweakID);
-        if (ta != tb) return ta > tb ? NSOrderedAscending : NSOrderedDescending;
-        return NSOrderedSame;
-    }];
-
-    self.recentPackages = recentPkgs;
-    self.allPackagesSorted = filtered;
+    self.javaScriptPackages = javaScriptPackages;
+    self.otherPackages = otherPackages;
+    self.allPackagesSorted = all;
     [self rebuildSearchResults];
 }
 
@@ -194,29 +178,30 @@ typedef NS_ENUM(NSInteger, PackagesSection) {
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
     if ([self isSearchActive]) return (NSInteger)self.searchResults.count;
-    if (section == PackagesSectionNew) return (NSInteger)self.recentPackages.count;
-    return (NSInteger)self.allPackagesSorted.count;
+    if (section == PackagesSectionJavaScript) return (NSInteger)self.javaScriptPackages.count;
+    return (NSInteger)self.otherPackages.count;
 }
 
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section
 {
     if ([self isSearchActive]) return nil;
-    if (section == PackagesSectionNew) return self.recentPackages.count > 0 ? CYSectionHeaderView(packages_l10n(@"Recently Added")) : nil;
-    return CYSectionHeaderView(packages_l10n(@"All Packages"));
+    if (section == PackagesSectionJavaScript) return self.javaScriptPackages.count > 0 ? CYSectionHeaderView(packages_l10n(@"JavaScript")) : nil;
+    return self.otherPackages.count > 0 ? CYSectionHeaderView(packages_l10n(@"Packages")) : nil;
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section
 {
     if ([self isSearchActive]) return 0.0;
-    if (section == PackagesSectionNew && self.recentPackages.count == 0) return 0.0;
+    if (section == PackagesSectionJavaScript && self.javaScriptPackages.count == 0) return 0.0;
+    if (section == PackagesSectionOther && self.otherPackages.count == 0) return 0.0;
     return 46.0;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {
     if ([self isSearchActive]) return [self packageCellForPackage:self.searchResults[indexPath.row] colorIndex:(NSUInteger)indexPath.row tableView:tableView];
-    if (indexPath.section == PackagesSectionNew) return [self packageCellForPackage:self.recentPackages[indexPath.row] colorIndex:(NSUInteger)indexPath.row tableView:tableView];
-    return [self packageCellForPackage:self.allPackagesSorted[indexPath.row] colorIndex:(NSUInteger)indexPath.row tableView:tableView];
+    if (indexPath.section == PackagesSectionJavaScript) return [self packageCellForPackage:self.javaScriptPackages[indexPath.row] colorIndex:(NSUInteger)indexPath.row tableView:tableView];
+    return [self packageCellForPackage:self.otherPackages[indexPath.row] colorIndex:(NSUInteger)indexPath.row tableView:tableView];
 }
 
 - (UITableViewCell *)packageCellForPackage:(Package *)pkg colorIndex:(NSUInteger)colorIndex tableView:(UITableView *)tableView
@@ -240,9 +225,6 @@ typedef NS_ENUM(NSInteger, PackagesSection) {
     if (disabledForInstall) config.textProperties.color = UIColor.secondaryLabelColor;
 
     BOOL hasUpdate = package_has_repo_update(pkg);
-    NSTimeInterval seen = (pkg.kind == PackageInstallKindRepoTweak && pkg.repoURL.length > 0)
-        ? repotweaks_seen_timestamp(pkg.repoURL, pkg.repoTweakID) : 0;
-    NSString *time = relative_time(seen);
     NSString *shortDescription = packages_l10n(pkg.shortDescription);
     NSString *installDisabledReason = packages_l10n(pkg.installDisabledReason);
     if (unsupported && installed && pkg.shortDescription.length > 0) {
@@ -256,14 +238,10 @@ typedef NS_ENUM(NSInteger, PackagesSection) {
         config.secondaryText = [NSString stringWithFormat:@"%@ · %@", installDisabledReason, shortDescription];
     } else if (unsupported) {
         config.secondaryText = installDisabledReason;
-    } else if (hasUpdate && time && pkg.shortDescription.length > 0) {
-        config.secondaryText = [NSString stringWithFormat:packages_l10n(@"Update available · %@ · %@"), time, shortDescription];
     } else if (hasUpdate && pkg.shortDescription.length > 0) {
         config.secondaryText = [NSString stringWithFormat:packages_l10n(@"Update available · %@"), shortDescription];
     } else if (hasUpdate) {
         config.secondaryText = packages_l10n(@"Update available");
-    } else if (time && pkg.shortDescription.length > 0) {
-        config.secondaryText = [NSString stringWithFormat:@"%@ · %@", time, shortDescription];
     } else {
         config.secondaryText = shortDescription;
     }
@@ -342,10 +320,10 @@ typedef NS_ENUM(NSInteger, PackagesSection) {
     Package *pkg;
     if ([self isSearchActive]) {
         pkg = self.searchResults[indexPath.row];
-    } else if (indexPath.section == PackagesSectionNew) {
-        pkg = self.recentPackages[indexPath.row];
+    } else if (indexPath.section == PackagesSectionJavaScript) {
+        pkg = self.javaScriptPackages[indexPath.row];
     } else {
-        pkg = self.allPackagesSorted[indexPath.row];
+        pkg = self.otherPackages[indexPath.row];
     }
     PackageDetailViewController *detail = [[PackageDetailViewController alloc] initWithPackage:pkg];
     [self.navigationController pushViewController:detail animated:YES];

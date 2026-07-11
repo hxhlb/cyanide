@@ -323,6 +323,20 @@
 "Invalid Number" = "Invalid Number";
 "iOS 6 Theme" = "iOS 6 Theme";
 "IPA Decryptor" = "IPA Decryptor";
+"Not signed in. Sign in before downloading IPAs." = "Not signed in. Sign in before downloading IPAs.";
+"Signed in" = "Signed in";
+"unknown" = "unknown";
+"%@ • storefront %@" = "%@ • storefront %@";
+"Sign In Again…" = "Sign In Again…";
+"Sign In to App Store…" = "Sign In to App Store…";
+"Not started." = "Not started.";
+"Cyanide Documents/DecryptedIPAs" = "Cyanide Documents/DecryptedIPAs";
+"Start Decrypt (Main Binary)" = "Start Decrypt (Main Binary)";
+"Requires KRW. Decrypts only the main executable via process-path-matched dump, then packs a Payload IPA. Encrypted frameworks/extensions are left encrypted until image-matched dep dump lands." = "Requires KRW. Decrypts only the main executable via process-path-matched dump, then packs a Payload IPA. Encrypted frameworks/extensions are left encrypted until image-matched dep dump lands.";
+"Main-binary IPA decryptor (beta). Select an installed user app, run the kernel chain, then Start Decrypt (Main Binary). Cyanide launches the target if needed, matches the live process by executable path (not basename), dumps FairPlay-decrypted pages for the main Mach-O only, clears cryptid, and writes Payload/*.ipa to Documents/DecryptedIPAs.\n\nEncrypted frameworks, appex, and dylibs are inventoried and left encrypted — dependency dump is disabled until image-path matching exists. Optional App Store download still yields an encrypted IPA until a main-binary dump runs. SINF/iTunesMetadata re-sign is out of scope." = "Main-binary IPA decryptor (beta). Select an installed user app, run the kernel chain, then Start Decrypt (Main Binary). Cyanide launches the target if needed, matches the live process by executable path (not basename), dumps FairPlay-decrypted pages for the main Mach-O only, clears cryptid, and writes Payload/*.ipa to Documents/DecryptedIPAs.\n\nEncrypted frameworks, appex, and dylibs are inventoried and left encrypted — dependency dump is disabled until image-path matching exists. Optional App Store download still yields an encrypted IPA until a main-binary dump runs. SINF/iTunesMetadata re-sign is out of scope.";
+"Main-binary FairPlay dump → Payload IPA" = "Main-binary FairPlay dump → Payload IPA";
+"Main-binary IPA decryptor for installed user apps. Select a target (or paste an App Store link, sign in, and fetch an encrypted IPA), probe FairPlay LC_ENCRYPTION_INFO, then Start Decrypt (Main Binary).\n\nDecrypt path: run the Cyanide kernel chain → launch/find the process whose executable path matches the selected app (not basename-only) → dump decrypted __TEXT crypt pages for the main Mach-O via DarkSword KRW → clear cryptid → pack Payload/*.app into Documents/DecryptedIPAs/*.ipa.\n\nScope: main executable only. Encrypted frameworks, app extensions, and dylibs are listed in the result and left encrypted until image-matched dependency dump is implemented. Optional App Store download still yields an encrypted IPA until dump runs. SINF/iTunesMetadata re-sign is not included.\n\nCredits: main dump flow adapted from lara decrypt.m (neonmodder123)." = "Main-binary IPA decryptor for installed user apps. Select a target (or paste an App Store link, sign in, and fetch an encrypted IPA), probe FairPlay LC_ENCRYPTION_INFO, then Start Decrypt (Main Binary).\n\nDecrypt path: run the Cyanide kernel chain → launch/find the process whose executable path matches the selected app (not basename-only) → dump decrypted __TEXT crypt pages for the main Mach-O via DarkSword KRW → clear cryptid → pack Payload/*.app into Documents/DecryptedIPAs/*.ipa.\n\nScope: main executable only. Encrypted frameworks, app extensions, and dylibs are listed in the result and left encrypted until image-matched dependency dump is implemented. Optional App Store download still yields an encrypted IPA until dump runs. SINF/iTunesMetadata re-sign is not included.\n\nCredits: main dump flow adapted from lara decrypt.m (neonmodder123).";
+"⚠️ Beta main-binary only — requires live KRW and a path-matched running target. Encrypted frameworks/extensions are NOT dumped. App Store download + SINF patching remain experimental." = "⚠️ Beta main-binary only — requires live KRW and a path-matched running target. Encrypted frameworks/extensions are NOT dumped. App Store download + SINF patching remain experimental.";
 "Keep app alive in background" = "Keep app alive in background";
 "Keeps pickup-to-unlock armed after Cyanide closes." = "Keeps pickup-to-unlock armed after Cyanide closes.";
 "kexploit_opa334 runs once per app lifetime. Keep Alive applies only while Cyanide is minimized; an App Switcher kill still terminates the process." = "kexploit_opa334 runs once per app lifetime. Keep Alive applies only while Cyanide is minimized; an App Switcher kill still terminates the process.";
@@ -764,3 +778,6 @@
 "Metal Lock Light did not start cleanly." = "Metal Lock Light did not start cleanly.";
 "Log Only Mode" = "Log Only Mode";
 "Only log gravity target changes. The main wallpaper stays visible and SpringBoard images are not switched." = "Only log gravity target changes. The main wallpaper stays visible and SpringBoard images are not switched.";
+"Tools" = "Tools";
+"JavaScript" = "JavaScript";
+"Twitter (Original Author)" = "Twitter (Original Author)";

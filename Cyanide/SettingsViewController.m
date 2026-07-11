@@ -4,6 +4,8 @@
 //
 
 #import "SettingsViewController.h"
+#import "ThemerFormatGuideViewController.h"
+#import "RepoTweaksViewControllers.h"
 #import "VPhoneDebug.h"
 #import "kexploit/kexploit_opa334.h"
 #import "tweaks/sbcustomizer.h"
@@ -145,631 +147,6 @@ static NSMutableDictionary *settings_string_values_dictionary(id raw)
     }];
     return out;
 }
-
-static void settings_clear_repo_tweak_defaults(NSString *repoURL, NSString *tweakID)
-{
-    if (![repoURL isKindOfClass:NSString.class] || repoURL.length == 0 ||
-        ![tweakID isKindOfClass:NSString.class] || tweakID.length == 0) {
-        return;
-    }
-    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
-    [d removeObjectForKey:repotweaks_enabled_defaults_key(repoURL, tweakID)];
-    [d removeObjectForKey:repotweaks_script_defaults_key(repoURL, tweakID)];
-    [d removeObjectForKey:repotweaks_values_defaults_key(repoURL, tweakID)];
-    [d synchronize];
-    repotweaks_cancel_tweak(repoURL, tweakID);
-}
-
-static NSDictionary *settings_repotweaks_caches(void)
-{
-    id raw = [[NSUserDefaults standardUserDefaults] objectForKey:@"RepoTweaksCaches"];
-    return [raw isKindOfClass:NSDictionary.class] ? (NSDictionary *)raw : @{};
-}
-
-static NSString * const kSettingsDefaultRepoURL = @"https://zeroxjf.github.io/cyanide-repotweaks.json";
-
-static NSArray<NSString *> *settings_repotweaks_urls(void)
-{
-    id raw = [[NSUserDefaults standardUserDefaults] objectForKey:@"RepoTweaksURLs"];
-    if (![raw isKindOfClass:NSArray.class]) return @[];
-    NSMutableArray<NSString *> *urls = [NSMutableArray array];
-    for (id value in (NSArray *)raw) {
-        if ([value isKindOfClass:NSString.class]) [urls addObject:value];
-    }
-    return urls;
-}
-
-static NSDictionary *settings_repotweaks_repo_for_url(NSString *repoURL)
-{
-    id repo = repoURL.length ? settings_repotweaks_caches()[repoURL] : nil;
-    return [repo isKindOfClass:NSDictionary.class] ? (NSDictionary *)repo : @{};
-}
-
-static NSArray<NSDictionary *> *settings_repotweaks_tweaks_for_url(NSString *repoURL)
-{
-    id raw = settings_repotweaks_repo_for_url(repoURL)[@"tweaks"];
-    if (![raw isKindOfClass:NSArray.class]) return @[];
-    NSMutableArray<NSDictionary *> *out = [NSMutableArray array];
-    for (id value in (NSArray *)raw) {
-        if ([value isKindOfClass:NSDictionary.class]) {
-            NSMutableDictionary *tweak = [(NSDictionary *)value mutableCopy];
-            if ([repoURL isKindOfClass:NSString.class] && repoURL.length > 0) {
-                tweak[@"_repoURL"] = repoURL;
-            }
-            [out addObject:tweak];
-        }
-    }
-    return out;
-}
-
-
-
-// =============================================================================
-// REPOTWEAKS: Details and Dynamic parameters window
-// =============================================================================
-@interface RepoTweakDetailController : UITableViewController
-@property (nonatomic, strong) NSDictionary *tweak;
-@property (nonatomic, strong) NSString *tweakID;
-@property (nonatomic, strong) NSString *repoURL;
-@property (nonatomic, strong) NSString *rawScript;
-@property (nonatomic, strong) NSArray<NSDictionary *> *params;
-@property (nonatomic, strong) NSMutableDictionary *values;
-@end
-
-@implementation RepoTweakDetailController
-
-- (instancetype)initWithTweak:(NSDictionary *)tweak {
-    self = [super initWithStyle:UITableViewStyleGrouped];
-    if (self) {
-        self.tweak = [tweak isKindOfClass:NSDictionary.class] ? tweak : @{};
-        self.tweakID = settings_string_or_empty(self.tweak[@"id"]);
-        self.repoURL = settings_string_or_empty(self.tweak[@"_repoURL"]);
-        self.title = settings_string_or_empty(self.tweak[@"name"]).length ? settings_string_or_empty(self.tweak[@"name"]) : @"RepoTweak";
-
-        NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
-        // Retrieve js code from repo
-        NSString *scriptKey = repotweaks_script_defaults_key(self.repoURL, self.tweakID);
-        self.rawScript = [d stringForKey:scriptKey] ?: @"";
-
-        // Retrieve tweaks-specific user saved settings
-        NSString *valuesKey = repotweaks_values_defaults_key(self.repoURL, self.tweakID);
-        self.values = settings_string_values_dictionary([d dictionaryForKey:valuesKey]);
-
-        // Analyze @param comments in js code
-        NSMutableArray *parsedParams = [NSMutableArray array];
-        NSArray *lines = [self.rawScript componentsSeparatedByString:@"\n"];
-        for (NSString *line in lines) {
-            if ([line containsString:@"@param:"]) {
-                NSArray *parts = [line componentsSeparatedByString:@"|"];
-                if (parts.count >= 4) {
-                    NSArray *typeParts = [parts[0] componentsSeparatedByString:@"@param:"];
-                    if (typeParts.count < 2) continue;
-                    NSString *rawType = typeParts[1];
-                    NSString *type = [rawType stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-                    NSString *varName = [parts[1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-                    NSString *label = [parts[2] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-                    NSString *defValue = [parts[3] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-                    if (!settings_js_identifier_valid(varName)) continue;
-
-                    NSMutableDictionary *paramDict = [@{@"type": type, @"varName": varName, @"label": label, @"default": defValue} mutableCopy];
-                    if (parts.count >= 5 && ([type isEqualToString:@"slider"] || [type isEqualToString:@"number"])) {
-                        NSString *rangeStr = [parts[4] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-                        NSArray *rangeParts = [rangeStr componentsSeparatedByString:@"-"];
-                        if (rangeParts.count == 2) {
-                            paramDict[@"min"] = rangeParts[0];
-                            paramDict[@"max"] = rangeParts[1];
-                        }
-                    }
-                    [parsedParams addObject:paramDict];
-                    if (!self.values[varName]) {
-                        self.values[varName] = defValue; //default values if new
-                    }
-                }
-            }
-        }
-        self.params = parsedParams;
-    }
-    return self;
-}
-
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return self.params.count > 0 ? 3 : 2;
-}
-
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if (section == 0) return 2; //description and version
-    if (section == 1) return 1; //status (active or not)
-    return self.params.count;   //JS dynamic parameters
-}
-
-- (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
-    if (section == 0) return CYSectionHeaderView(settings_l10n_text(@"Tweak Infos"));
-    if (section == 1) return CYSectionHeaderView(settings_l10n_text(@"Tweak Status"));
-    return CYSectionHeaderView(settings_l10n_text(@"Personalization Options"));
-}
-- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section { return 46.0; }
-
-- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    if (indexPath.section == 0) {
-        UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"info-cell"];
-        cell.selectionStyle = UITableViewCellSelectionStyleNone;
-        if (indexPath.row == 0) {
-            cell.textLabel.text = settings_l10n_text(@"Description");
-            cell.detailTextLabel.text = settings_string_or_empty(self.tweak[@"description"]);
-            cell.detailTextLabel.numberOfLines = 0;
-        } else {
-            cell.textLabel.text = settings_l10n_text(@"Version");
-            cell.detailTextLabel.text = settings_string_or_empty(self.tweak[@"version"]);
-        }
-        return cell;
-    }
-
-    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
-
-    if (indexPath.section == 1) {
-        UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"toggle-cell"];
-        cell.selectionStyle = UITableViewCellSelectionStyleNone;
-        cell.textLabel.text = settings_l10n_text(@"Enable Tweak");
-
-        UISwitch *sw = [[UISwitch alloc] init];
-        NSString *toggleKey = repotweaks_enabled_defaults_key(self.repoURL, self.tweakID);
-        sw.on = [d boolForKey:toggleKey];
-
-        UIAction *action = [UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
-            [d setBool:sw.isOn forKey:toggleKey];
-            [d synchronize];
-            if (!sw.isOn) {
-                repotweaks_cancel_tweak(self.repoURL, self.tweakID);
-            }
-        }];
-        [sw addAction:action forControlEvents:UIControlEventValueChanged];
-        cell.accessoryView = sw;
-        return cell;
-    }
-
-    // Dynamic parameters section (same as QuickLoader)
-    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"param-cell"];
-    cell.selectionStyle = UITableViewCellSelectionStyleNone;
-
-    NSDictionary *param = self.params[indexPath.row];
-    cell.textLabel.text = param[@"label"];
-
-    NSString *varName = param[@"varName"];
-    NSString *pType = param[@"type"];
-    NSString *currentValue = settings_string_or_empty(self.values[varName]);
-
-    NSString *valuesKey = repotweaks_values_defaults_key(self.repoURL, self.tweakID);
-
-    if ([pType isEqualToString:@"switch"]) {
-        UISwitch *sw = [[UISwitch alloc] init];
-        sw.on = [currentValue isEqualToString:@"true"];
-        UIAction *action = [UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
-            self.values[varName] = sw.isOn ? @"true" : @"false";
-            [d setObject:self.values forKey:valuesKey];
-            [d synchronize];
-        }];
-        [sw addAction:action forControlEvents:UIControlEventValueChanged];
-        cell.accessoryView = sw;
-    }
-    else if ([pType isEqualToString:@"text"]) {
-        UITextField *tf = [[UITextField alloc] initWithFrame:CGRectMake(0, 0, 150, 30)];
-        tf.textAlignment = NSTextAlignmentRight;
-        tf.textColor = UIColor.secondaryLabelColor;
-        tf.text = currentValue;
-        UIAction *action = [UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
-            self.values[varName] = tf.text;
-            [d setObject:self.values forKey:valuesKey];
-            [d synchronize];
-        }];
-        [tf addAction:action forControlEvents:UIControlEventEditingChanged];
-        cell.accessoryView = tf;
-    }
-    else if ([pType isEqualToString:@"color"]) {
-        UIColorWell *colorWell = [[UIColorWell alloc] init];
-        colorWell.translatesAutoresizingMaskIntoConstraints = NO;
-        //call to convert color
-        colorWell.selectedColor = colorFromHexString(currentValue ?: @"#FF0000");
-
-        UIAction *action = [UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
-            colorWell.title = param[@"label"];
-            self.values[varName] = hexStringFromColor(colorWell.selectedColor);
-            [d setObject:self.values forKey:valuesKey];
-            [d synchronize];
-        }];
-        [colorWell addAction:action forControlEvents:UIControlEventValueChanged];
-
-        [cell.contentView addSubview:colorWell];
-        [NSLayoutConstraint activateConstraints:@[
-            [colorWell.trailingAnchor constraintEqualToAnchor:cell.contentView.layoutMarginsGuide.trailingAnchor],
-            [colorWell.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-            [colorWell.widthAnchor constraintEqualToConstant:32.0],
-            [colorWell.heightAnchor constraintEqualToConstant:32.0]
-        ]];
-    }
-    else if ([pType isEqualToString:@"slider"] || [pType isEqualToString:@"number"]) {
-        UIStackView *stack = [[UIStackView alloc] initWithFrame:CGRectMake(0, 0, 220, 30)];
-        stack.axis = UILayoutConstraintAxisHorizontal;
-        stack.spacing = 10;
-        stack.alignment = UIStackViewAlignmentCenter;
-
-        UISlider *slider = [[UISlider alloc] init];
-        slider.minimumValue = param[@"min"] ? [param[@"min"] floatValue] : 0.0;
-        slider.maximumValue = param[@"max"] ? [param[@"max"] floatValue] : 1.0;
-
-        //if there is none, retrieve default value
-        float defVal = param[@"default"] ? [param[@"default"] floatValue] : slider.minimumValue;
-        slider.value = currentValue ? [currentValue floatValue] : defVal;
-
-        UILabel *valLabel = [[UILabel alloc] init];
-        valLabel.textColor = [UIColor secondaryLabelColor];
-        valLabel.font = [UIFont systemFontOfSize:14];
-        [valLabel setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
-
-        void (^updateLabelText)(float) = ^(float value) {
-            if (fabs(value - defVal) < 0.01) {
-                valLabel.text = [NSString stringWithFormat:@"%.2f (Def)", value];
-            } else {
-                valLabel.text = [NSString stringWithFormat:@"%.2f", value];
-            }
-        };
-
-        updateLabelText(slider.value);
-
-        [stack addArrangedSubview:slider];
-        [stack addArrangedSubview:valLabel];
-
-        UIAction *updateTextAction = [UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
-            updateLabelText(slider.value);
-        }];
-        [slider addAction:updateTextAction forControlEvents:UIControlEventValueChanged];
-
-        UIAction *saveAction = [UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
-            self.values[varName] = [NSString stringWithFormat:@"%.2f", slider.value];
-            [d setObject:self.values forKey:valuesKey];
-            [d synchronize];
-        }];
-        [slider addAction:saveAction forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchUpOutside];
-
-        cell.accessoryView = stack;
-    }
-
-    return cell;
-}
-
-@end
-
-
-// ==========================================
-// REPOTWEAKS: REPO DETAIL VIEW CONTROLLER
-// ==========================================
-@interface RepoDetailController : UITableViewController
-@property (nonatomic, strong) NSString *repoURL;
-@end
-
-@implementation RepoDetailController
-
-- (void)viewDidLoad {
-    [super viewDidLoad];
-    NSDictionary *repo = settings_repotweaks_repo_for_url(self.repoURL);
-    NSString *repoName = settings_string_or_empty(repo[@"repoName"]);
-    self.title = repoName.length ? repoName : settings_l10n_text(@"Repository");
-}
-
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return 2; // Section 0: Tweaks, Section 1: Delete
-}
-
-- (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
-    if (section == 0) {
-        NSDictionary *repo = settings_repotweaks_repo_for_url(self.repoURL);
-        NSString *author = settings_string_or_empty(repo[@"author"]);
-        return CYSectionHeaderView([NSString stringWithFormat:settings_l10n_text(@"By %@"), author.length ? author : settings_l10n_text(@"Unknown")]);
-    }
-    return nil;
-}
-- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section {
-    return section == 0 ? UITableViewAutomaticDimension : 0.0;
-}
-
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if (section == 1) return 1;
-    return settings_repotweaks_tweaks_for_url(self.repoURL).count;
-}
-
-- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];
-
-    // The Delete Button
-    if (indexPath.section == 1) {
-        cell.textLabel.text = settings_l10n_text(@"Delete Repository");
-        cell.textLabel.textColor = [UIColor systemRedColor];
-        cell.textLabel.textAlignment = NSTextAlignmentCenter;
-        return cell;
-    }
-
-    // The Tweaks
-    NSArray *tweaks = settings_repotweaks_tweaks_for_url(self.repoURL);
-    if (indexPath.row >= (NSInteger)tweaks.count) return cell;
-    NSDictionary *tweak = tweaks[indexPath.row];
-
-    cell.textLabel.text = settings_string_or_empty(tweak[@"name"]);
-    cell.detailTextLabel.text = settings_string_or_empty(tweak[@"description"]);
-    cell.detailTextLabel.numberOfLines = 0;
-
-    UISwitch *toggle = [[UISwitch alloc] init];
-    toggle.tag = indexPath.row; // Link the switch to the tweak array index
-    NSString *tweakID = settings_string_or_empty(tweak[@"id"]);
-    NSString *key = repotweaks_enabled_defaults_key(self.repoURL, tweakID);
-    toggle.on = [[NSUserDefaults standardUserDefaults] boolForKey:key];
-    [toggle addTarget:self action:@selector(toggled:) forControlEvents:UIControlEventValueChanged];
-
-    cell.accessoryView = toggle;
-    cell.selectionStyle = UITableViewCellSelectionStyleDefault;
-    return cell;
-}
-
-- (void)toggled:(UISwitch *)sender {
-    NSArray *tweaks = settings_repotweaks_tweaks_for_url(self.repoURL);
-    if (sender.tag < 0 || sender.tag >= (NSInteger)tweaks.count) return;
-    NSDictionary *tweak = tweaks[sender.tag];
-    NSString *tweakID = settings_string_or_empty(tweak[@"id"]);
-    if (tweakID.length == 0) return;
-    NSString *key = repotweaks_enabled_defaults_key(self.repoURL, tweakID);
-    [[NSUserDefaults standardUserDefaults] setBool:sender.on forKey:key];
-    [[NSUserDefaults standardUserDefaults] synchronize];
-    if (!sender.on) {
-        repotweaks_cancel_tweak(self.repoURL, tweakID);
-    }
-}
-
-- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
-    [tableView deselectRowAtIndexPath:indexPath animated:YES];
-
-    if (indexPath.section == 0) {
-        NSArray *tweaks = settings_repotweaks_tweaks_for_url(self.repoURL);
-        if (indexPath.row >= (NSInteger)tweaks.count) return;
-        RepoTweakDetailController *detailVC = [[RepoTweakDetailController alloc] initWithTweak:tweaks[indexPath.row]];
-        [self.navigationController pushViewController:detailVC animated:YES];
-        return;
-    }
-
-    // Handle Repo Deletion
-    if (indexPath.section == 1) {
-        NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
-        for (NSDictionary *tweak in settings_repotweaks_tweaks_for_url(self.repoURL)) {
-            settings_clear_repo_tweak_defaults(self.repoURL, settings_string_or_empty(tweak[@"id"]));
-        }
-
-        NSMutableArray *urls = [settings_repotweaks_urls() mutableCopy];
-        if (!urls) urls = [NSMutableArray array];
-        [urls removeObject:self.repoURL];
-        [d setObject:urls forKey:@"RepoTweaksURLs"];
-
-        NSMutableDictionary *caches = [settings_repotweaks_caches() mutableCopy];
-        if (!caches) caches = [NSMutableDictionary dictionary];
-        [caches removeObjectForKey:self.repoURL];
-        [d setObject:caches forKey:@"RepoTweaksCaches"];
-        [d synchronize];
-
-        [self.navigationController popViewControllerAnimated:YES]; // Slide back to main menu
-    }
-}
-@end
-
-
-
-
-
-
-// ==========================================
-// REPOTWEAKS: REPO MANAGER CONTROLLER (the main page)
-// ==========================================
-@interface RepoManagerController : UITableViewController
-@property (nonatomic, strong) NSArray *flattenedTweaks;
-@end
-
-@implementation RepoManagerController
-
-- (void)viewDidLoad {
-    [super viewDidLoad];
-    self.title = @"RepoTweaks";
-
-    // + and refresh buttons (menu bar)
-    UIBarButtonItem *addButton = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd target:self action:@selector(addRepo)];
-    UIBarButtonItem *refreshButton = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(refreshAll)];
-    self.navigationItem.rightBarButtonItems = @[addButton, refreshButton];
-
-    repotweaks_seed_default_repos();
-    if ([settings_repotweaks_urls() containsObject:kSettingsDefaultRepoURL]) {
-        NSDictionary *repo = settings_repotweaks_repo_for_url(kSettingsDefaultRepoURL);
-        NSArray *tweaks = repo[@"tweaks"];
-        if (![tweaks isKindOfClass:NSArray.class] || tweaks.count == 0) {
-            __weak typeof(self) weakSelf = self;
-            repotweaks_refresh_repo(kSettingsDefaultRepoURL, ^(BOOL success, NSString *message) {
-                (void)success;
-                (void)message;
-                [weakSelf updateData];
-            });
-        }
-    }
-}
-
-// auto refresh (there was a bug and I had to go back to the page and it would not refresh the UI without this)
-- (void)viewWillAppear:(BOOL)animated {
-    [super viewWillAppear:animated];
-    [self updateData];
-}
-
-- (void)updateData {
-    NSMutableArray *tempTweaks = [NSMutableArray array];
-    for (NSString *url in settings_repotweaks_urls()) {
-        [tempTweaks addObjectsFromArray:settings_repotweaks_tweaks_for_url(url)];
-    }
-    self.flattenedTweaks = tempTweaks;
-    [self.tableView reloadData];
-}
-
-- (void)addRepo {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:settings_l10n_text(@"Add Source") message:settings_l10n_text(@"Paste the RAW link to your packages.json") preferredStyle:UIAlertControllerStyleAlert];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) { textField.placeholder = @"https://raw.githubusercontent.com/..."; }];
-    [alert addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Add") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        NSString *url = alert.textFields.firstObject.text;
-        if (url.length > 0) {
-            repotweaks_refresh_repo(url, ^(BOOL success, NSString *message) {
-                [self updateData];
-                if (!success) {
-        UIAlertController *err = [UIAlertController alertControllerWithTitle:settings_l10n_text(@"Source Failed")
-                                                                     message:message ?: settings_l10n_text(@"Could not refresh that repository.")
-                                                              preferredStyle:UIAlertControllerStyleAlert];
-                    [err addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"OK") style:UIAlertActionStyleDefault handler:nil]];
-                    [self presentViewController:err animated:YES completion:nil];
-                }
-            });
-        }
-    }]];
-    [alert addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
-    [self presentViewController:alert animated:YES completion:nil];
-}
-
-- (void)refreshAll {
-    NSArray *urls = settings_repotweaks_urls();
-    if (urls.count == 0) return;
-
-    // Refresh Alert
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:settings_l10n_text(@"Refreshing Sources")
-                                                                   message:settings_l10n_text(@"Nuking old scripts and downloading the latest...")
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [self presentViewController:alert animated:YES completion:nil];
-
-    // track download status
-    dispatch_group_t group = dispatch_group_create();
-
-    for (NSString *url in urls) {
-        dispatch_group_enter(group);
-        repotweaks_refresh_repo(url, ^(BOOL success, NSString *message) {
-            dispatch_group_leave(group);
-        });
-    }
-
-    //dismiss alert and refresh UI on success
-    dispatch_group_notify(group, dispatch_get_main_queue(), ^{
-        [alert dismissViewControllerAnimated:YES completion:^{
-            [self updateData];
-        }];
-    });
-}
-
-// Native tweak sections
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 2; }
-- (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
-    return CYSectionHeaderView(settings_l10n_text(section == 0 ? @"Sources" : @"All Tweaks"));
-}
-- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section { return 46.0; }
-
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if (section == 0) return settings_repotweaks_urls().count;
-    return self.flattenedTweaks.count;
-}
-
-- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];
-    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
-
-    if (indexPath.section == 0) {
-        NSArray *urls = settings_repotweaks_urls();
-        if (indexPath.row >= (NSInteger)urls.count) return cell;
-        NSString *url = urls[indexPath.row];
-        NSDictionary *repo = settings_repotweaks_repo_for_url(url);
-
-        NSString *repoName = settings_string_or_empty(repo[@"repoName"]);
-        cell.textLabel.text = repoName.length ? repoName : @"Unknown Repo";
-        cell.detailTextLabel.text = url;
-        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-    } else {
-        if (indexPath.row >= (NSInteger)self.flattenedTweaks.count) return cell;
-        NSDictionary *tweak = self.flattenedTweaks[indexPath.row];
-        cell.textLabel.text = settings_string_or_empty(tweak[@"name"]);
-        cell.detailTextLabel.text = settings_string_or_empty(tweak[@"description"]);
-        cell.detailTextLabel.numberOfLines = 0;
-
-        UISwitch *toggle = [[UISwitch alloc] init];
-        toggle.tag = indexPath.row;
-        NSString *tweakID = settings_string_or_empty(tweak[@"id"]);
-        NSString *repoURL = settings_string_or_empty(tweak[@"_repoURL"]);
-        NSString *key = repotweaks_enabled_defaults_key(repoURL, tweakID);
-        toggle.on = [d boolForKey:key];
-        [toggle addTarget:self action:@selector(toggled:) forControlEvents:UIControlEventValueChanged];
-
-        cell.accessoryView = toggle;
-        cell.selectionStyle = UITableViewCellSelectionStyleDefault;
-    }
-    return cell;
-}
-
-- (void)toggled:(UISwitch *)sender {
-    if (sender.tag < 0 || sender.tag >= (NSInteger)self.flattenedTweaks.count) return;
-    NSDictionary *tweak = self.flattenedTweaks[sender.tag];
-    NSString *tweakID = settings_string_or_empty(tweak[@"id"]);
-    NSString *repoURL = settings_string_or_empty(tweak[@"_repoURL"]);
-    if (tweakID.length == 0) return;
-    NSString *key = repotweaks_enabled_defaults_key(repoURL, tweakID);
-    [[NSUserDefaults standardUserDefaults] setBool:sender.on forKey:key];
-    [[NSUserDefaults standardUserDefaults] synchronize];
-    if (!sender.on) {
-        repotweaks_cancel_tweak(repoURL, tweakID);
-    }
-}
-
-//swipe to delete logic
-- (BOOL)tableView:(UITableView *)tableView canEditRowAtIndexPath:(NSIndexPath *)indexPath {
-    return indexPath.section == 0; //only let user swipe to delete sources
-}
-
-- (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)editingStyle forRowAtIndexPath:(NSIndexPath *)indexPath {
-    if (editingStyle == UITableViewCellEditingStyleDelete && indexPath.section == 0) {
-        NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
-        NSMutableArray *urls = [settings_repotweaks_urls() mutableCopy];
-        if (!urls) urls = [NSMutableArray array];
-        if (indexPath.row >= (NSInteger)urls.count) return;
-        NSString *urlToRemove = urls[indexPath.row];
-        for (NSDictionary *tweak in settings_repotweaks_tweaks_for_url(urlToRemove)) {
-            settings_clear_repo_tweak_defaults(urlToRemove, settings_string_or_empty(tweak[@"id"]));
-        }
-
-        [urls removeObjectAtIndex:indexPath.row];
-        [d setObject:urls forKey:@"RepoTweaksURLs"];
-
-        NSMutableDictionary *caches = [settings_repotweaks_caches() mutableCopy];
-        if (!caches) caches = [NSMutableDictionary dictionary];
-        [caches removeObjectForKey:urlToRemove];
-        [d setObject:caches forKey:@"RepoTweaksCaches"];
-        [d synchronize];
-
-        [self updateData]; //refreshes the ui
-    }
-}
-
-- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
-    [tableView deselectRowAtIndexPath:indexPath animated:YES];
-
-    // Section 0: press on the repo, it lists all tweaks
-    if (indexPath.section == 0) {
-        NSArray *urls = settings_repotweaks_urls();
-        if (indexPath.row >= (NSInteger)urls.count) return;
-        RepoDetailController *detailVC = [[RepoDetailController alloc] initWithStyle:UITableViewStyleGrouped];
-        detailVC.repoURL = urls[indexPath.row];
-        [self.navigationController pushViewController:detailVC animated:YES];
-    }
-    // Section 1: press on a tweak, it lists all dynamic parameters
-    else if (indexPath.section == 1) {
-        if (indexPath.row >= (NSInteger)self.flattenedTweaks.count) return;
-        NSDictionary *tweak = self.flattenedTweaks[indexPath.row];
-
-        RepoTweakDetailController *detailVC = [[RepoTweakDetailController alloc] initWithTweak:tweak];
-        [self.navigationController pushViewController:detailVC animated:YES];
-    }
-}
-@end
 
 @interface DSRespringOverlayView : UIView
 @property (nonatomic, strong) WKWebView *webView;
@@ -1018,13 +395,7 @@ NSString * const kSettingsLocationSimHostProcess = @"LocationSimHostProcess";
 static NSString * const kSettingsLocationSimStarted = @"LocationSimStarted";
 
 static NSString * const kSettingsIPADecryptorTargetBundleID = @"IPADecryptorTargetBundleID";
-static NSString * const kSettingsIPADecryptorAppStoreInput = @"IPADecryptorAppStoreInput";
-static NSString * const kSettingsIPADecryptorAppStoreID = @"IPADecryptorAppStoreID";
-static NSString * const kSettingsIPADecryptorAppStoreName = @"IPADecryptorAppStoreName";
-static NSString * const kSettingsIPADecryptorAppStoreVersion = @"IPADecryptorAppStoreVersion";
-static NSString * const kSettingsIPADecryptorAppStoreURL = @"IPADecryptorAppStoreURL";
-static NSString * const kSettingsIPADecryptorDownloadedIPAPath = @"IPADecryptorDownloadedIPAPath";
-static NSString * const kSettingsIPADecryptorDownloadStatus = @"IPADecryptorDownloadStatus";
+static NSString * const kSettingsIPADecryptorLastOutputPath = @"IPADecryptorLastOutputPath";
 
 NSString * const kSettingsThemerEnabled = @"ThemerEnabled";
 NSString * const kSettingsThemerThemeID = @"ThemerThemeID";
@@ -1064,12 +435,6 @@ NSString * const kSettingsNanoMinPairing       = @"NanoRegistryMinPairing";
 NSString * const kSettingsNanoMinPairingChipID = @"NanoRegistryMinPairingChipID";
 NSString * const kSettingsNanoMinQuickSwitch   = @"NanoRegistryMinQuickSwitch";
 
-NSString * const kSettingsLogUploadEnabled = @"LogUploadEnabled";
-
-static void cyanide_upload_log_if_enabled(void);
-static void cyanide_upload_log_milestone(NSString *event);
-static void cyanide_start_session_uploads(void);
-static void cyanide_stop_session_uploads(void);
 static NSObject *settings_rc_lock(void);
 static BOOL settings_cleanup_in_progress(void);
 static BOOL settings_screen_awake_cached(void);
@@ -4181,10 +3546,8 @@ static void settings_apply_armed_gravitylite_once_async(const char *reason)
                 settings_start_gravity_motion(appliedConfig.magnitude,
                                               appliedConfig.explosionForce);
                 log_user("[OK] Gravity Lite active.\n");
-                cyanide_upload_log_milestone(@"gravity-lite-applied");
             } else {
                 log_user("[WARN] Gravity Lite did not start cleanly.\n");
-                cyanide_upload_log_milestone(@"gravity-lite-warning");
             }
 
             printf("[SETTINGS] Gravity Lite start%s%s result=%d\n",
@@ -4717,7 +4080,6 @@ static void settings_start_statbar_live_loop(void)
                kStatBarLiveIntervalUS,
                settings_statbar_refresh_rate_us(),
                (unsigned long)kStatBarLiveMaxTicks);
-        cyanide_upload_log_milestone(@"statbar-live-started");
 
         @try {
             while ([d boolForKey:kSettingsStatBarEnabled] &&
@@ -4760,7 +4122,6 @@ static void settings_start_statbar_live_loop(void)
 
                 if (tick == 0) {
                     printf("[SETTINGS] StatBar result=%d\n", ok);
-                    cyanide_upload_log_milestone(ok ? @"statbar-live-first-ok" : @"statbar-live-first-failed");
                 }
                 if (ok) {
                     failures = 0;
@@ -4820,7 +4181,6 @@ static void settings_start_statbar_live_loop(void)
                 settings_end_statbar_background_task_async("live loop exited");
             }
             if (failures > 0)
-                cyanide_upload_log_milestone(@"statbar-live-exited-failed");
             __sync_lock_release(&g_statbar_live_running);
         }
     });
@@ -5186,7 +4546,6 @@ static void settings_start_rssi_live_loop(void)
                kRSSILiveIntervalUS,
                kRSSILiveBackgroundIntervalUS,
                (unsigned long)kRSSILiveMaxTicks);
-        cyanide_upload_log_milestone(@"rssi-live-started");
 
         @try {
             while ([d boolForKey:kSettingsRSSIDisplayEnabled] &&
@@ -5231,7 +4590,6 @@ static void settings_start_rssi_live_loop(void)
                     printf("[SETTINGS] RSSI first tick result=%d elapsed=%lluus\n",
                            ok,
                            (unsigned long long)elapsedUS);
-                    cyanide_upload_log_milestone(ok ? @"rssi-live-first-ok" : @"rssi-live-first-failed");
                 }
                 if (ok) {
                     failures = 0;
@@ -5273,7 +4631,6 @@ static void settings_start_rssi_live_loop(void)
                    (unsigned long)failures,
                    g_rssi_live_stop_requested);
             if (failures > 0)
-                cyanide_upload_log_milestone(@"rssi-live-exited-failed");
             __sync_lock_release(&g_rssi_live_running);
         }
     });
@@ -5345,7 +4702,6 @@ static void settings_start_axonlite_live_loop(void)
                kAxonLiteLiveIntervalUS,
                kAxonLiteLiveBackgroundIntervalUS,
                (unsigned long)kAxonLiteLiveMaxTicks);
-        cyanide_upload_log_milestone(@"axon-lite-live-started");
 
         @try {
             settings_live_loop_sleep_interruptible(0,
@@ -5406,7 +4762,6 @@ static void settings_start_axonlite_live_loop(void)
 
                 if (tick == 0) {
                     printf("[SETTINGS] Axon Lite result=%d\n", ok);
-                    cyanide_upload_log_milestone(ok ? @"axon-lite-live-first-ok" : @"axon-lite-live-first-failed");
                 }
                 if (ok) {
                     failures = 0;
@@ -5453,7 +4808,6 @@ static void settings_start_axonlite_live_loop(void)
                    (unsigned long)failures,
                    g_axonlite_live_stop_requested);
             if (failures > 0)
-                cyanide_upload_log_milestone(@"axon-lite-live-exited-failed");
             __sync_lock_release(&g_axonlite_live_running);
         }
     });
@@ -5676,7 +5030,6 @@ static void settings_start_notificationisland_live_loop(void)
                kNotificationIslandLiveIntervalUS,
                kNotificationIslandLiveBackgroundIntervalUS,
                (unsigned long)kNotificationIslandLiveMaxTicks);
-        cyanide_upload_log_milestone(@"notification-island-live-started");
 
         @try {
             while ([d boolForKey:kSettingsNotificationIslandEnabled] &&
@@ -5714,8 +5067,6 @@ static void settings_start_notificationisland_live_loop(void)
 
                 if (tick == 0) {
                     printf("[SETTINGS] Notification Island result=%d\n", ok);
-                    cyanide_upload_log_milestone(ok ? @"notification-island-live-first-ok" :
-                                                     @"notification-island-live-first-failed");
                 }
                 if (ok) {
                     failures = 0;
@@ -5755,7 +5106,6 @@ static void settings_start_notificationisland_live_loop(void)
                    (unsigned long)failures,
                    g_notificationisland_live_stop_requested);
             if (failures > 0)
-                cyanide_upload_log_milestone(@"notification-island-live-exited-failed");
             __sync_lock_release(&g_notificationisland_live_running);
         }
     });
@@ -6712,24 +6062,6 @@ static BOOL settings_mwlite_export_selected_apps(NSUserDefaults *d)
     return ok;
 }
 
-static NSString *settings_ipadecryptor_app_store_summary(NSUserDefaults *d)
-{
-    NSString *appID = [d stringForKey:kSettingsIPADecryptorAppStoreID];
-    NSString *name = [d stringForKey:kSettingsIPADecryptorAppStoreName];
-    NSString *version = [d stringForKey:kSettingsIPADecryptorAppStoreVersion];
-    NSString *url = [d stringForKey:kSettingsIPADecryptorAppStoreURL];
-    if (appID.length == 0 && url.length == 0) {
-        return settings_l10n_text(@"None. Paste an App Store link or numeric app ID.");
-    }
-    if (name.length > 0) {
-        return [NSString stringWithFormat:@"%@%@%@",
-                name,
-                version.length > 0 ? @" " : @"",
-                version.length > 0 ? version : @""];
-    }
-    return appID.length > 0 ? [NSString stringWithFormat:settings_l10n_text(@"App Store ID %@"), appID] : url;
-}
-
 static BOOL settings_apply_location_sim_from_defaults_locked(NSUserDefaults *d)
 {
     NSInteger accuracy = [d integerForKey:kSettingsLocationSimHorizontalAccuracy];
@@ -7556,13 +6888,6 @@ void settings_register_defaults(void)
         kSettingsLocationSimHostProcess: @"Maps",
         kSettingsLocationSimStarted: @NO,
         kSettingsIPADecryptorTargetBundleID: @"",
-        kSettingsIPADecryptorAppStoreInput: @"",
-        kSettingsIPADecryptorAppStoreID: @"",
-        kSettingsIPADecryptorAppStoreName: @"",
-        kSettingsIPADecryptorAppStoreVersion: @"",
-        kSettingsIPADecryptorAppStoreURL: @"",
-        kSettingsIPADecryptorDownloadedIPAPath: @"",
-        kSettingsIPADecryptorDownloadStatus: @"Not started.",
 
         kSettingsThemerEnabled: @NO,
         kSettingsThemerThemeID: kThemerThemeNone,
@@ -7674,7 +6999,6 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             settings_wait_live_loops_stopped_for_switch("Apply Tweaks");
         }
         log_session_begin();
-        cyanide_start_session_uploads();
         BOOL runSucceeded = NO;
         BOOL runHadBlockingFailure = NO;
         NSString *runCompletionMessage = @"Run failed. Check the log for details.";
@@ -7821,7 +7145,6 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             if (runFastLockXLite && runStageStrip) {
                 log_user("[COMPAT] FastLockX Lite will arm before Dynamic Stage Lite starts its control loop.\n");
             }
-            cyanide_upload_log_milestone(@"run-plan");
 
             if (!hasRunWork) {
                 if (!statBarEnabled) g_statbar_live_stop_requested = 1;
@@ -7840,7 +7163,6 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                 log_user("[DONE] No pending runtime changes to apply.\n");
                 runSucceeded = YES;
                 runCompletionMessage = @"Done. No pending runtime changes to apply.";
-                cyanide_upload_log_milestone(@"run-noop");
                 return;
             }
 
@@ -7849,21 +7171,17 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                 if (!settings_ensure_kexploit()) {
                     log_user("[RUN] Failed: kernel primitives were not acquired. Please try running chain again.\n");
                     runCompletionMessage = @"Failed: kernel primitives were not acquired. Please try running chain again.";
-                    cyanide_upload_log_milestone(@"krw-failed");
                     return;
                 }
                 log_user("[OK] Kernel r/w armed — injection staged.\n");
-                cyanide_upload_log_milestone(@"krw-ready");
             } else if (skipKernelForVPhoneSpringBoardOnly) {
                 log_user("[VPHONE] SpringBoard-only run — using the vphone bridge without app-side kernel primitives.\n");
-                cyanide_upload_log_milestone(@"vphone-bridge-no-krw");
             }
 
             if (patchSandboxExt) {
                 settings_progress(&step, total, "Patching sandbox-extension issue path");
                 escape_sbx_demo3();
                 log_user("[OK] Sandbox extension issue path patched.\n");
-                cyanide_upload_log_milestone(@"sandbox-ext-patched");
             }
             if (runPowercuff) {
                 settings_progress(&step, total, "Applying Powercuff via thermalmonitord");
@@ -7883,7 +7201,6 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                     log_user("%s Powercuff %s through thermalmonitord.\n",
                              ok ? "[OK]" : "[WARN]",
                              ok ? "applied" : "did not apply cleanly");
-                    cyanide_upload_log_milestone(ok ? @"powercuff-applied" : @"powercuff-failed");
                 }
             }
 
@@ -7893,11 +7210,9 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                     if (!settings_ensure_springboard_remote_call_locked()) {
                         log_user("[RUN] Failed: could not open the SpringBoard control session. Please try installing tweaks again.\n");
                         runCompletionMessage = @"Failed: could not open the SpringBoard control session. Please try installing tweaks again.";
-                        cyanide_upload_log_milestone(@"springboard-remote-call-failed");
                         return;
                     }
                     log_user("[OK] SpringBoard channel open.\n");
-                    cyanide_upload_log_milestone(@"springboard-remote-call-ready");
 
                     if (runSandboxEscape && !g_springboard_sandbox_escaped) {
                         settings_progress(&step, total, "Lifting SpringBoard filesystem sandbox");
@@ -7906,17 +7221,14 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         log_user("%s Filesystem sandbox %s.\n",
                                  sbx == 0 ? "[OK]" : "[WARN]",
                                  sbx == 0 ? "lifted — access granted" : "lift returned a warning");
-                        cyanide_upload_log_milestone(sbx == 0 ? @"springboard-sandbox-token-ready" : @"springboard-sandbox-token-warning");
                     } else if (runSandboxEscape) {
                         settings_progress(&step, total, "Reusing sandbox token from prior run");
                         log_user("[OK] Sandbox already lifted — reusing token.\n");
-                        cyanide_upload_log_milestone(@"springboard-sandbox-token-reused");
                     }
 
                     if (cleanupDisabledSpringBoardTweaks) {
                         settings_progress(&step, total, "Stopping disabled SpringBoard tweaks");
                         settings_stop_disabled_applied_springboard_tweaks_locked(d);
-                        cyanide_upload_log_milestone(@"disabled-springboard-tweaks-stopped");
                     }
 
                     if (runTypeBanner) {
@@ -7924,7 +7236,6 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         log_user("%s TypeBanner overlay window %s.\n",
                                  ok ? "[OK]" : "[WARN]",
                                  ok ? "prewarmed" : "did not prewarm");
-                        cyanide_upload_log_milestone(ok ? @"typebanner-overlay-prewarmed" : @"typebanner-overlay-prewarm-failed");
                     }
 
                     if (runSBC) {
@@ -7938,7 +7249,6 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                                  (long)[d integerForKey:kSettingsSBCDockIcons],
                                  (long)[d integerForKey:kSettingsSBCCols],
                                  (long)[d integerForKey:kSettingsSBCRows]);
-                        cyanide_upload_log_milestone(ok ? @"sbc-applied" : @"sbc-warning");
                     }
 
                     if (runDarkTweaks) {
@@ -7968,7 +7278,6 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         log_user("%s DarkSword hooks %s.\n",
                                  ok ? "[OK]" : "[WARN]",
                                  ok ? "applied" : "may need a refresh");
-                        cyanide_upload_log_milestone(ok ? @"darksword-tweaks-applied" : @"darksword-tweaks-warning");
                     }
 
                     if (runLayoutExtras) {
@@ -7979,7 +7288,6 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         log_user("%s Home Layout Extras %s.\n",
                                  ok ? "[OK]" : "[WARN]",
                                  ok ? "applied" : "did not apply cleanly");
-                        cyanide_upload_log_milestone(ok ? @"layout-extras-applied" : @"layout-extras-warning");
                     }
 
                     if (runThemer) {
@@ -7990,7 +7298,6 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         log_user("%s Icon Theme Engine %s.\n",
                                  ok ? "[OK]" : "[WARN]",
                                  ok ? "applied" : "did not apply cleanly");
-                        cyanide_upload_log_milestone(ok ? @"themer-applied" : @"themer-warning");
                         if (ok) {
                             settings_start_themer_live_loop();
                         }
@@ -8005,7 +7312,6 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         log_user("%s SnowBoard Lite %s.\n",
                                  ok ? "[OK]" : "[WARN]",
                                  ok ? "theme applied" : "did not apply cleanly");
-                        cyanide_upload_log_milestone(ok ? @"snowboard-lite-applied" : @"snowboard-lite-warning");
                         if (ok && !settings_themer_live_repair_enabled(d)) {
                             log_user("[SBL] Live repair is enabled; Cyanide will keep the SpringBoard channel open so repair ticks reuse it.\n");
                             settings_start_themer_live_loop();
@@ -8029,10 +7335,8 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         }
                         if (ok) {
                             log_user("[OK] Gravity Lite active.\n");
-                            cyanide_upload_log_milestone(@"gravity-lite-applied");
                         } else {
                             log_user("[WARN] Gravity Lite did not start cleanly.\n");
-                            cyanide_upload_log_milestone(@"gravity-lite-warning");
                             runHadBlockingFailure = YES;
                             runCompletionMessage = @"Gravity Lite did not start cleanly.";
                         }
@@ -8054,7 +7358,6 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         log_user("%s StatBar %s.\n",
                                  ok ? "[OK]" : "[WARN]",
                                  ok ? "showing thermal + memory overlay" : "did not start cleanly");
-                        cyanide_upload_log_milestone(ok ? @"statbar-initial-applied" : @"statbar-initial-failed");
                     }
 
                     if (runNSBar) {
@@ -8066,7 +7369,6 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         log_user("%s NSBar %s.\n",
                                  ok ? "[OK]" : "[WARN]",
                                  ok ? "showing network speed" : "did not start cleanly");
-                        cyanide_upload_log_milestone(ok ? @"nsbar-initial-applied" : @"nsbar-initial-failed");
                     }
 
                     if (runNiceBarLite) {
@@ -8079,7 +7381,6 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         log_user("%s NiceBar Lite %s.\n",
                                  ok ? "[OK]" : "[WARN]",
                                  ok ? "labels active" : "did not start cleanly");
-                        cyanide_upload_log_milestone(ok ? @"nicebar-lite-initial-applied" : @"nicebar-lite-initial-failed");
                     }
 
                     if (runRSSI) {
@@ -8092,7 +7393,6 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         log_user("%s RSSI %s.\n",
                                  ok ? "[OK]" : "[WARN]",
                                  ok ? "showing live signal strength (dBm)" : "did not start cleanly");
-                        cyanide_upload_log_milestone(ok ? @"rssi-initial-applied" : @"rssi-initial-failed");
                     }
 
                     if (runLiveWP) {
@@ -8104,7 +7404,6 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         log_user("%s LiveWP %s.\n",
                                  ok ? "[OK]" : "[WARN]",
                                  ok ? "video wallpaper active" : "did not start cleanly");
-                        cyanide_upload_log_milestone(ok ? @"livewp-initial-applied" : @"livewp-initial-failed");
                     }
 
                     if (runMetalLockLight) {
@@ -8121,7 +7420,6 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         log_user("%s Metal Lock Light %s.\n",
                                  ok ? "[OK]" : "[WARN]",
                                  ok ? "rendered on the lock screen" : "did not start cleanly");
-                        cyanide_upload_log_milestone(ok ? @"metal-lock-light-applied" : @"metal-lock-light-failed");
                     }
 
                     if (runMoodWallpaper) {
@@ -8133,7 +7431,6 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         log_user("%s Mood Wallpaper %s.\n",
                                  ok ? "[OK]" : "[WARN]",
                                  ok ? "active" : "did not start cleanly");
-                        cyanide_upload_log_milestone(ok ? @"mood-wallpaper-applied" : @"mood-wallpaper-failed");
                     }
 
                     if (runQuickLoader) {
@@ -8168,8 +7465,6 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                                  (ok || deferred) ? "[OK]" : "[WARN]",
                                  ok ? "hub active — watching for notifications" :
                                  (deferred ? "standing by — fires when notifications appear" : "did not start cleanly"));
-                        cyanide_upload_log_milestone(ok ? @"axon-lite-initial-applied" :
-                                                     (deferred ? @"axon-lite-initial-deferred" : @"axon-lite-initial-failed"));
                     }
 
                     if (runNotificationIsland) {
@@ -8181,8 +7476,6 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         log_user("%s Notification Island %s.\n",
                                  ok ? "[OK]" : "[WARN]",
                                  ok ? "watching incoming banners" : "did not start cleanly");
-                        cyanide_upload_log_milestone(ok ? @"notification-island-initial-applied" :
-                                                         @"notification-island-initial-failed");
                     }
 
                     if (runAppSwitcherGrid) {
@@ -8194,7 +7487,6 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         log_user("%s App Switcher Grid %s.\n",
                                  ok ? "[OK]" : "[WARN]",
                                  ok ? "enabled" : "did not apply cleanly");
-                        cyanide_upload_log_milestone(ok ? @"app-switcher-grid-applied" : @"app-switcher-grid-failed");
                     } else if (!appSwitcherGridEnabled) {
                         appswitchergrid_stop_in_session();
                     }
@@ -8224,8 +7516,6 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         log_user("%s FastLockX Lite Always On %s.\n",
                                  ok ? "[OK]" : "[WARN]",
                                  ok ? "enabled" : "did not install cleanly");
-                        cyanide_upload_log_milestone(ok ? @"fastlockx-lite-applied" :
-                                                         @"fastlockx-lite-failed");
                     }
 
                     if (runStageStrip) {
@@ -8245,7 +7535,6 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         log_user("%s Dynamic Stage Lite %s.\n",
                                  ok ? "[OK]" : "[WARN]",
                                  ok ? "overlay active" : "did not install cleanly");
-                        cyanide_upload_log_milestone(ok ? @"stagestrip-initial-applied" : @"stagestrip-initial-failed");
                     } else if (!stageStripEnabled && !mwLiteEnabled) {
                         // Uninstall path: tear down the overlay if one survived
                         // from a prior Run. No-op when the strip was never up.
@@ -8272,7 +7561,6 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                             runHadBlockingFailure = YES;
                             runCompletionMessage = @"MilkyWay Lite host did not install cleanly.";
                         }
-                        cyanide_upload_log_milestone(ok ? @"mwlite-host-applied" : @"mwlite-host-failed");
                     }
                 }
 
@@ -8327,7 +7615,6 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                 settings_progress(&step, total, "Starting TypeBanner daemon poll");
                 settings_mark_tweak_applied(kSettingsTypeBannerEnabled, YES);
                 log_user("[OK] TypeBanner watching imagent for incoming typing indicators.\n");
-                cyanide_upload_log_milestone(@"typebanner-live-starting");
                 // Daemon-only detection avoids foregrounding Messages and
                 // avoids the MobileSMS synthetic-thread PAC/0x401 crash path.
                 printf("[TYPEBANNER] daemon-only: starting live loop without sms launch\n");
@@ -8343,7 +7630,6 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                 stagestrip_start_control_loop();
             }
             if (runStatBar || runNSBar || runNiceBarLite || runRSSI || runAxonLite || runTypeBanner || runNotificationIsland || runLiveWP || startStageStripControlLoopAfterInstall)
-                cyanide_upload_log_milestone(@"live-tweaks-started");
 
             if (!settings_has_persistent_springboard_remote_call_user()) {
                 BOOL closedNonLiveRemoteCall = NO;
@@ -8364,13 +7650,11 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                 }
                 if (closedNonLiveRemoteCall) {
                     log_user("[OK] SpringBoard channel released — no persistent hooks.\n");
-                    cyanide_upload_log_milestone(@"springboard-remote-call-closed");
                 }
             }
 
             if (runHadBlockingFailure) {
                 log_user("[RUN] Incomplete: a requested live tweak did not become active.\n");
-                cyanide_upload_log_milestone(@"run-incomplete");
                 return;
             }
 
@@ -8379,10 +7663,8 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             runCompletionMessage = [NSString stringWithFormat:@"%@. %@",
                                     settings_l10n_text(@"Done"),
                                     settings_l10n_text(@"All tweaks applied in-session.")];
-            cyanide_upload_log_milestone(@"run-complete");
         } @finally {
             // Close any legacy uploader state before the final snapshot.
-            cyanide_stop_session_uploads();
             log_session_end();
             __sync_lock_release(&g_settings_actions_running);
             settings_reconcile_applied_from_defaults();
@@ -8401,7 +7683,6 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                 [[NSNotificationCenter defaultCenter] postNotificationName:kSettingsActionsDidCompleteNotification
                                                                     object:nil
                                                                   userInfo:completionInfo];
-                cyanide_upload_log_if_enabled();
             });
         }
     });
@@ -8454,6 +7735,8 @@ typedef NS_ENUM(NSInteger, SettingsSection) {
 typedef NS_ENUM(NSInteger, RootSection) {
     RootSectionChangelog = 0,
     RootSectionActions,
+    RootSectionTools,
+    RootSectionJavaScript,
     RootSectionTweakBundles,
     RootSectionInDev,
     RootSectionSystemBundles,
@@ -8558,238 +7841,6 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     dispatch_once(&once, ^{ d = [[_CyanideMailDelegate alloc] init]; });
     return d;
 }
-
-@interface ThemerFormatGuideViewController : UITableViewController
-@end
-
-@implementation ThemerFormatGuideViewController
-
-- (void)viewDidLoad
-{
-    [super viewDidLoad];
-    self.title = @"Theme Format";
-    self.tableView.rowHeight = UITableViewAutomaticDimension;
-    self.tableView.estimatedRowHeight = 72.0;
-}
-
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
-{
-    return 3;
-}
-
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
-{
-    return section == 2 ? 3 : 1;
-}
-
-- (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section
-{
-    switch (section) {
-        case 0: return CYSectionHeaderView(settings_l10n_text(@"Folder Theme"));
-        case 1: return CYSectionHeaderView(settings_l10n_text(@"Plist Theme"));
-        case 2: return CYSectionHeaderView(settings_l10n_text(@"Files"));
-        default: return nil;
-    }
-}
-- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section { return 46.0; }
-
-- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section
-{
-    if (section == 0) {
-        return settings_l10n_text(@"Only icons with matching bundle IDs change. Missing apps keep their stock icon.");
-    }
-    if (section == 1) {
-        return settings_l10n_text(@"Use a binary plist when you want one portable file instead of a folder of PNGs.");
-    }
-    return nil;
-}
-
-- (UITableViewCell *)tableView:(UITableView *)tableView
-         cellForRowAtIndexPath:(NSIndexPath *)indexPath
-{
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"guide"];
-    if (!cell) {
-        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
-                                      reuseIdentifier:@"guide"];
-        cell.detailTextLabel.numberOfLines = 0;
-    }
-    cell.accessoryType = UITableViewCellAccessoryNone;
-    cell.textLabel.textColor = UIColor.labelColor;
-    cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
-
-    if (indexPath.section == 0) {
-        cell.selectionStyle = UITableViewCellSelectionStyleNone;
-        cell.textLabel.text = settings_l10n_text(@"PNG Files");
-        cell.detailTextLabel.text =
-            @"Make a folder containing PNG files named by app bundle ID:\n"
-             "com.apple.mobilesafari.png\n"
-             "com.apple.MobileSMS.png\n"
-             "com.apple.mobiletimer.png";
-    } else if (indexPath.section == 1) {
-        cell.selectionStyle = UITableViewCellSelectionStyleNone;
-        cell.textLabel.text = settings_l10n_text(@"Bundle ID → PNG Data");
-        cell.detailTextLabel.text =
-            @"Make a dictionary plist. Each key is a bundle ID. Each value is raw PNG data. "
-             "Cyanide imports the plist and copies it into Documents/Themes.";
-    } else {
-        cell.selectionStyle = UITableViewCellSelectionStyleDefault;
-        if (indexPath.row == 0) {
-            cell.textLabel.text = settings_l10n_text(@"Share Sample Theme Plist");
-            cell.detailTextLabel.text = settings_l10n_text(@"Exports a small binary plist template with example bundle IDs.");
-        } else if (indexPath.row == 1) {
-            cell.textLabel.text = settings_l10n_text(@"Share iOS 6 Theme Plist");
-            cell.detailTextLabel.text = settings_l10n_text(@"Exports the iOS 6 Theme plist. Icons by zagnut531/iOS-6-Icons.");
-        } else {
-            cell.textLabel.text = settings_l10n_text(@"Share App Info.plist");
-            cell.detailTextLabel.text = settings_l10n_text(@"Exports Cyanide's bundled Info.plist for reference.");
-        }
-        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-    }
-    return cell;
-}
-
-- (NSData *)sampleIconPNGWithText:(NSString *)text color:(UIColor *)color
-{
-    CGSize size = CGSizeMake(120.0, 120.0);
-    UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat defaultFormat];
-    format.scale = 1.0;
-    format.opaque = NO;
-    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:size
-                                                                               format:format];
-    UIImage *image = [renderer imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
-        CGRect rect = CGRectMake(0.0, 0.0, size.width, size.height);
-        [[UIBezierPath bezierPathWithRoundedRect:rect cornerRadius:27.0] addClip];
-        [color setFill];
-        UIRectFill(rect);
-
-        NSDictionary *attrs = @{
-            NSFontAttributeName: [UIFont systemFontOfSize:48.0 weight:UIFontWeightBold],
-            NSForegroundColorAttributeName: UIColor.whiteColor,
-        };
-        CGSize textSize = [text sizeWithAttributes:attrs];
-        CGRect textRect = CGRectMake((size.width - textSize.width) / 2.0,
-                                     (size.height - textSize.height) / 2.0,
-                                     textSize.width,
-                                     textSize.height);
-        [text drawInRect:textRect withAttributes:attrs];
-    }];
-    return UIImagePNGRepresentation(image);
-}
-
-- (NSURL *)writeSamplePlist:(NSError **)error
-{
-    NSData *safari = [self sampleIconPNGWithText:@"S"
-                                           color:[UIColor colorWithRed:0.05 green:0.45 blue:0.95 alpha:1.0]];
-    NSData *sms = [self sampleIconPNGWithText:@"M"
-                                        color:[UIColor colorWithRed:0.10 green:0.65 blue:0.25 alpha:1.0]];
-    NSDictionary *plist = @{
-        @"com.apple.mobilesafari": safari ?: [NSData data],
-        @"com.apple.MobileSMS": sms ?: [NSData data],
-    };
-    NSData *data = [NSPropertyListSerialization dataWithPropertyList:plist
-                                                              format:NSPropertyListBinaryFormat_v1_0
-                                                             options:0
-                                                               error:error];
-    if (!data) return nil;
-
-    NSURL *url = [NSURL fileURLWithPath:
-        [NSTemporaryDirectory() stringByAppendingPathComponent:@"CyanideThemeTemplate.plist"]];
-    if (![data writeToURL:url options:NSDataWritingAtomic error:error]) return nil;
-    return url;
-}
-
-- (NSURL *)copyBuiltInIOS6Plist:(NSError **)error
-{
-    NSString *src = [[NSBundle mainBundle] pathForResource:@"Themes-iOS6" ofType:@"plist"];
-    if (!src) {
-        if (error) {
-            *error = [NSError errorWithDomain:@"CyanideThemerGuide"
-                                         code:1
-                                     userInfo:@{NSLocalizedDescriptionKey: settings_l10n_text(@"Bundled iOS 6 plist was not found.")}];
-        }
-        return nil;
-    }
-
-    NSURL *dst = [NSURL fileURLWithPath:
-        [NSTemporaryDirectory() stringByAppendingPathComponent:@"Cyanide-iOS6-Theme.plist"]];
-    NSFileManager *fm = NSFileManager.defaultManager;
-    if ([fm fileExistsAtPath:dst.path]) {
-        [fm removeItemAtURL:dst error:nil];
-    }
-    if (![fm copyItemAtURL:[NSURL fileURLWithPath:src] toURL:dst error:error]) return nil;
-    return dst;
-}
-
-- (NSURL *)copyAppInfoPlist:(NSError **)error
-{
-    NSString *src = [[NSBundle mainBundle] pathForResource:@"Info" ofType:@"plist"];
-    if (!src) {
-        if (error) {
-            *error = [NSError errorWithDomain:@"CyanideThemerGuide"
-                                         code:2
-                                     userInfo:@{NSLocalizedDescriptionKey: settings_l10n_text(@"Bundled Info.plist was not found.")}];
-        }
-        return nil;
-    }
-
-    NSURL *dst = [NSURL fileURLWithPath:
-        [NSTemporaryDirectory() stringByAppendingPathComponent:@"Cyanide-Info.plist"]];
-    NSFileManager *fm = NSFileManager.defaultManager;
-    if ([fm fileExistsAtPath:dst.path]) {
-        [fm removeItemAtURL:dst error:nil];
-    }
-    if (![fm copyItemAtURL:[NSURL fileURLWithPath:src] toURL:dst error:error]) return nil;
-    return dst;
-}
-
-- (void)dismissGuide
-{
-    [self dismissViewControllerAnimated:YES completion:nil];
-}
-
-- (void)shareURL:(NSURL *)url sourceView:(UIView *)sourceView
-{
-    UIActivityViewController *vc = [[UIActivityViewController alloc] initWithActivityItems:@[url]
-                                                                     applicationActivities:nil];
-    UIView *anchor = sourceView ?: self.view;
-    vc.popoverPresentationController.sourceView = anchor;
-    vc.popoverPresentationController.sourceRect = anchor.bounds;
-    [self presentViewController:vc animated:YES completion:nil];
-}
-
-- (void)showExportError:(NSError *)error
-{
-    UIAlertController *ac = [UIAlertController alertControllerWithTitle:settings_l10n_text(@"Export Failed")
-                                                                message:error.localizedDescription ?: @"Could not write the plist."
-                                                         preferredStyle:UIAlertControllerStyleAlert];
-    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"OK") style:UIAlertActionStyleDefault handler:nil]];
-    [self presentViewController:ac animated:YES completion:nil];
-}
-
-- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath
-{
-    [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    if (indexPath.section != 2) return;
-
-    NSError *error = nil;
-    NSURL *url = nil;
-    if (indexPath.row == 0) {
-        url = [self writeSamplePlist:&error];
-    } else if (indexPath.row == 1) {
-        url = [self copyBuiltInIOS6Plist:&error];
-    } else {
-        url = [self copyAppInfoPlist:&error];
-    }
-    if (!url) {
-        [self showExportError:error];
-        return;
-    }
-
-    UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
-    [self shareURL:url sourceView:cell.contentView ?: tableView];
-}
-
-@end
 
 @implementation SettingsViewController
 
@@ -9637,66 +8688,57 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 {
     NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
     NSString *bundleID = [d stringForKey:kSettingsIPADecryptorTargetBundleID] ?: @"";
-    NSString *appStoreInput = [d stringForKey:kSettingsIPADecryptorAppStoreInput] ?: @"";
-    NSString *downloadedPath = [d stringForKey:kSettingsIPADecryptorDownloadedIPAPath] ?: @"";
+    BOOL deviceOK = settings_device_supported();
+    BOOL krwReady = deviceOK && kexploit_krw_ready_quiet();
+    NSString *lastIPA = [d stringForKey:kSettingsIPADecryptorLastOutputPath] ?: @"";
+
     NSMutableArray<NSDictionary *> *rows = [NSMutableArray arrayWithArray:@[
         @{ @"kind": @"info",
-           @"title": @"App Store Account",
-           @"subtitle": ipadecryptor_app_store_account_summary() },
+           @"title": settings_l10n_text(@"Kernel Chain"),
+           @"subtitle": !deviceOK
+                ? settings_unsupported_message()
+                : (krwReady
+                    ? settings_l10n_text(@"Ready — KRW session is live. Decrypt can run without installing a tweak.")
+                    : settings_l10n_text(@"Not armed. Tap Run Kernel Chain below (no tweak install required).")) },
         @{ @"kind": @"button",
-           @"title": ipadecryptor_has_app_store_account()
-                ? @"Sign In Again…"
-                : @"Sign In to App Store…",
-           @"subtitle": @"Required before Cyanide can request an authenticated IPA download ticket. 2FA is requested after Apple asks for it.",
-           @"action": @"ipadec-signin" },
+           @"title": krwReady
+                ? settings_l10n_text(@"Re-run Kernel Chain")
+                : settings_l10n_text(@"Run Kernel Chain"),
+           @"subtitle": settings_l10n_text(@"Arms DarkSword KRW for this session so IPA Decrypt works without enabling any Installer tweak."),
+           @"action": @"ipadec-chain",
+           @"style": krwReady ? @"" : @"prominent" },
         @{ @"kind": @"info",
-           @"title": @"Selected App",
+           @"title": settings_l10n_text(@"Selected App"),
            @"subtitle": settings_ipadecryptor_target_summary(d) },
         @{ @"kind": @"info",
-           @"title": @"App Store Link",
-           @"subtitle": settings_ipadecryptor_app_store_summary(d) },
-        @{ @"kind": @"info",
-           @"title": @"Download Status",
-           @"subtitle": [d stringForKey:kSettingsIPADecryptorDownloadStatus] ?: @"Not started." },
-        @{ @"kind": @"info",
-           @"title": @"Output Folder",
+           @"title": settings_l10n_text(@"Output Folder"),
            @"subtitle": ipadecryptor_default_output_directory().length > 0
                 ? ipadecryptor_default_output_directory()
-                : @"Cyanide Documents/DecryptedIPAs" },
+                : settings_l10n_text(@"Cyanide Documents/DecryptedIPAs") },
         @{ @"kind": @"button",
-           @"title": @"Choose Installed App…",
+           @"title": settings_l10n_text(@"Choose Installed App…"),
            @"action": @"ipadec-choose" },
-        @{ @"kind": @"button",
-           @"title": @"Paste App Store Link & Download…",
-           @"subtitle": @"Resolves the link, then starts the IPA download path.",
-           @"action": @"ipadec-paste-link" },
     ]];
-    if (appStoreInput.length > 0) {
-        [rows addObject:@{ @"kind": @"button",
-                           @"title": @"Download IPA from App Store",
-                           @"subtitle": @"Requests an authenticated download ticket, then fetches the encrypted IPA to Documents.",
-                           @"action": @"ipadec-download" }];
-    }
-    if (ipadecryptor_has_app_store_account()) {
-        [rows addObject:@{ @"kind": @"button",
-                           @"title": @"Clear Saved App Store Token",
-                           @"action": @"ipadec-clear-account",
-                           @"destructive": @YES }];
-    }
-    if (downloadedPath.length > 0) {
+    if (lastIPA.length > 0) {
         [rows addObject:@{ @"kind": @"info",
-                           @"title": @"Downloaded IPA",
-                           @"subtitle": downloadedPath }];
+                           @"title": settings_l10n_text(@"Last Decrypted IPA"),
+                           @"subtitle": lastIPA }];
+        [rows addObject:@{ @"kind": @"button",
+                           @"title": settings_l10n_text(@"Share Last IPA…"),
+                           @"action": @"ipadec-share-last" }];
     }
     if (bundleID.length > 0) {
         [rows addObject:@{ @"kind": @"button",
-                           @"title": @"Probe Target",
-                           @"subtitle": @"Reads the app bundle and reports the main Mach-O FairPlay encryption command.",
+                           @"title": settings_l10n_text(@"Probe Target"),
+                           @"subtitle": settings_l10n_text(@"Reads the app bundle and reports the main Mach-O FairPlay encryption command."),
                            @"action": @"ipadec-probe" }];
         [rows addObject:@{ @"kind": @"button",
-                           @"title": @"Start Decrypt",
-                           @"subtitle": @"Runs the in-dev pipeline. Dump and IPA writer stages are still being wired.",
-                           @"action": @"ipadec-start" }];
+                           @"title": settings_l10n_text(@"Start Decrypt (Main Binary)"),
+                           @"subtitle": krwReady
+                                ? settings_l10n_text(@"Decrypts the main executable (UUID-matched dump) and packs a Payload IPA. Encrypted frameworks stay encrypted.")
+                                : settings_l10n_text(@"Requires KRW. Run Kernel Chain first, or this action will try to arm it automatically."),
+                           @"action": @"ipadec-start",
+                           @"style": krwReady ? @"prominent" : @"" }];
     }
     return rows;
 }
@@ -10107,7 +9149,6 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         [out addObject:@{@"title": @"Target", @"value": settings_location_sim_target_summary(d)}];
     } else if (section == SectionIPADecryptor) {
         [out addObject:@{@"title": @"Target", @"value": settings_ipadecryptor_target_summary(d)}];
-        [out addObject:@{@"title": @"App Store", @"value": settings_ipadecryptor_app_store_summary(d)}];
     } else if (section == SectionMWLite) {
         NSUInteger selectedCount = settings_mwlite_selected_apps(d).count;
         [out addObject:@{@"title": NSLocalizedString(@"Selected Apps", nil),
@@ -10183,8 +9224,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 #if CYANIDE_EXPERIMENTAL_TWEAKS_AVAILABLE
         @{ @"title": @"TypeBanner",         @"icon": @"ellipsis.bubble.fill",                @"color": [UIColor systemTealColor],   @"section": @(SectionTypeBanner), @"indev": @YES },
         @{ @"title": @"Notification Island", @"icon": @"bell.and.waves.left.and.right.fill",  @"color": [UIColor systemOrangeColor], @"section": @(SectionNotificationIsland), @"indev": @YES },
-        @{ @"title": @"IPA Decryptor",      @"icon": @"lock.open.fill",                      @"color": [UIColor systemPurpleColor], @"section": @(SectionIPADecryptor), @"indev": @YES },
-        @{ @"title": @"MilkyWay Lite",             @"icon": @"macwindow",                           @"color": [UIColor systemMintColor],   @"section": @(SectionMWLite), @"indev": @YES },
+        @{ @"title": @"MilkyWay Lite",             @"icon": @"macwindow",                           @"color": [UIColor systemMintColor],   @"section": @(SectionMWLite) },
         @{ @"title": @"FastLockX Lite",     @"icon": @"lock.open.fill",                      @"color": [UIColor systemGreenColor],  @"section": @(SectionFastLockXLite) },
 #endif
         @{ @"title": @"Gravity Lite",       @"icon": @"arrow.down.circle.fill",              @"color": [UIColor systemGreenColor],  @"section": @(SectionGravityLite) },
@@ -10194,12 +9234,27 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         @{ @"title": @"LiveWP",             @"icon": @"play.rectangle.fill",                 @"color": [UIColor systemPurpleColor], @"section": @(SectionLiveWP) },
         @{ @"title": @"Metal Lock Light",    @"icon": @"sparkles",                            @"color": [UIColor systemYellowColor], @"section": @(SectionMetalLockLight) },
         @{ @"title": @"Mood Wallpaper",      @"icon": @"photo.on.rectangle.angled",            @"color": [UIColor systemPinkColor],   @"section": @(SectionMoodWallpaper) },
-        @{ @"title": @"QuickLoader",        @"icon": @"bolt.fill",                           @"color": [UIColor systemYellowColor], @"section": @(SectionQuickLoader) },
-        @{ @"title": @"RepoTweaks",         @"icon": @"tray.and.arrow.down.fill",            @"color": [UIColor systemBlueColor],   @"section": @(SectionRepoTweaks) },
         @{ @"title": @"Powercuff",          @"icon": @"bolt.slash.fill",                     @"color": [UIColor systemOrangeColor], @"section": @(SectionPowercuff) },
         @{ @"title": @"SpringBoard Tweaks", @"icon": @"apps.iphone",                         @"color": [UIColor systemIndigoColor], @"section": @(SectionDarkSwordTweaks) },
         @{ @"title": @"Drag Coefficient",   @"icon": @"dial.medium.fill",                    @"color": [UIColor systemIndigoColor], @"section": @(SectionDragCoefficient) },
         @{ @"title": @"Home Layout Extras", @"icon": @"square.dashed.inset.filled",          @"color": [UIColor systemPurpleColor], @"section": @(SectionLayoutExtras) },
+    ];
+}
+
+- (NSArray<NSDictionary *> *)allToolBundleRows
+{
+    return @[
+#if CYANIDE_EXPERIMENTAL_TWEAKS_AVAILABLE
+        @{ @"title": @"IPA Decryptor",      @"icon": @"lock.open.fill",                      @"color": [UIColor systemPurpleColor], @"section": @(SectionIPADecryptor) },
+#endif
+    ];
+}
+
+- (NSArray<NSDictionary *> *)allJavaScriptBundleRows
+{
+    return @[
+        @{ @"title": @"QuickLoader",        @"icon": @"bolt.fill",                           @"color": [UIColor systemYellowColor], @"section": @(SectionQuickLoader) },
+        @{ @"title": @"RepoTweaks",         @"icon": @"tray.and.arrow.down.fill",            @"color": [UIColor systemBlueColor],   @"section": @(SectionRepoTweaks) },
     ];
 }
 
@@ -10244,6 +9299,16 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     return [self filterBundles:[self allTweakBundleRows]];
 }
 
+- (NSArray<NSDictionary *> *)toolBundleRows
+{
+    return [self filterBundles:[self allToolBundleRows]];
+}
+
+- (NSArray<NSDictionary *> *)javaScriptBundleRows
+{
+    return [self filterBundles:[self allJavaScriptBundleRows]];
+}
+
 - (NSArray<NSDictionary *> *)systemBundleRows
 {
     return [self filterBundles:[self allSystemBundleRows]];
@@ -10251,6 +9316,8 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 
 - (NSArray<NSDictionary *> *)bundleRowsForRootSection:(RootSection)section
 {
+    if (section == RootSectionTools)         return self.toolBundleRows;
+    if (section == RootSectionJavaScript)    return self.javaScriptBundleRows;
     if (section == RootSectionTweakBundles)  return self.tweakBundleRows;
     if (section == RootSectionInDev)        return self.inDevBundleRows;
     if (section == RootSectionSystemBundles) return self.systemBundleRows;
@@ -10276,10 +9343,12 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
             return self.changelogExpanded ? n + 2 : 1;
         }
         case RootSectionActions:        return 4;
+        case RootSectionTools:          return (NSInteger)self.toolBundleRows.count;
+        case RootSectionJavaScript:     return (NSInteger)self.javaScriptBundleRows.count;
         case RootSectionTweakBundles:   return (NSInteger)self.tweakBundleRows.count;
         case RootSectionInDev:         return (NSInteger)self.inDevBundleRows.count;
         case RootSectionSystemBundles:  return (NSInteger)self.systemBundleRows.count;
-        case RootSectionAbout:          return 6;
+        case RootSectionAbout:          return 5;
         case RootSectionWarning:        return 0;
         case RootSectionCount:          return 0;
     }
@@ -10292,6 +9361,8 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     switch ((RootSection)section) {
         case RootSectionChangelog:      return self.changelogExpanded ? @"What's New" : nil;
         case RootSectionActions:        return @"Quick Actions";
+        case RootSectionTools:          return self.toolBundleRows.count        > 0 ? @"Tools" : nil;
+        case RootSectionJavaScript:     return self.javaScriptBundleRows.count  > 0 ? @"JavaScript" : nil;
         case RootSectionTweakBundles:   return self.tweakBundleRows.count   > 0 ? @"Tweaks" : nil;
         case RootSectionInDev:         return self.inDevBundleRows.count   > 0 ? @"In Development" : nil;
         case RootSectionSystemBundles:  return self.systemBundleRows.count  > 0 ? @"System" : nil;
@@ -10379,7 +9450,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         return settings_l10n_text(@"Beta CoreLocation simulation. Requires Apple Maps installed and set up — Maps is the RemoteCall host process that drives the simulation.\n\nThis is a manual tool, not an installable package. Use Simulate Current Target to start; use Restore Real Location to stop simulation and return CoreLocation to the device's real providers. Each run opens the activity log and marks completion when the request returns.\n\nNot all apps respect the simulated location. Apps that use their own location validation or additional signals may ignore it.\n\nCredits: kolbicz for the RemoteCall/CLSimulationManager GPS spoofer prototype, and ezzuldinSt's LSpoof for picker/route references.\n\nWarning: this can affect more than maps. Location-tied system behavior, including time zone and date/time handling, may behave unexpectedly. Only use this if you know what you're doing.");
     }
     if (s == SectionIPADecryptor) {
-        return settings_l10n_text(@"In-development local IPA decryptor. Current build discovers installed user apps, resolves pasted App Store links to bundle IDs, signs in for an App Store download token, and fetches the encrypted IPA to Documents. The fetched IPA still needs SINF/iTunesMetadata patching plus the KRW dump/rebuild stage before it becomes a decrypted IPA.");
+        return settings_l10n_text(@"Main-binary IPA decryptor (beta) for apps already installed on this device. Use Run Kernel Chain to arm KRW without installing any Installer tweak, choose an app, then Start Decrypt (Main Binary).\n\nDecrypt path: arm KRW → find the live process → UUID-matched dump of the main Mach-O → pack Payload/*.ipa into Documents/DecryptedIPAs → share sheet.\n\nNo App Store login or remote download. Encrypted frameworks/appex/dylibs stay encrypted until image-matched dep dump lands.");
     }
     if (s == SectionMWLite) {
         return [NSString stringWithFormat:@"%@\n\n%@",
@@ -10406,6 +9477,8 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     if (!self.detailMode) {
         if ((RootSection)section == RootSectionWarning) return CGFLOAT_MIN;
         if ((RootSection)section == RootSectionChangelog     && settings_changelog_entries().count == 0) return CGFLOAT_MIN;
+        if ((RootSection)section == RootSectionTools         && self.toolBundleRows.count == 0) return CGFLOAT_MIN;
+        if ((RootSection)section == RootSectionJavaScript    && self.javaScriptBundleRows.count == 0) return CGFLOAT_MIN;
         if ((RootSection)section == RootSectionTweakBundles  && self.tweakBundleRows.count  == 0) return CGFLOAT_MIN;
         if ((RootSection)section == RootSectionInDev        && self.inDevBundleRows.count  == 0) return CGFLOAT_MIN;
         if ((RootSection)section == RootSectionSystemBundles && self.systemBundleRows.count == 0) return CGFLOAT_MIN;
@@ -10466,16 +9539,16 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     if (!cell) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"indev"];
     }
-    cell.imageView.image = [SettingsViewController iconBadgeWithSymbol:row[@"icon"] color:[UIColor systemGrayColor] size:29.0];
+    cell.imageView.image = [SettingsViewController iconBadgeWithSymbol:row[@"icon"] color:row[@"color"] ?: UIColor.systemGrayColor size:29.0];
     cell.textLabel.text = settings_l10n_text(row[@"title"]);
     cell.textLabel.font = [UIFont systemFontOfSize:17.0];
-    cell.textLabel.textColor = UIColor.tertiaryLabelColor;
+    cell.textLabel.textColor = UIColor.labelColor;
     cell.detailTextLabel.text = settings_l10n_text(@"In Development");
     cell.detailTextLabel.font = [UIFont systemFontOfSize:13.0];
-    cell.detailTextLabel.textColor = UIColor.tertiaryLabelColor;
-    cell.accessoryType = UITableViewCellAccessoryNone;
-    cell.selectionStyle = UITableViewCellSelectionStyleNone;
-    cell.userInteractionEnabled = NO;
+    cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
+    cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+    cell.userInteractionEnabled = YES;
     return cell;
 }
 
@@ -10664,7 +9737,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     switch (row) {
         case 0:
             cell.imageView.image = [SettingsViewController iconBadgeWithSymbol:@"at" color:UIColor.systemBlueColor size:29.0];
-            cell.textLabel.text = @"Twitter";
+            cell.textLabel.text = settings_l10n_text(@"Twitter (Original Author)");
             cell.detailTextLabel.text = @"@zeroxjf";
             break;
         case 1:
@@ -10685,21 +9758,9 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
             cell.textLabel.text = settings_l10n_text(@"Share Log");
             break;
         default:
-            cell.imageView.image = [SettingsViewController iconBadgeWithSymbol:@"icloud.and.arrow.up" color:UIColor.systemIndigoColor size:29.0];
-            cell.textLabel.text = settings_l10n_text(@"Auto-Upload Logs");
-            cell.accessoryType = UITableViewCellAccessoryNone;
-            cell.selectionStyle = UITableViewCellSelectionStyleNone;
-            UISwitch *sw = [[UISwitch alloc] init];
-            sw.on = [[NSUserDefaults standardUserDefaults] boolForKey:kSettingsLogUploadEnabled];
-            [sw addTarget:self action:@selector(logUploadSwitchChanged:) forControlEvents:UIControlEventValueChanged];
-            cell.accessoryView = sw;
             break;
     }
     return cell;
-}
-
-- (void)logUploadSwitchChanged:(UISwitch *)sw {
-    [[NSUserDefaults standardUserDefaults] setBool:sw.isOn forKey:kSettingsLogUploadEnabled];
 }
 
 - (void)reloadThemerSectionAndQueue
@@ -12261,139 +11322,6 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
     [self presentViewController:vc animated:YES completion:nil];
 }
 
-// Session-scoped state so uploaded snapshots from one chain run get grouped on
-// the server side (same sessionId, monotonically increasing seq). A fresh
-// session begins at every settings_run_actions() entry.
-static dispatch_source_t g_cyanide_upload_timer = NULL;
-static NSString         *g_cyanide_upload_session_id = nil;
-static NSMutableSet<NSString *> *g_cyanide_upload_milestones = nil;
-static volatile int      g_cyanide_upload_seq = 0;
-
-// kind = "milestone" (important chain transition) or "final"
-// (post-completion). Milestones are explicit so uploads line up with exploit,
-// RemoteCall, tweak, and live-loop boundaries instead of timer noise.
-static void cyanide_upload_log_with_kind_event(NSString *kind, NSString *event) {
-    if (![[NSUserDefaults standardUserDefaults] boolForKey:kSettingsLogUploadEnabled]) return;
-    NSString *path = log_most_recent_session_path();
-    if (!path) return;
-    NSString *rawLog = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
-    if (!rawLog.length) return;
-
-    int seq = __sync_add_and_fetch(&g_cyanide_upload_seq, 1);
-    NSString *sessionId = g_cyanide_upload_session_id ?: @"adhoc";
-
-    NSString *appVersion = settings_app_version_string();
-    NSString *appBuild = settings_app_build_string();
-    NSString *iosVersion = [UIDevice currentDevice].systemVersion;
-
-    struct utsname sysInfo;
-    uname(&sysInfo);
-    NSString *machine = [NSString stringWithUTF8String:sysInfo.machine];
-
-    // Prepend a diagnostic header so each uploaded log is self-contained.
-    NSString *header = [NSString stringWithFormat:
-        @"=== Cyanide Diagnostic Log ===\n"
-        @"app_version : %@\n"
-        @"app_build   : %@\n"
-        @"ios_version : %@\n"
-        @"device      : %@\n"
-        @"log_file    : %@\n"
-        @"session_id  : %@\n"
-        @"kind        : %@\n"
-        @"event       : %@\n"
-        @"seq         : %d\n"
-        @"==============================\n\n",
-        appVersion, appBuild, iosVersion, machine, path.lastPathComponent,
-        sessionId, kind, event ?: @"", seq];
-
-    NSDictionary *body = @{
-        @"log": [header stringByAppendingString:rawLog],
-        @"meta": @{
-            @"build":      [NSString stringWithFormat:@"cyanide-%@-%@", appVersion, appBuild],
-            @"appVersion": appVersion,
-            @"appBuild":   appBuild,
-            @"source":     @"cyanide",
-            @"ios":        iosVersion,
-            @"device":     machine,
-            @"sessionId":  sessionId,
-            @"kind":       kind,
-            @"event":      event ?: @"",
-            @"seq":        @(seq),
-        }
-    };
-    NSData *data = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
-    if (!data) return;
-    NSURL *url = [NSURL URLWithString:@"https://brokenblade-weblogs.hackerboii.workers.dev/log"];
-    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
-    req.HTTPMethod = @"POST";
-    [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-    req.HTTPBody = data;
-    printf("[LOG] uploading diagnostic (%s%s%s seq=%d, %zu bytes)...\n",
-           kind.UTF8String,
-           event.length ? ":" : "",
-           event.length ? event.UTF8String : "",
-           seq,
-           (size_t)data.length);
-    [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
-        if (e) {
-            printf("[LOG] upload %s%s%s failed: %s\n",
-                   kind.UTF8String,
-                   event.length ? ":" : "",
-                   event.length ? event.UTF8String : "",
-                   e.localizedDescription.UTF8String);
-        } else {
-            NSHTTPURLResponse *http = (NSHTTPURLResponse *)r;
-            printf("[LOG] upload %s%s%s ok: HTTP %ld\n",
-                   kind.UTF8String,
-                   event.length ? ":" : "",
-                   event.length ? event.UTF8String : "",
-                   (long)http.statusCode);
-        }
-    }] resume];
-}
-
-static void cyanide_upload_log_with_kind(NSString *kind) {
-    cyanide_upload_log_with_kind_event(kind, nil);
-}
-
-static void cyanide_upload_log_milestone(NSString *event) {
-    if (!event.length) return;
-
-    @synchronized ([NSUserDefaults standardUserDefaults]) {
-        if (!g_cyanide_upload_milestones)
-            g_cyanide_upload_milestones = [NSMutableSet set];
-        if ([g_cyanide_upload_milestones containsObject:event])
-            return;
-        [g_cyanide_upload_milestones addObject:event];
-    }
-
-    cyanide_upload_log_with_kind_event(@"milestone", event);
-}
-
-static void cyanide_upload_log_if_enabled(void) {
-    cyanide_upload_log_with_kind(@"final");
-}
-
-// Begin a diagnostic upload session. Uploads are milestone-driven; this no
-// longer starts the old 3s/8s periodic checkpoint timer.
-static void cyanide_start_session_uploads(void) {
-    if (![[NSUserDefaults standardUserDefaults] boolForKey:kSettingsLogUploadEnabled]) return;
-    if (g_cyanide_upload_timer) return;
-
-    g_cyanide_upload_session_id = [[NSUUID UUID] UUIDString];
-    @synchronized ([NSUserDefaults standardUserDefaults]) {
-        g_cyanide_upload_milestones = [NSMutableSet set];
-    }
-    g_cyanide_upload_seq = 0;
-}
-
-static void cyanide_stop_session_uploads(void) {
-    if (g_cyanide_upload_timer) {
-        dispatch_source_cancel(g_cyanide_upload_timer);
-        g_cyanide_upload_timer = NULL;
-    }
-}
-
 // Contact owner (zeroxjf) with the diagnostic log inline in the body. Build
 // info sits between the user's typing area at the top and the log dump
 // below, so the user just types above the signature and hits send.
@@ -12493,6 +11421,10 @@ void cyanide_present_contact(UIViewController *host)
             case RootSectionActions:
                 indexPath = [NSIndexPath indexPathForRow:indexPath.row inSection:SectionActions];
                 break;
+            case RootSectionTools:
+                return [self buildBundleCellWithRow:self.toolBundleRows[indexPath.row] tableView:tableView];
+            case RootSectionJavaScript:
+                return [self buildBundleCellWithRow:self.javaScriptBundleRows[indexPath.row] tableView:tableView];
             case RootSectionTweakBundles:
                 return [self buildBundleCellWithRow:self.tweakBundleRows[indexPath.row] tableView:tableView];
             case RootSectionInDev:
@@ -12732,25 +11664,42 @@ void cyanide_present_contact(UIViewController *host)
             [action isEqualToString:@"nano-load"]) {
             rowSupported = settings_nano_load_override_enabled();
         }
+        // Per-row soft disable (still may handle tap with a log), keeps tint correct after reload.
+        BOOL rowDisabled = [row[@"disabled"] boolValue];
+        BOOL rowInteractive = rowSupported && !rowDisabled;
         UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"button" forIndexPath:dequeuePath];
-        cell.selectionStyle = rowSupported ? UITableViewCellSelectionStyleDefault : UITableViewCellSelectionStyleNone;
-        cell.userInteractionEnabled = rowSupported;
+        // Clear leftover selected/highlighted state from prior taps + reloads.
+        [cell setSelected:NO animated:NO];
+        [cell setHighlighted:NO animated:NO];
+        cell.selectionStyle = rowInteractive ? UITableViewCellSelectionStyleDefault : UITableViewCellSelectionStyleNone;
+        cell.userInteractionEnabled = rowSupported; // disabled rows may still show message on tap
         cell.accessoryView = nil;
+        cell.accessoryType = UITableViewCellAccessoryNone;
         cell.textLabel.text = settings_l10n_text(row[@"title"]);
         cell.textLabel.textAlignment = NSTextAlignmentCenter;
+        cell.textLabel.numberOfLines = 0;
 
         BOOL prominent = [row[@"style"] isEqualToString:@"prominent"];
-        if (prominent && rowSupported) {
-            cell.textLabel.textColor = UIColor.whiteColor;
-            cell.textLabel.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold];
-            cell.backgroundColor = self.view.tintColor;
-        } else {
-            cell.textLabel.textColor = rowSupported
-                ? ([row[@"destructive"] boolValue] ? UIColor.systemRedColor : self.view.tintColor)
-                : UIColor.tertiaryLabelColor;
+        UIColor *titleColor = nil;
+        if (!rowSupported || rowDisabled) {
+            titleColor = UIColor.tertiaryLabelColor;
             cell.textLabel.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightRegular];
             cell.backgroundColor = nil;
+            cell.contentView.backgroundColor = nil;
+        } else if (prominent) {
+            titleColor = UIColor.whiteColor;
+            cell.textLabel.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold];
+            cell.backgroundColor = self.view.tintColor;
+            cell.contentView.backgroundColor = self.view.tintColor;
+        } else {
+            titleColor = [row[@"destructive"] boolValue] ? UIColor.systemRedColor : self.view.tintColor;
+            cell.textLabel.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightRegular];
+            cell.backgroundColor = nil;
+            cell.contentView.backgroundColor = nil;
         }
+        cell.textLabel.textColor = titleColor;
+        // Prevent selection flash from sticking as gray tertiary text after deselect/reload.
+        cell.textLabel.highlightedTextColor = titleColor;
         return cell;
     }
 
@@ -13192,20 +12141,28 @@ void cyanide_present_contact(UIViewController *host)
 
 - (void)presentActivityLogWithCompletion:(dispatch_block_t)completion
 {
+    [self presentActivityLogWithCompletion:completion afterDismiss:nil];
+}
+
+- (void)presentActivityLogWithCompletion:(dispatch_block_t)completion
+                            afterDismiss:(dispatch_block_t)afterDismiss
+{
     if (self.presentedViewController) {
         if ([self.presentedViewController isKindOfClass:UIAlertController.class]) {
             __weak typeof(self) weakSelf = self;
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(250 * NSEC_PER_MSEC)),
                            dispatch_get_main_queue(), ^{
-                [weakSelf presentActivityLogWithCompletion:completion];
+                [weakSelf presentActivityLogWithCompletion:completion afterDismiss:afterDismiss];
             });
             return;
         }
         if (completion) completion();
+        if (afterDismiss) afterDismiss();
         return;
     }
 
     InstallProgressViewController *vc = [[InstallProgressViewController alloc] init];
+    vc.onDismiss = afterDismiss;
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
     nav.modalPresentationStyle = UIModalPresentationAutomatic;
     [self presentViewController:nav animated:YES completion:completion];
@@ -13375,6 +12332,10 @@ void cyanide_present_contact(UIViewController *host)
 
 - (void)reloadIPADecryptorUI
 {
+    NSIndexPath *selected = self.tableView.indexPathForSelectedRow;
+    if (selected) {
+        [self.tableView deselectRowAtIndexPath:selected animated:NO];
+    }
     [self reloadSectionOrAll:SectionIPADecryptor];
     [[NSNotificationCenter defaultCenter] postNotificationName:PackageQueueDidChangeNotification
                                                         object:[PackageQueue sharedQueue]];
@@ -13480,11 +12441,19 @@ void cyanide_present_contact(UIViewController *host)
 
 - (void)presentIPADecryptorAppPicker
 {
+    // KRW alone is not enough to scan /var/containers — widen sandbox first.
+    if (kexploit_krw_ready_quiet()) {
+        (void)ipadecryptor_prepare_for_app_enumeration();
+    }
+
     NSArray<NSDictionary<NSString *, NSString *> *> *apps = ipadecryptor_installed_apps();
     if (apps.count == 0) {
+        NSString *hint = kexploit_krw_ready_quiet()
+            ? settings_l10n_text(@"Cyanide still cannot see installed user apps. Try Re-run Kernel Chain, or open the target app once and try again.")
+            : settings_l10n_text(@"Cyanide could not list installed user apps yet. Run Kernel Chain on this page first, then try again.");
         UIAlertController *ac = [UIAlertController
             alertControllerWithTitle:settings_l10n_text(@"No Apps Found")
-                             message:settings_l10n_text(@"Cyanide could not list installed user apps yet. Run the chain once, then try again.")
+                             message:hint
                       preferredStyle:UIAlertControllerStyleAlert];
         [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"OK") style:UIAlertActionStyleDefault handler:nil]];
         settings_present_controller(ac, self);
@@ -13530,350 +12499,76 @@ void cyanide_present_contact(UIViewController *host)
     settings_present_controller(ac, self);
 }
 
-- (void)saveIPADecryptorAppStoreMetadata:(NSDictionary<NSString *, NSString *> *)meta
-                                   input:(NSString *)input
+- (void)presentIPADecryptorShareSheetForPath:(NSString *)path
 {
-    if (meta.count == 0) return;
-    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
-    NSString *bundleID = meta[@"bundleID"] ?: @"";
-    [d setObject:input ?: @"" forKey:kSettingsIPADecryptorAppStoreInput];
-    [d setObject:meta[@"appStoreID"] ?: @"" forKey:kSettingsIPADecryptorAppStoreID];
-    [d setObject:meta[@"name"] ?: @"" forKey:kSettingsIPADecryptorAppStoreName];
-    [d setObject:meta[@"version"] ?: @"" forKey:kSettingsIPADecryptorAppStoreVersion];
-    [d setObject:meta[@"trackURL"] ?: @"" forKey:kSettingsIPADecryptorAppStoreURL];
-    [d setObject:@"" forKey:kSettingsIPADecryptorDownloadedIPAPath];
-    [d setObject:settings_l10n_text(@"Resolved App Store metadata. Download not started yet.")
-          forKey:kSettingsIPADecryptorDownloadStatus];
-    if (bundleID.length > 0) {
-        [d setObject:bundleID forKey:kSettingsIPADecryptorTargetBundleID];
+    if (path.length == 0) return;
+    BOOL isDir = NO;
+    if (![NSFileManager.defaultManager fileExistsAtPath:path isDirectory:&isDir] || isDir) {
+        log_user("[IPADEC] Share skipped; file missing: %s\n", path.UTF8String);
+        return;
     }
-    [d synchronize];
-}
-
-- (void)saveIPADecryptorDownloadStatus:(NSString *)status
-                         downloadedIPA:(NSString *)downloadedPath
-{
-    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
-    [d setObject:status.length > 0 ? status : @"Download status unavailable."
-          forKey:kSettingsIPADecryptorDownloadStatus];
-    if (downloadedPath.length > 0) {
-        [d setObject:downloadedPath forKey:kSettingsIPADecryptorDownloadedIPAPath];
+    NSURL *url = [NSURL fileURLWithPath:path];
+    UIActivityViewController *vc =
+        [[UIActivityViewController alloc] initWithActivityItems:@[url]
+                                          applicationActivities:nil];
+    UIPopoverPresentationController *popover = vc.popoverPresentationController;
+    if (popover) {
+        popover.sourceView = self.view;
+        popover.sourceRect = CGRectMake(CGRectGetMidX(self.view.bounds),
+                                        CGRectGetMidY(self.view.bounds),
+                                        1.0,
+                                        1.0);
+        popover.permittedArrowDirections = 0;
     }
-    [d synchronize];
+    log_user("[IPADEC] Presenting share sheet for %s\n", path.UTF8String);
+    // Prefer top-most presenter (activity log may still be visible briefly).
+    settings_present_controller(vc, self);
 }
 
-- (void)presentIPADecryptorSignInPrompt
+- (void)runIPADecryptorKernelChain
 {
-    UIAlertController *ac = [UIAlertController
-        alertControllerWithTitle:settings_l10n_text(@"App Store Sign In")
-                         message:settings_l10n_text(@"Sign in with the Apple ID that owns or can download the app. If Apple asks for two-factor authentication, Cyanide will prompt for the code next.")
-                  preferredStyle:UIAlertControllerStyleAlert];
-    [ac addTextFieldWithConfigurationHandler:^(UITextField *field) {
-        field.placeholder = settings_l10n_text(@"Apple ID email");
-        field.keyboardType = UIKeyboardTypeEmailAddress;
-        field.autocapitalizationType = UITextAutocapitalizationTypeNone;
-        field.autocorrectionType = UITextAutocorrectionTypeNo;
-        field.clearButtonMode = UITextFieldViewModeWhileEditing;
-    }];
-    [ac addTextFieldWithConfigurationHandler:^(UITextField *field) {
-        field.placeholder = settings_l10n_text(@"Password");
-        field.secureTextEntry = YES;
-        field.autocapitalizationType = UITextAutocapitalizationTypeNone;
-        field.autocorrectionType = UITextAutocorrectionTypeNo;
-        field.clearButtonMode = UITextFieldViewModeWhileEditing;
-    }];
-    __weak typeof(self) weakSelf = self;
-    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
-    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Sign In")
-                                           style:UIAlertActionStyleDefault
-                                         handler:^(__unused UIAlertAction *action) {
-        __strong typeof(weakSelf) strongSelf = weakSelf;
-        [strongSelf runIPADecryptorSignInEmail:ac.textFields[0].text
-                                      password:ac.textFields[1].text
-                                      authCode:nil];
-    }]];
-    settings_present_controller(ac, self);
-}
-
-- (void)presentIPADecryptorTwoFactorPromptForEmail:(NSString *)email
-                                          password:(NSString *)password
-{
-    NSString *trimmedEmail = [email ?: @"" stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    NSString *shownEmail = trimmedEmail.length > 0 ? trimmedEmail : @"this Apple ID";
-    UIAlertController *ac = [UIAlertController
-        alertControllerWithTitle:settings_l10n_text(@"Two-Factor Code")
-                         message:[NSString stringWithFormat:settings_l10n_text(@"Enter the 6-digit code Apple sent for %@."), shownEmail]
-                  preferredStyle:UIAlertControllerStyleAlert];
-    [ac addTextFieldWithConfigurationHandler:^(UITextField *field) {
-        field.placeholder = settings_l10n_text(@"2FA code");
-        field.keyboardType = UIKeyboardTypeNumberPad;
-        field.textContentType = UITextContentTypeOneTimeCode;
-        field.clearButtonMode = UITextFieldViewModeWhileEditing;
-    }];
-    __weak typeof(self) weakSelf = self;
-    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
-    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Verify")
-                                           style:UIAlertActionStyleDefault
-                                         handler:^(__unused UIAlertAction *action) {
-        __strong typeof(weakSelf) strongSelf = weakSelf;
-        NSString *rawCode = ac.textFields.firstObject.text ?: @"";
-        NSMutableString *code = [NSMutableString string];
-        NSCharacterSet *digits = NSCharacterSet.decimalDigitCharacterSet;
-        for (NSUInteger i = 0; i < rawCode.length; i++) {
-            unichar c = [rawCode characterAtIndex:i];
-            if ([digits characterIsMember:c]) [code appendFormat:@"%C", c];
-        }
-        if (code.length == 0) {
-            UIAlertController *retry = [UIAlertController
-                alertControllerWithTitle:settings_l10n_text(@"Code Required")
-                                 message:settings_l10n_text(@"Enter the 6-digit Apple verification code.")
-                          preferredStyle:UIAlertControllerStyleAlert];
-            [retry addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"OK") style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
-                [strongSelf presentIPADecryptorTwoFactorPromptForEmail:email password:password];
-            }]];
-            settings_present_controller(retry, strongSelf);
-            return;
-        }
-        [strongSelf runIPADecryptorSignInEmail:email
-                                      password:password
-                                      authCode:code];
-    }]];
-    settings_present_controller(ac, self);
-}
-
-- (void)runIPADecryptorSignInEmail:(NSString *)email
-                          password:(NSString *)password
-                          authCode:(NSString *)authCode
-{
-    static volatile int sIPADecryptorSignInInFlight = 0;
-    if (__sync_lock_test_and_set(&sIPADecryptorSignInInFlight, 1)) {
-        log_user("[IPADEC] App Store sign-in already running.\n");
+    if (!settings_device_supported()) {
+        log_user("[IPADEC] Unsupported device: %s\n", settings_unsupported_message().UTF8String);
         return;
     }
 
-    NSString *emailCopy = [email copy] ?: @"";
-    NSString *passwordCopy = [password copy] ?: @"";
-    NSString *authCodeCopy = [authCode copy] ?: @"";
-    __weak typeof(self) weakSelf = self;
-    log_user("[IPADEC] Signing in to App Store as %s%s\n",
-             emailCopy.UTF8String,
-             authCodeCopy.length > 0 ? " with 2FA code" : "");
-    dispatch_async(dispatch_get_global_queue(0, 0), ^{
-        BOOL actionOK = NO;
-        BOOL actionLockAcquired = NO;
-        NSString *completionMessage = nil;
-        @try {
-            actionLockAcquired = settings_try_claim_actions_lock("IPA Decryptor App Store sign-in",
-                                                                 "[IPADEC] Another action is already running.");
-            if (!actionLockAcquired) {
-                completionMessage = @"Sign-in blocked: another action is still running.";
-                return;
-            }
-            NSString *message = nil;
-            actionOK = ipadecryptor_login_app_store(emailCopy, passwordCopy, authCodeCopy, &message);
-            completionMessage = message ?: (actionOK ? @"App Store sign-in complete." : @"App Store sign-in failed.");
-            log_user("[IPADEC] %s\n", completionMessage.UTF8String);
-        } @finally {
-            if (actionLockAcquired) settings_release_actions_lock();
-            __sync_lock_release(&sIPADecryptorSignInInFlight);
-            BOOL messageRequestsTwoFactor =
-                completionMessage.length > 0 &&
-                [completionMessage rangeOfString:@"Two-factor code required"
-                                         options:NSCaseInsensitiveSearch].location != NSNotFound;
-            BOOL needsTwoFactor = (!actionOK &&
-                                   authCodeCopy.length == 0 &&
-                                   messageRequestsTwoFactor);
-            dispatch_async(dispatch_get_main_queue(), ^{
-                __strong typeof(weakSelf) strongSelf = weakSelf;
-                [strongSelf reloadIPADecryptorUI];
-                NSDictionary *info = @{
-                    kSettingsActionsDidCompleteSuccessKey: @(actionOK),
-                    kSettingsActionsDidCompleteMessageKey: completionMessage ?: @""
-                };
-                [[NSNotificationCenter defaultCenter]
-                    postNotificationName:kSettingsActionsDidCompleteNotification
-                                  object:nil
-                                userInfo:info];
-                if (needsTwoFactor) {
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(250 * NSEC_PER_MSEC)),
-                                   dispatch_get_main_queue(), ^{
-                        __strong typeof(weakSelf) laterSelf = weakSelf;
-                        [laterSelf presentIPADecryptorTwoFactorPromptForEmail:emailCopy
-                                                                      password:passwordCopy];
-                    });
-                }
-            });
-        }
-    });
-}
-
-- (void)presentIPADecryptorAppStoreLinkPrompt
-{
-    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
-    UIAlertController *ac = [UIAlertController
-        alertControllerWithTitle:settings_l10n_text(@"App Store Link")
-                         message:settings_l10n_text(@"Paste an App Store URL like https://apps.apple.com/us/app/name/id123456789, or enter the numeric app ID. Cyanide will resolve it, then attempt the IPA download path.")
-                  preferredStyle:UIAlertControllerStyleAlert];
-    [ac addTextFieldWithConfigurationHandler:^(UITextField *field) {
-        field.placeholder = settings_l10n_text(@"App Store URL or app ID");
-        field.text = [d stringForKey:kSettingsIPADecryptorAppStoreInput] ?: @"";
-        field.keyboardType = UIKeyboardTypeURL;
-        field.autocapitalizationType = UITextAutocapitalizationTypeNone;
-        field.autocorrectionType = UITextAutocorrectionTypeNo;
-        field.clearButtonMode = UITextFieldViewModeWhileEditing;
-    }];
-    __weak typeof(self) weakSelf = self;
-    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel") style:UIAlertActionStyleCancel handler:nil]];
-    [ac addAction:[UIAlertAction actionWithTitle:settings_l10n_text(@"Resolve")
-                                           style:UIAlertActionStyleDefault
-                                         handler:^(__unused UIAlertAction *action) {
-        __strong typeof(weakSelf) strongSelf = weakSelf;
-        NSString *input = ac.textFields.firstObject.text ?: @"";
-        [strongSelf runIPADecryptorResolveAppStoreInput:input];
-    }]];
-    settings_present_controller(ac, self);
-}
-
-- (void)runIPADecryptorResolveAppStoreInput:(NSString *)input
-{
-    NSString *trimmed = [input stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    if (trimmed.length == 0) {
-        log_user("[IPADEC] Paste an App Store link first.\n");
+    static volatile int sIPADecryptorChainInFlight = 0;
+    if (__sync_lock_test_and_set(&sIPADecryptorChainInFlight, 1)) {
+        log_user("[IPADEC] Kernel chain is already running.\n");
         return;
     }
 
     __weak typeof(self) weakSelf = self;
     dispatch_block_t startAction = ^{
-        log_user("[IPADEC] Resolving App Store input: %s\n", trimmed.UTF8String);
+        log_user("[IPADEC] Running kernel chain for decrypt (no tweak install)...\n");
         dispatch_async(dispatch_get_global_queue(0, 0), ^{
             BOOL actionOK = NO;
             BOOL actionLockAcquired = NO;
             NSString *completionMessage = nil;
-            NSDictionary<NSString *, NSString *> *meta = nil;
-            BOOL downloadOK = NO;
-            NSString *downloadedPath = nil;
-            NSString *downloadMessage = nil;
             @try {
-                actionLockAcquired = settings_try_claim_actions_lock("IPA Decryptor App Store lookup",
+                actionLockAcquired = settings_try_claim_actions_lock("IPA Decryptor kernel chain",
                                                                      "[IPADEC] Another action is already running.");
                 if (!actionLockAcquired) {
-                    completionMessage = @"App Store lookup blocked: another action is still running.";
+                    completionMessage = settings_l10n_text(@"IPA Decryptor blocked: another action is still running.");
                     return;
                 }
-
-                NSString *message = nil;
-                meta = ipadecryptor_resolve_app_store_input(trimmed, &message);
-                actionOK = meta != nil;
-                completionMessage = message ?: (actionOK ? @"App Store link resolved." : @"App Store lookup failed.");
-                if (meta) {
-                    log_user("[IPADEC] Resolved target bundle id: %s\n",
-                             (meta[@"bundleID"] ?: @"").UTF8String);
-                    log_user("[IPADEC] Starting IPA download path after resolve.\n");
-                    downloadOK = ipadecryptor_download_app_store_ipa(trimmed,
-                                                                     &downloadedPath,
-                                                                     &downloadMessage);
-                    if (downloadOK) {
-                        completionMessage = downloadMessage ?: @"IPA downloaded.";
-                    } else {
-                        completionMessage = [NSString stringWithFormat:settings_l10n_text(@"Link resolved. %@"),
-                                                                       downloadMessage ?: @"IPA download did not start."];
-                    }
-                }
-            } @finally {
-                if (actionLockAcquired) settings_release_actions_lock();
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    __strong typeof(weakSelf) strongSelf = weakSelf;
-                    if (meta) [strongSelf saveIPADecryptorAppStoreMetadata:meta input:trimmed];
-                    if (meta) {
-                        [strongSelf saveIPADecryptorDownloadStatus:downloadMessage ?: (downloadOK ? @"IPA downloaded." : @"IPA download did not start.")
-                                                     downloadedIPA:downloadOK ? downloadedPath : nil];
-                    }
-                    [strongSelf reloadIPADecryptorUI];
-                    NSDictionary *info = @{
-                        kSettingsActionsDidCompleteSuccessKey: @(actionOK && downloadOK),
-                        kSettingsActionsDidCompleteMessageKey: completionMessage ?: @""
-                    };
-                    [[NSNotificationCenter defaultCenter]
-                        postNotificationName:kSettingsActionsDidCompleteNotification
-                                      object:nil
-                                    userInfo:info];
-                });
-            }
-        });
-    };
-    [self presentActivityLogWithCompletion:startAction];
-}
-
-- (void)runIPADecryptorAction:(NSString *)action
-{
-    if (action.length == 0) return;
-    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
-    BOOL downloadIPA = [action isEqualToString:@"ipadec-download"];
-    NSString *bundleID = [d stringForKey:kSettingsIPADecryptorTargetBundleID];
-    NSString *appStoreInput = [d stringForKey:kSettingsIPADecryptorAppStoreInput];
-    if (!downloadIPA && bundleID.length == 0) {
-        log_user("[IPADEC] Select an installed app first.\n");
-        return;
-    }
-    if (downloadIPA && appStoreInput.length == 0) {
-        log_user("[IPADEC] Paste an App Store link first.\n");
-        return;
-    }
-
-    BOOL startDecrypt = [action isEqualToString:@"ipadec-start"];
-    BOOL probeOnly = [action isEqualToString:@"ipadec-probe"];
-    if (!startDecrypt && !probeOnly && !downloadIPA) return;
-
-    static volatile int sIPADecryptorInFlight = 0;
-    if (__sync_lock_test_and_set(&sIPADecryptorInFlight, 1)) {
-        log_user("[IPADEC] Another IPA Decryptor action is already running.\n");
-        return;
-    }
-
-    __weak typeof(self) weakSelf = self;
-    dispatch_block_t startAction = ^{
-        log_user("[IPADEC] %s %s\n",
-                 downloadIPA ? "Downloading App Store IPA for" : (startDecrypt ? "Starting decrypt pipeline for" : "Probing"),
-                 downloadIPA ? appStoreInput.UTF8String : bundleID.UTF8String);
-        dispatch_async(dispatch_get_global_queue(0, 0), ^{
-            BOOL actionOK = NO;
-            BOOL actionLockAcquired = NO;
-            NSString *completionMessage = nil;
-            NSString *downloadedPath = nil;
-            @try {
-                actionLockAcquired = settings_try_claim_actions_lock("IPA Decryptor action",
-                                                                     "[IPADEC] Another action is already running.");
-                if (!actionLockAcquired) {
-                    completionMessage = @"IPA Decryptor blocked: another action is still running.";
-                    return;
-                }
-                if (startDecrypt && !settings_ensure_kexploit()) {
-                    log_user("[IPADEC] Failed: kernel primitives not acquired. Please run the chain again.\n");
-                    completionMessage = @"IPA Decryptor failed: kernel primitives were not acquired.";
-                    return;
-                }
-
-                NSString *message = nil;
-                if (downloadIPA) {
-                    actionOK = ipadecryptor_download_app_store_ipa(appStoreInput,
-                                                                   &downloadedPath,
-                                                                   &message);
+                actionOK = settings_ensure_kexploit();
+                if (actionOK) {
+                    // KRW alone cannot list /var/containers — widen sandbox for app picker.
+                    BOOL sbx = ipadecryptor_prepare_for_app_enumeration();
+                    log_user("[IPADEC] Kernel chain ready (sandbox widen %s). Decrypt without Installer tweak.\n",
+                             sbx ? "ok" : "partial");
+                    completionMessage = settings_l10n_text(sbx
+                        ? @"Kernel chain ready. You can list apps and decrypt."
+                        : @"Kernel chain ready, but sandbox widen was partial — app list may still be empty.");
                 } else {
-                    actionOK = startDecrypt
-                        ? ipadecryptor_start_decrypt_installed_app(bundleID, &message)
-                        : ipadecryptor_probe_installed_app(bundleID, &message);
+                    log_user("[IPADEC] Kernel chain failed. Try again or check device window.\n");
+                    completionMessage = settings_l10n_text(@"Kernel chain failed. Try again.");
                 }
-                completionMessage = message ?: (actionOK ? @"IPA Decryptor action finished." : @"IPA Decryptor action did not complete.");
             } @finally {
                 if (actionLockAcquired) settings_release_actions_lock();
-                __sync_lock_release(&sIPADecryptorInFlight);
+                __sync_lock_release(&sIPADecryptorChainInFlight);
                 dispatch_async(dispatch_get_main_queue(), ^{
-                    __strong typeof(weakSelf) strongSelf = weakSelf;
-                    if (downloadIPA) {
-                        [strongSelf saveIPADecryptorDownloadStatus:completionMessage
-                                                     downloadedIPA:(actionOK ? downloadedPath : nil)];
-                    }
-                    [strongSelf reloadIPADecryptorUI];
                     NSDictionary *info = @{
                         kSettingsActionsDidCompleteSuccessKey: @(actionOK),
                         kSettingsActionsDidCompleteMessageKey: completionMessage ?: @""
@@ -13886,7 +12581,109 @@ void cyanide_present_contact(UIViewController *host)
             }
         });
     };
-    [self presentActivityLogWithCompletion:startAction];
+    [self presentActivityLogWithCompletion:startAction afterDismiss:^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        [strongSelf reloadIPADecryptorUI];
+    }];
+}
+
+- (void)runIPADecryptorAction:(NSString *)action
+{
+    if (action.length == 0) return;
+    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    NSString *bundleID = [d stringForKey:kSettingsIPADecryptorTargetBundleID];
+    if (bundleID.length == 0) {
+        log_user("[IPADEC] Select an installed app first.\n");
+        return;
+    }
+
+    BOOL startDecrypt = [action isEqualToString:@"ipadec-start"];
+    BOOL probeOnly = [action isEqualToString:@"ipadec-probe"];
+    if (!startDecrypt && !probeOnly) return;
+
+    static volatile int sIPADecryptorInFlight = 0;
+    if (__sync_lock_test_and_set(&sIPADecryptorInFlight, 1)) {
+        log_user("[IPADEC] Another IPA Decryptor action is already running.\n");
+        return;
+    }
+
+    __weak typeof(self) weakSelf = self;
+    __block NSString *sharePathAfterDismiss = nil;
+    dispatch_block_t startAction = ^{
+        log_user("[IPADEC] %s %s\n",
+                 startDecrypt ? "Starting decrypt pipeline for" : "Probing",
+                 bundleID.UTF8String);
+        dispatch_async(dispatch_get_global_queue(0, 0), ^{
+            BOOL actionOK = NO;
+            BOOL actionLockAcquired = NO;
+            NSString *completionMessage = nil;
+            NSString *outputPath = nil;
+            @try {
+                actionLockAcquired = settings_try_claim_actions_lock("IPA Decryptor action",
+                                                                     "[IPADEC] Another action is already running.");
+                if (!actionLockAcquired) {
+                    completionMessage = settings_l10n_text(@"IPA Decryptor blocked: another action is still running.");
+                    return;
+                }
+                if (startDecrypt && !settings_ensure_kexploit()) {
+                    log_user("[IPADEC] Failed: kernel primitives not acquired. Use Run Kernel Chain, then retry.\n");
+                    completionMessage = settings_l10n_text(@"IPA Decryptor failed: kernel primitives were not acquired. Run Kernel Chain first.");
+                    return;
+                }
+
+                NSString *message = nil;
+                actionOK = startDecrypt
+                    ? ipadecryptor_start_decrypt_installed_app(bundleID, &message)
+                    : ipadecryptor_probe_installed_app(bundleID, &message);
+                if (startDecrypt && actionOK) {
+                    outputPath = [[NSUserDefaults standardUserDefaults]
+                        stringForKey:kSettingsIPADecryptorLastOutputPath];
+                    if (outputPath.length == 0 && message.length > 0) {
+                        NSRegularExpression *re =
+                            [NSRegularExpression regularExpressionWithPattern:
+                             @"(/[^\\s]+DecryptedIPAs/[^\\s]+\\.ipa)"
+                                                                      options:0
+                                                                        error:nil];
+                        NSTextCheckingResult *m =
+                            [re firstMatchInString:message options:0 range:NSMakeRange(0, message.length)];
+                        if (m && m.numberOfRanges > 1) {
+                            outputPath = [message substringWithRange:[m rangeAtIndex:1]];
+                            if (outputPath.length > 0) {
+                                [[NSUserDefaults standardUserDefaults]
+                                    setObject:outputPath
+                                       forKey:kSettingsIPADecryptorLastOutputPath];
+                                [[NSUserDefaults standardUserDefaults] synchronize];
+                            }
+                        }
+                    }
+                }
+                completionMessage = message.length > 0
+                    ? settings_l10n_text(message)
+                    : settings_l10n_text(actionOK ? @"IPA Decryptor action finished." : @"IPA Decryptor action did not complete.");
+            } @finally {
+                if (actionLockAcquired) settings_release_actions_lock();
+                __sync_lock_release(&sIPADecryptorInFlight);
+                if (startDecrypt && actionOK) sharePathAfterDismiss = [outputPath copy];
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    NSDictionary *info = @{
+                        kSettingsActionsDidCompleteSuccessKey: @(actionOK),
+                        kSettingsActionsDidCompleteMessageKey: completionMessage ?: @""
+                    };
+                    [[NSNotificationCenter defaultCenter]
+                        postNotificationName:kSettingsActionsDidCompleteNotification
+                        object:nil
+                                      userInfo:info];
+                });
+            }
+        });
+    };
+    [self presentActivityLogWithCompletion:startAction afterDismiss:^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        [strongSelf reloadIPADecryptorUI];
+        if (sharePathAfterDismiss.length > 0) {
+            [strongSelf presentIPADecryptorShareSheetForPath:sharePathAfterDismiss];
+        }
+    }];
 }
 
 - (void)runGravityLiteAction:(NSString *)action
@@ -14372,14 +13169,12 @@ void cyanide_present_contact(UIViewController *host)
             case RootSectionActions:
                 indexPath = [NSIndexPath indexPathForRow:indexPath.row inSection:SectionActions];
                 break;
+            case RootSectionTools:
+            case RootSectionJavaScript:
             case RootSectionInDev:
             case RootSectionTweakBundles:
             case RootSectionSystemBundles: {
-                NSArray<NSDictionary *> *bundles = (RootSection)indexPath.section == RootSectionInDev
-                    ? self.inDevBundleRows
-                    : ((RootSection)indexPath.section == RootSectionTweakBundles
-                        ? self.tweakBundleRows
-                        : self.systemBundleRows);
+                NSArray<NSDictionary *> *bundles = [self bundleRowsForRootSection:(RootSection)indexPath.section];
                 NSDictionary *bundle = bundles[indexPath.row];
                 NSInteger underlying = [bundle[@"section"] integerValue];
                 NSString *pushTitle = bundle[@"title"];
@@ -14399,7 +13194,6 @@ void cyanide_present_contact(UIViewController *host)
                     case 2: [self showAppIconPicker]; break;
                     case 3: [self openViewLog]; break;
                     case 4: [self openShareLog]; break;
-                    // Row 5: Auto-Upload — UISwitch handles it
                 }
                 return;
             }
@@ -14647,21 +13441,20 @@ void cyanide_present_contact(UIViewController *host)
     if (indexPath.section == SectionIPADecryptor) {
         NSDictionary *row = [self rowsForSection:indexPath.section][indexPath.row];
         if (![row[@"kind"] isEqualToString:@"button"]) return;
+        if ([row[@"disabled"] boolValue]) {
+            log_user("[IPADEC] That action is currently disabled.\n");
+            return;
+        }
         NSString *action = row[@"action"];
-        if ([action isEqualToString:@"ipadec-choose"]) {
+        if ([action isEqualToString:@"ipadec-chain"]) {
+            [self runIPADecryptorKernelChain];
+        } else if ([action isEqualToString:@"ipadec-choose"]) {
             [self presentIPADecryptorAppPicker];
-        } else if ([action isEqualToString:@"ipadec-signin"]) {
-            [self presentIPADecryptorSignInPrompt];
-        } else if ([action isEqualToString:@"ipadec-clear-account"]) {
-            ipadecryptor_clear_app_store_account();
-            [self saveIPADecryptorDownloadStatus:@"App Store token cleared. Sign in before downloading."
-                                   downloadedIPA:nil];
-            [self reloadIPADecryptorUI];
-        } else if ([action isEqualToString:@"ipadec-paste-link"]) {
-            [self presentIPADecryptorAppStoreLinkPrompt];
+        } else if ([action isEqualToString:@"ipadec-share-last"]) {
+            NSString *path = [NSUserDefaults.standardUserDefaults stringForKey:kSettingsIPADecryptorLastOutputPath];
+            [self presentIPADecryptorShareSheetForPath:path];
         } else if ([action isEqualToString:@"ipadec-probe"] ||
-                   [action isEqualToString:@"ipadec-start"] ||
-                   [action isEqualToString:@"ipadec-download"]) {
+                   [action isEqualToString:@"ipadec-start"]) {
             [self runIPADecryptorAction:action];
         }
         return;

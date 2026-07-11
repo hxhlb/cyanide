@@ -1,45 +1,56 @@
 //
 //  ipadecryptor.m
-//  Cyanide private/in-dev IPA decryptor scaffold.
+//  Cyanide local IPA decryptor (installed apps only).
+//
+//  FairPlay memory dump adapted from lara/kexploit/decrypt.m (neonmodder123)
+//  onto Cyanide KRW / vm_map_remote_page primitives.
+//  No App Store login/download — decrypt already-installed user apps only.
 //
 
 #import "ipadecryptor.h"
 #import "../../LogTextView.h"
 #import "../../kexploit/kutils.h"
+#import "../../kexploit/krw.h"
+#import "../../kexploit/offsets.h"
+#import "../../kexploit/kexploit_opa334.h"
+#import "../../TaskRop/VM.h"
+#import "../../utils/sandbox.h"
 
 #import <Foundation/Foundation.h>
 #import <mach-o/fat.h>
 #import <mach-o/loader.h>
+#import <mach/mach.h>
 #import <libkern/OSByteOrder.h>
 #import <objc/runtime.h>
+#import <objc/message.h>
 #import <dlfcn.h>
-#import <ifaddrs.h>
-#import <net/if_dl.h>
-#import <sys/socket.h>
 #import <sys/stat.h>
+#import <copyfile.h>
+#import <fcntl.h>
+#import <limits.h>
 #import <stdlib.h>
+#import <string.h>
 #import <unistd.h>
+#import <zlib.h>
+
+// iOS SDK does not ship libproc.h; the symbols exist in libsystem.
+#ifndef PROC_ALL_PIDS
+#define PROC_ALL_PIDS 1
+#endif
+#ifndef PROC_PIDPATHINFO_MAXSIZE
+#define PROC_PIDPATHINFO_MAXSIZE (4 * MAXPATHLEN)
+#endif
+extern int proc_listpids(uint32_t type, uint32_t typeinfo, void *buffer, int buffersize);
+extern int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
+
+extern kern_return_t mach_vm_deallocate(task_t task, mach_vm_address_t addr, mach_vm_size_t size);
+
+// Declared in TaskRop/VM.m but not all are re-exported from VM.h yet.
+void vm_map_iterate_entries(uint64_t vm_map_ptr, void (^itBlock)(uint64_t start, uint64_t end, uint64_t entry, BOOL *stop));
 
 static NSString * const kIPADecryptorKeyBundleID = @"bundleID";
 static NSString * const kIPADecryptorKeyName = @"name";
 static NSString * const kIPADecryptorKeyBundlePath = @"bundlePath";
-static NSString * const kIPADecryptorKeyAppStoreID = @"appStoreID";
-static NSString * const kIPADecryptorKeyVersion = @"version";
-static NSString * const kIPADecryptorKeyTrackURL = @"trackURL";
-static NSString * const kIPADecryptorKeyCountry = @"country";
-static NSString * const kIPADecryptorKeyFileSizeBytes = @"fileSizeBytes";
-static NSString * const kIPADecryptorKeyPrice = @"price";
-
-static NSString * const kIPADefaultUserAgent = @"Configurator/2.17 (Macintosh; OS X 15.2; 24C5089c) AppleWebKit/0620.1.16.11.6";
-static NSString * const kIPAFallbackAuthUserAgent = @"iTunes/12.10.11 (Macintosh; OS X 10.15.7) AppleWebKit/605.1.15";
-static NSString * const kIPADefaultUSStoreFront = @"143441-1,29";
-static NSString * const kIPAAccountEmailKey = @"cyanide.ipadecryptor.apple.email";
-static NSString * const kIPAAccountTokenKey = @"cyanide.ipadecryptor.apple.passwordToken";
-static NSString * const kIPAAccountDSIDKey = @"cyanide.ipadecryptor.apple.dsid";
-static NSString * const kIPAAccountStoreFrontKey = @"cyanide.ipadecryptor.apple.storeFront";
-static NSString * const kIPAAccountPodKey = @"cyanide.ipadecryptor.apple.pod";
-static NSString * const kIPAAccountNameKey = @"cyanide.ipadecryptor.apple.name";
-static NSString * const kIPAGUIDKey = @"cyanide.ipadecryptor.apple.guid";
 
 typedef struct {
     bool isMachO;
@@ -49,24 +60,6 @@ typedef struct {
     uint32_t cryptsize;
     uint32_t archCount;
 } IPADecryptorMachOInfo;
-
-@interface IPADECHTTPRedirectBlocker : NSObject <NSURLSessionTaskDelegate>
-@property (atomic, strong) NSHTTPURLResponse *redirectResponse;
-@property (atomic, copy) NSURLRequest *redirectRequest;
-@end
-
-@implementation IPADECHTTPRedirectBlocker
-- (void)URLSession:(__unused NSURLSession *)session
-              task:(__unused NSURLSessionTask *)task
-willPerformHTTPRedirection:(NSHTTPURLResponse *)response
-        newRequest:(NSURLRequest *)request
- completionHandler:(void (^)(NSURLRequest * _Nullable))completionHandler
-{
-    self.redirectResponse = response;
-    self.redirectRequest = request;
-    completionHandler(nil);
-}
-@end
 
 static NSString *ipadec_nonempty_string(id value)
 {
@@ -250,6 +243,20 @@ NSArray<NSDictionary<NSString *, NSString *> *> *ipadecryptor_installed_apps(voi
     return ipadecryptor_installed_apps_with_system_apps(NO);
 }
 
+// Defined with the dump helpers further below.
+static bool ipadec_ensure_sandbox_for_dump(void);
+
+bool ipadecryptor_prepare_for_app_enumeration(void)
+{
+    // Listing user apps needs either LS path access or a /var scan.
+    // KRW alone is not enough — widen sandbox when primitives are live.
+    if (!kexploit_krw_ready()) {
+        log_user("[IPADEC] prepare_for_app_enumeration: KRW not ready\n");
+        return false;
+    }
+    return ipadec_ensure_sandbox_for_dump();
+}
+
 static NSDictionary<NSString *, NSString *> *ipadec_lookup_app(NSString *bundleID)
 {
     if (bundleID.length == 0) return nil;
@@ -421,1132 +428,6 @@ static BOOL ipadec_file_exists(NSString *path)
            !isDir;
 }
 
-static NSString *ipadec_trimmed(NSString *s)
-{
-    return [s isKindOfClass:NSString.class]
-        ? [s stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]
-        : @"";
-}
-
-static NSString *ipadec_extract_app_store_id(NSString *input)
-{
-    NSString *s = ipadec_trimmed(input);
-    if (s.length == 0) return nil;
-
-    NSCharacterSet *nonDigits = NSCharacterSet.decimalDigitCharacterSet.invertedSet;
-    if ([s rangeOfCharacterFromSet:nonDigits].location == NSNotFound) return s;
-
-    NSRegularExpression *re = [NSRegularExpression regularExpressionWithPattern:@"(?:^|[^A-Za-z0-9])id(\\d{5,})"
-                                                                        options:0
-                                                                          error:nil];
-    NSTextCheckingResult *match = [re firstMatchInString:s options:0 range:NSMakeRange(0, s.length)];
-    if (match && match.numberOfRanges > 1) {
-        return [s substringWithRange:[match rangeAtIndex:1]];
-    }
-    return nil;
-}
-
-static NSString *ipadec_country_from_app_store_input(NSString *input)
-{
-    NSURLComponents *components = [NSURLComponents componentsWithString:ipadec_trimmed(input)];
-    NSArray<NSString *> *parts = components.path.pathComponents;
-    for (NSString *part in parts) {
-        if (part.length != 2) continue;
-        NSCharacterSet *letters = NSCharacterSet.letterCharacterSet;
-        unichar a = [part characterAtIndex:0];
-        unichar b = [part characterAtIndex:1];
-        if ([letters characterIsMember:a] && [letters characterIsMember:b]) {
-            return part.uppercaseString;
-        }
-    }
-    return @"US";
-}
-
-static NSString *ipadec_string_from_json_value(id value)
-{
-    if ([value isKindOfClass:NSString.class]) return value;
-    if ([value isKindOfClass:NSNumber.class]) return [(NSNumber *)value stringValue];
-    return nil;
-}
-
-static void ipadec_log_guid_source_once(const char *source)
-{
-    static BOOL didLog = NO;
-    if (didLog) return;
-    didLog = YES;
-    log_user("[IPADEC] App Store GUID source: %s\n", source ?: "unknown");
-}
-
-static NSString *ipadec_mac12_from_string(NSString *s)
-{
-    if (![s isKindOfClass:NSString.class]) return nil;
-    NSMutableString *hex = [NSMutableString string];
-    NSCharacterSet *hexChars = [NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF"];
-    for (NSUInteger i = 0; i < s.length; i++) {
-        unichar c = [s characterAtIndex:i];
-        if ([hexChars characterIsMember:c]) {
-            [hex appendFormat:@"%C", c];
-        }
-    }
-    NSString *out = hex.uppercaseString;
-    return out.length == 12 ? out : nil;
-}
-
-static NSString *ipadec_mac12_from_data(NSData *data)
-{
-    if (![data isKindOfClass:NSData.class] || data.length < 6) return nil;
-    const uint8_t *mac = data.bytes;
-    return [NSString stringWithFormat:@"%02X%02X%02X%02X%02X%02X",
-            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]];
-}
-
-static BOOL ipadec_mac12_is_placeholder(NSString *mac)
-{
-    return mac.length != 12 ||
-           [mac isEqualToString:@"000000000000"] ||
-           [mac isEqualToString:@"020000000000"];
-}
-
-static NSString *ipadec_guid_from_mobilegestalt(void)
-{
-    void *h = dlopen("/usr/lib/libMobileGestalt.dylib", RTLD_LAZY);
-    if (!h) return nil;
-    typedef CFTypeRef (*MGCopyAnswerFn)(CFStringRef);
-    MGCopyAnswerFn MGCopyAnswer = (MGCopyAnswerFn)dlsym(h, "MGCopyAnswer");
-    if (!MGCopyAnswer) return nil;
-
-    NSArray<NSString *> *keys = @[@"WifiAddress", @"WiFiAddress", @"EthernetMacAddress", @"BluetoothAddress"];
-    for (NSString *key in keys) {
-        CFTypeRef answerRef = MGCopyAnswer((__bridge CFStringRef)key);
-        id answer = CFBridgingRelease(answerRef);
-        NSString *mac = nil;
-        if ([answer isKindOfClass:NSString.class]) {
-            mac = ipadec_mac12_from_string(answer);
-        } else if ([answer isKindOfClass:NSData.class]) {
-            mac = ipadec_mac12_from_data(answer);
-        }
-        if (mac.length == 12 && !ipadec_mac12_is_placeholder(mac)) {
-            ipadec_log_guid_source_once("MobileGestalt Wi-Fi hardware address");
-            return mac;
-        }
-    }
-    return nil;
-}
-
-static NSString *ipadec_guid_from_network_interfaces_plist(void)
-{
-    NSArray<NSString *> *paths = @[
-        @"/Library/Preferences/SystemConfiguration/NetworkInterfaces.plist",
-        @"/private/var/preferences/SystemConfiguration/NetworkInterfaces.plist"
-    ];
-    for (NSString *path in paths) {
-        NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:path];
-        NSArray *interfaces = [plist[@"Interfaces"] isKindOfClass:NSArray.class] ? plist[@"Interfaces"] : nil;
-        for (NSDictionary *iface in interfaces) {
-            if (![iface isKindOfClass:NSDictionary.class]) continue;
-            NSString *bsd = [iface[@"BSD Name"] isKindOfClass:NSString.class] ? iface[@"BSD Name"] : @"";
-            if (![bsd isEqualToString:@"en0"]) continue;
-
-            NSString *mac = nil;
-            id raw = iface[@"IOMACAddress"];
-            if ([raw isKindOfClass:NSData.class]) {
-                mac = ipadec_mac12_from_data(raw);
-            } else if ([raw isKindOfClass:NSString.class]) {
-                mac = ipadec_mac12_from_string(raw);
-            }
-            if (mac.length == 12 && !ipadec_mac12_is_placeholder(mac)) {
-                ipadec_log_guid_source_once("NetworkInterfaces en0 hardware address");
-                return mac;
-            }
-        }
-    }
-    return nil;
-}
-
-static NSString *ipadec_guid(void)
-{
-    NSString *realMAC = ipadec_guid_from_mobilegestalt();
-    if (realMAC.length == 12) return realMAC;
-
-    realMAC = ipadec_guid_from_network_interfaces_plist();
-    if (realMAC.length == 12) return realMAC;
-
-    // Match londek/ipadecrypt: Configurator-shaped GUID is the machine MAC
-    // address, uppercase, with colons removed. Do not filter iOS' privacy
-    // placeholder address; ipadecrypt uses any non-empty en0 hardware address.
-    struct ifaddrs *ifaddr = NULL;
-    if (getifaddrs(&ifaddr) == 0) {
-        NSString *fallback = nil;
-        for (struct ifaddrs *ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
-            if (!ifa->ifa_addr || ifa->ifa_addr->sa_family != AF_LINK) continue;
-            struct sockaddr_dl *sdl = (struct sockaddr_dl *)ifa->ifa_addr;
-            if (sdl->sdl_alen < 6) continue;
-
-            unsigned char *mac = (unsigned char *)LLADDR(sdl);
-            NSString *candidate = [NSString stringWithFormat:@"%02X%02X%02X%02X%02X%02X",
-                                   mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]];
-            if (strcmp(ifa->ifa_name, "en0") == 0) {
-                freeifaddrs(ifaddr);
-                ipadec_log_guid_source_once("en0 hardware address");
-                return candidate;
-            }
-            if (!fallback) fallback = candidate;
-        }
-        freeifaddrs(ifaddr);
-        if (fallback.length == 12) {
-            ipadec_log_guid_source_once("network interface hardware address");
-            return fallback;
-        }
-    }
-
-    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
-    NSString *guid = [d stringForKey:kIPAGUIDKey];
-    if (guid.length == 12) {
-        ipadec_log_guid_source_once("stored fallback");
-        return guid;
-    }
-
-    static const char hex[] = "0123456789ABCDEF";
-    char buf[13] = {0};
-    for (int i = 0; i < 12; i++) {
-        buf[i] = hex[arc4random_uniform(16)];
-    }
-    guid = [NSString stringWithUTF8String:buf];
-    [d setObject:guid forKey:kIPAGUIDKey];
-    [d synchronize];
-    ipadec_log_guid_source_once("generated fallback");
-    return guid;
-}
-
-static NSString *ipadec_xml_escaped(NSString *s)
-{
-    NSMutableString *m = [(s ?: @"") mutableCopy];
-    [m replaceOccurrencesOfString:@"&" withString:@"&amp;" options:0 range:NSMakeRange(0, m.length)];
-    [m replaceOccurrencesOfString:@"<" withString:@"&lt;" options:0 range:NSMakeRange(0, m.length)];
-    [m replaceOccurrencesOfString:@">" withString:@"&gt;" options:0 range:NSMakeRange(0, m.length)];
-    return m;
-}
-
-static void ipadec_append_plist_value(NSMutableString *xml, id value);
-
-static void ipadec_append_plist_dict(NSMutableString *xml, NSDictionary *dict)
-{
-    [xml appendString:@"<dict>"];
-    NSArray *keys = [[dict allKeys] sortedArrayUsingComparator:^NSComparisonResult(id a, id b) {
-        return [[a description] compare:[b description]];
-    }];
-    for (id key in keys) {
-        NSString *keyString = [key description] ?: @"";
-        [xml appendFormat:@"<key>%@</key>", ipadec_xml_escaped(keyString)];
-        ipadec_append_plist_value(xml, dict[key]);
-    }
-    [xml appendString:@"</dict>"];
-}
-
-static void ipadec_append_plist_array(NSMutableString *xml, NSArray *array)
-{
-    [xml appendString:@"<array>"];
-    for (id value in array) {
-        ipadec_append_plist_value(xml, value);
-    }
-    [xml appendString:@"</array>"];
-}
-
-static void ipadec_append_plist_value(NSMutableString *xml, id value)
-{
-    if (!value || value == NSNull.null) {
-        [xml appendString:@"<string/>"];
-    } else if ([value isKindOfClass:NSDictionary.class]) {
-        ipadec_append_plist_dict(xml, (NSDictionary *)value);
-    } else if ([value isKindOfClass:NSArray.class]) {
-        ipadec_append_plist_array(xml, (NSArray *)value);
-    } else if ([value isKindOfClass:NSData.class]) {
-        [xml appendFormat:@"<data>%@</data>",
-         [(NSData *)value base64EncodedStringWithOptions:0] ?: @""];
-    } else if ([value isKindOfClass:NSNumber.class]) {
-        NSNumber *n = (NSNumber *)value;
-        if (CFGetTypeID((__bridge CFTypeRef)n) == CFBooleanGetTypeID()) {
-            [xml appendString:n.boolValue ? @"<true/>" : @"<false/>"];
-        } else {
-            [xml appendFormat:@"<integer>%@</integer>", n.stringValue ?: @"0"];
-        }
-    } else {
-        [xml appendFormat:@"<string>%@</string>", ipadec_xml_escaped([value description] ?: @"")];
-    }
-}
-
-static NSData *ipadec_plist_body(NSDictionary *dict, NSString **messageOut)
-{
-    if (dict && ![dict isKindOfClass:NSDictionary.class]) {
-        if (messageOut) *messageOut = @"plist encode failed: root is not dictionary";
-        return nil;
-    }
-    NSMutableString *xml = [NSMutableString stringWithString:
-        @"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-        @"<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
-        @"<plist version=\"1.0\">"];
-    ipadec_append_plist_dict(xml, dict ?: @{});
-    [xml appendString:@"</plist>"];
-    return [xml dataUsingEncoding:NSUTF8StringEncoding];
-}
-
-static NSData *ipadec_normalized_plist_data(NSData *data)
-{
-    if (data.length == 0) return data;
-    NSString *s = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    if (s.length == 0) return data;
-    NSString *trim = [s stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-
-    NSRegularExpression *doc = [NSRegularExpression regularExpressionWithPattern:@"(?is)<Document\\b[^>]*>(.*)</Document>"
-                                                                         options:0
-                                                                           error:nil];
-    NSTextCheckingResult *docMatch = [doc firstMatchInString:trim options:0 range:NSMakeRange(0, trim.length)];
-    if (docMatch && docMatch.numberOfRanges > 1) {
-        trim = [[trim substringWithRange:[docMatch rangeAtIndex:1]]
-            stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    }
-
-    NSRegularExpression *plist = [NSRegularExpression regularExpressionWithPattern:@"(?is)<plist\\b[^>]*>.*?</plist>"
-                                                                           options:0
-                                                                             error:nil];
-    NSTextCheckingResult *plistMatch = [plist firstMatchInString:trim options:0 range:NSMakeRange(0, trim.length)];
-    if (plistMatch) {
-        NSString *sub = [trim substringWithRange:plistMatch.range];
-        return [sub dataUsingEncoding:NSUTF8StringEncoding] ?: data;
-    }
-
-    NSRegularExpression *dict = [NSRegularExpression regularExpressionWithPattern:@"(?is)<dict\\b[^>]*>.*</dict>"
-                                                                          options:0
-                                                                            error:nil];
-    NSTextCheckingResult *dictMatch = [dict firstMatchInString:trim options:0 range:NSMakeRange(0, trim.length)];
-    if (dictMatch) {
-        NSString *sub = [trim substringWithRange:dictMatch.range];
-        NSString *wrapped = [NSString stringWithFormat:@"<?xml version=\"1.0\" encoding=\"UTF-8\"?><plist version=\"1.0\">%@</plist>", sub];
-        return [wrapped dataUsingEncoding:NSUTF8StringEncoding] ?: data;
-    }
-
-    if ([trim rangeOfString:@"<key>"].location != NSNotFound) {
-        NSString *wrapped = [NSString stringWithFormat:@"<?xml version=\"1.0\" encoding=\"UTF-8\"?><plist version=\"1.0\"><dict>%@</dict></plist>", trim];
-        return [wrapped dataUsingEncoding:NSUTF8StringEncoding] ?: data;
-    }
-    return data;
-}
-
-static id ipadec_plist_object_from_data(NSData *data, NSString **messageOut)
-{
-    NSError *err = nil;
-    id obj = [NSPropertyListSerialization propertyListWithData:ipadec_normalized_plist_data(data)
-                                                       options:NSPropertyListMutableContainersAndLeaves
-                                                        format:nil
-                                                         error:&err];
-    if (!obj && messageOut) {
-        *messageOut = [NSString stringWithFormat:@"plist decode failed: %@", err.localizedDescription ?: @"unknown"];
-    }
-    return obj;
-}
-
-static NSData *ipadec_send_sync_internal(NSString *method,
-                                         NSURL *url,
-                                         NSDictionary<NSString *, NSString *> *headers,
-                                         NSData *body,
-                                         BOOL blockRedirects,
-                                         NSHTTPURLResponse **httpOut,
-                                         NSString **messageOut)
-{
-    if (!url) {
-        if (messageOut) *messageOut = @"request URL missing";
-        return nil;
-    }
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
-    request.HTTPMethod = method ?: @"GET";
-    request.timeoutInterval = 30.0;
-    request.HTTPBody = body;
-    [request setValue:kIPADefaultUserAgent forHTTPHeaderField:@"User-Agent"];
-    [headers enumerateKeysAndObjectsUsingBlock:^(NSString *key, NSString *value, BOOL *stop) {
-        (void)stop;
-        if (key.length > 0 && value.length > 0) [request setValue:value forHTTPHeaderField:key];
-    }];
-
-    NSString *label = [NSString stringWithFormat:@"%@%@", url.host ?: @"", url.path ?: @""];
-    CFAbsoluteTime started = CFAbsoluteTimeGetCurrent();
-    log_user("[IPADEC] HTTP %s %s start\n", (method ?: @"GET").UTF8String, label.UTF8String);
-
-    __block NSData *outData = nil;
-    __block NSURLResponse *outResponse = nil;
-    __block NSError *outError = nil;
-    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-
-    NSURLSessionConfiguration *cfg = NSURLSessionConfiguration.defaultSessionConfiguration;
-    cfg.timeoutIntervalForRequest = 30.0;
-    cfg.timeoutIntervalForResource = 45.0;
-    cfg.HTTPShouldSetCookies = YES;
-    cfg.HTTPCookieAcceptPolicy = NSHTTPCookieAcceptPolicyAlways;
-    cfg.HTTPCookieStorage = NSHTTPCookieStorage.sharedHTTPCookieStorage;
-    IPADECHTTPRedirectBlocker *redirectBlocker = blockRedirects ? [IPADECHTTPRedirectBlocker new] : nil;
-    NSURLSession *session = [NSURLSession sessionWithConfiguration:cfg
-                                                          delegate:redirectBlocker
-                                                     delegateQueue:nil];
-    NSURLSessionDataTask *task = [session dataTaskWithRequest:request
-                                            completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        outData = data;
-        outResponse = response;
-        outError = error;
-        dispatch_semaphore_signal(sem);
-    }];
-    [task resume];
-    long waited = dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(45 * NSEC_PER_SEC)));
-    if (waited != 0) {
-        [task cancel];
-        [session invalidateAndCancel];
-        log_user("[IPADEC] HTTP %s timed out after 45s\n", label.UTF8String);
-        if (messageOut) *messageOut = [NSString stringWithFormat:@"%@ request timed out", label];
-        return nil;
-    }
-    [session finishTasksAndInvalidate];
-
-    NSHTTPURLResponse *httpResponse = [outResponse isKindOfClass:NSHTTPURLResponse.class]
-        ? (NSHTTPURLResponse *)outResponse
-        : redirectBlocker.redirectResponse;
-    if (httpResponse && httpOut) {
-        *httpOut = httpResponse;
-    }
-    if (redirectBlocker.redirectResponse) {
-        NSString *loc = redirectBlocker.redirectResponse.allHeaderFields[@"Location"] ?: redirectBlocker.redirectRequest.URL.absoluteString ?: @"";
-        log_user("[IPADEC] HTTP %s captured redirect %ld -> %s\n",
-                 label.UTF8String,
-                 (long)redirectBlocker.redirectResponse.statusCode,
-                 loc.UTF8String);
-    }
-    if (outError) {
-        log_user("[IPADEC] HTTP %s error after %.1fs: %s\n",
-                 label.UTF8String,
-                 CFAbsoluteTimeGetCurrent() - started,
-                 (outError.localizedDescription ?: @"network error").UTF8String);
-        if (messageOut) *messageOut = outError.localizedDescription ?: @"network error";
-        return nil;
-    }
-    log_user("[IPADEC] HTTP %s -> %ld %lu bytes in %.1fs\n",
-             label.UTF8String,
-             (long)httpResponse.statusCode,
-             (unsigned long)outData.length,
-             CFAbsoluteTimeGetCurrent() - started);
-    return outData ?: [NSData data];
-}
-
-static NSData *ipadec_send_sync(NSString *method,
-                                NSURL *url,
-                                NSDictionary<NSString *, NSString *> *headers,
-                                NSData *body,
-                                NSHTTPURLResponse **httpOut,
-                                NSString **messageOut)
-{
-    return ipadec_send_sync_internal(method, url, headers, body, false, httpOut, messageOut);
-}
-
-static NSDictionary<NSString *, NSString *> *ipadec_saved_account(void)
-{
-    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
-    NSString *email = [d stringForKey:kIPAAccountEmailKey] ?: @"";
-    NSString *token = [d stringForKey:kIPAAccountTokenKey] ?: @"";
-    NSString *dsid = [d stringForKey:kIPAAccountDSIDKey] ?: @"";
-    if (token.length == 0 || dsid.length == 0) return nil;
-    return @{
-        @"email": email,
-        @"passwordToken": token,
-        @"dsid": dsid,
-        @"storeFront": [d stringForKey:kIPAAccountStoreFrontKey] ?: kIPADefaultUSStoreFront,
-        @"pod": [d stringForKey:kIPAAccountPodKey] ?: @"",
-        @"name": [d stringForKey:kIPAAccountNameKey] ?: @"",
-    };
-}
-
-bool ipadecryptor_has_app_store_account(void)
-{
-    return ipadec_saved_account() != nil;
-}
-
-NSString *ipadecryptor_app_store_account_summary(void)
-{
-    NSDictionary *acc = ipadec_saved_account();
-    if (!acc) return @"Not signed in. Sign in before downloading IPAs.";
-    NSString *email = acc[@"email"];
-    NSString *storeFront = acc[@"storeFront"];
-    if (email.length == 0) email = @"Signed in";
-    return [NSString stringWithFormat:@"%@ • storefront %@", email, storeFront.length > 0 ? storeFront : @"unknown"];
-}
-
-void ipadecryptor_clear_app_store_account(void)
-{
-    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
-    for (NSString *key in @[kIPAAccountEmailKey,
-                            kIPAAccountTokenKey,
-                            kIPAAccountDSIDKey,
-                            kIPAAccountStoreFrontKey,
-                            kIPAAccountPodKey,
-                            kIPAAccountNameKey]) {
-        [d removeObjectForKey:key];
-    }
-    [d synchronize];
-    log_user("[IPADEC] Cleared saved App Store account token.\n");
-}
-
-static NSString *ipadec_bag_auth_endpoint(NSString **messageOut)
-{
-    NSString *guid = ipadec_guid();
-    NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"https://init.itunes.apple.com/bag.xml?guid=%@", guid]];
-    log_user("[IPADEC] Fetching App Store bag for auth endpoint.\n");
-    NSHTTPURLResponse *http = nil;
-    NSData *data = ipadec_send_sync(@"GET", url, @{@"Accept": @"application/xml"}, nil, &http, messageOut);
-    if (!data) return nil;
-    if (http.statusCode != 200) {
-        log_user("[IPADEC] App Store bag HTTP %ld.\n", (long)http.statusCode);
-        if (messageOut) *messageOut = [NSString stringWithFormat:@"bag.xml HTTP %ld", (long)http.statusCode];
-        return nil;
-    }
-    id plist = ipadec_plist_object_from_data(data, messageOut);
-    NSDictionary *dict = [plist isKindOfClass:NSDictionary.class] ? plist : nil;
-    NSDictionary *urlBag = [dict[@"urlBag"] isKindOfClass:NSDictionary.class] ? dict[@"urlBag"] : nil;
-    NSString *endpoint = ipadec_nonempty_string(urlBag[@"authenticateAccount"]);
-    if (endpoint.length == 0) {
-        log_user("[IPADEC] App Store bag missing authenticateAccount.\n");
-        if (messageOut) *messageOut = @"bag.xml missing authenticateAccount";
-    } else {
-        log_user("[IPADEC] App Store auth endpoint: %s\n", endpoint.UTF8String);
-    }
-    return endpoint;
-}
-
-bool ipadecryptor_login_app_store(NSString *email,
-                                  NSString *password,
-                                  NSString *authCode,
-                                  NSString **messageOut)
-{
-    email = ipadec_trimmed(email);
-    password = password ?: @"";
-    authCode = [[authCode ?: @"" stringByReplacingOccurrencesOfString:@" " withString:@""]
-        stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    if (email.length == 0 || password.length == 0) {
-        if (messageOut) *messageOut = @"Enter Apple ID email and password.";
-        return false;
-    }
-    if (authCode.length > 0) log_user("[IPADEC] App Store login using 2FA code length=%lu.\n",
-                                      (unsigned long)authCode.length);
-
-    NSString *bagMessage = nil;
-    NSString *endpoint = ipadec_bag_auth_endpoint(&bagMessage);
-    if (endpoint.length == 0) {
-        if (messageOut) *messageOut = [NSString stringWithFormat:@"App Store bag failed: %@", bagMessage ?: @"unknown"];
-        return false;
-    }
-
-    NSString *urlString = endpoint;
-    NSDictionary *lastOut = nil;
-    NSHTTPURLResponse *lastHTTP = nil;
-    NSString *guid = ipadec_guid();
-    for (NSInteger attempt = 1; attempt <= 4; attempt++) {
-        NSString *plistMessage = nil;
-        NSData *body = ipadec_plist_body(@{
-            @"appleId": email,
-            @"attempt": [@(attempt) stringValue],
-            @"guid": guid,
-            @"password": [password stringByAppendingString:authCode ?: @""],
-            @"rmp": @"0",
-            @"why": @"signIn",
-        }, &plistMessage);
-        if (!body) {
-            if (messageOut) *messageOut = plistMessage ?: @"login plist encode failed";
-            return false;
-        }
-
-        NSURL *url = [NSURL URLWithString:urlString];
-        NSString *sendMessage = nil;
-        NSHTTPURLResponse *http = nil;
-        log_user("[IPADEC] App Store login request attempt %ld.\n", (long)attempt);
-        BOOL fastFallback = [urlString isEqualToString:@"https://auth.itunes.apple.com/auth/v1/native/fast"];
-        NSDictionary<NSString *, NSString *> *loginHeaders = fastFallback
-            ? @{@"Content-Type": @"application/x-www-form-urlencoded",
-                @"Accept": @"text/xml, application/xml",
-                @"User-Agent": kIPAFallbackAuthUserAgent}
-            : @{@"Content-Type": @"application/x-www-form-urlencoded"};
-        if (fastFallback) {
-            log_user("[IPADEC] App Store native/fast fallback using iTunes auth user agent.\n");
-        }
-        NSData *data = ipadec_send_sync(@"POST",
-                                        url,
-                                        loginHeaders,
-                                        body,
-                                        &http,
-                                        &sendMessage);
-        if (!data) {
-            if (messageOut) *messageOut = [NSString stringWithFormat:@"login request failed: %@", sendMessage ?: @"unknown"];
-            return false;
-        }
-        lastHTTP = http;
-
-        if (http.statusCode == 302) {
-            NSString *loc = http.allHeaderFields[@"Location"];
-            if (loc.length > 0) {
-                urlString = loc;
-                continue;
-            }
-        }
-
-        if (data.length == 0) {
-            if ([urlString isEqualToString:@"https://auth.itunes.apple.com/auth/v1/native"]) {
-                urlString = @"https://auth.itunes.apple.com/auth/v1/native/fast";
-                log_user("[IPADEC] App Store native auth returned empty body; retrying native/fast on iOS.\n");
-                continue;
-            }
-            log_user("[IPADEC] App Store login returned empty response body (HTTP %ld).\n", (long)http.statusCode);
-            if (messageOut) *messageOut = [NSString stringWithFormat:@"App Store login returned empty response (HTTP %ld).", (long)http.statusCode];
-            return false;
-        }
-
-        NSString *decodeMessage = nil;
-        id obj = ipadec_plist_object_from_data(data, &decodeMessage);
-        lastOut = [obj isKindOfClass:NSDictionary.class] ? obj : nil;
-        if (!lastOut) {
-            log_user("[IPADEC] App Store login decode failed: %s\n", (decodeMessage ?: @"unknown").UTF8String);
-            if (messageOut) *messageOut = [NSString stringWithFormat:@"login decode failed: %@", decodeMessage ?: @"unknown"];
-            return false;
-        }
-
-        NSString *failure = ipadec_string_from_json_value(lastOut[@"failureType"]) ?: @"";
-        NSString *customer = ipadec_nonempty_string(lastOut[@"customerMessage"]) ?: @"";
-        if (attempt == 1 && [failure isEqualToString:@"-5000"]) continue;
-        if (failure.length == 0 &&
-            authCode.length == 0 &&
-            [customer isEqualToString:@"MZFinance.BadLogin.Configurator_message"]) {
-            if (messageOut) *messageOut = @"Two-factor code required.";
-            log_user("[IPADEC] App Store sign-in needs 2FA code.\n");
-            return false;
-        }
-        if (failure.length == 0 && [customer isEqualToString:@"Your account is disabled."]) {
-            if (messageOut) *messageOut = @"Your account is disabled.";
-            log_user("[IPADEC] App Store login failed: account disabled.\n");
-            return false;
-        }
-        if (failure.length > 0) {
-            if (messageOut) *messageOut = customer.length > 0 ? customer : @"App Store login failed.";
-            log_user("[IPADEC] App Store login failed failureType=%s message=%s\n",
-                     failure.UTF8String,
-                     customer.UTF8String);
-            return false;
-        }
-
-        NSString *candidateToken = ipadec_nonempty_string(lastOut[@"passwordToken"]);
-        NSString *candidateDSID = ipadec_string_from_json_value(lastOut[@"dsPersonId"]);
-        if (http.statusCode != 200 || candidateToken.length == 0 || candidateDSID.length == 0) {
-            NSArray *keys = [[lastOut allKeys] sortedArrayUsingSelector:@selector(compare:)];
-            log_user("[IPADEC] App Store login did not return token/dsid on attempt %ld; http=%ld hasCode=%d failureType=%s message=%s keys=%s\n",
-                     (long)attempt,
-                     (long)http.statusCode,
-                     authCode.length > 0 ? 1 : 0,
-                     failure.UTF8String,
-                     customer.UTF8String,
-                     [keys componentsJoinedByString:@","].UTF8String);
-            if (messageOut) *messageOut = @"App Store login failed.";
-            return false;
-        }
-        break;
-    }
-
-    NSString *token = ipadec_nonempty_string(lastOut[@"passwordToken"]);
-    NSString *dsid = ipadec_string_from_json_value(lastOut[@"dsPersonId"]);
-    NSDictionary *accountInfo = [lastOut[@"accountInfo"] isKindOfClass:NSDictionary.class] ? lastOut[@"accountInfo"] : nil;
-    NSString *accountEmail = ipadec_nonempty_string(accountInfo[@"appleId"]) ?: email;
-    NSDictionary *address = [accountInfo[@"address"] isKindOfClass:NSDictionary.class] ? accountInfo[@"address"] : nil;
-    NSString *first = ipadec_nonempty_string(address[@"firstName"]) ?: @"";
-    NSString *last = ipadec_nonempty_string(address[@"lastName"]) ?: @"";
-    NSString *name = [[NSString stringWithFormat:@"%@ %@", first, last] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    NSString *storeFront = ipadec_nonempty_string(lastHTTP.allHeaderFields[@"X-Set-Apple-Store-Front"]) ?: kIPADefaultUSStoreFront;
-    NSString *pod = ipadec_nonempty_string(lastHTTP.allHeaderFields[@"pod"]) ?: @"";
-
-    if (token.length == 0 || dsid.length == 0) {
-        if (messageOut) *messageOut = @"App Store login returned no token.";
-        return false;
-    }
-
-    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
-    [d setObject:accountEmail forKey:kIPAAccountEmailKey];
-    [d setObject:token forKey:kIPAAccountTokenKey];
-    [d setObject:dsid forKey:kIPAAccountDSIDKey];
-    [d setObject:storeFront forKey:kIPAAccountStoreFrontKey];
-    [d setObject:pod forKey:kIPAAccountPodKey];
-    [d setObject:name ?: @"" forKey:kIPAAccountNameKey];
-    [d synchronize];
-
-    log_user("[IPADEC] App Store sign-in OK: %s storefront=%s pod=%s\n",
-             accountEmail.UTF8String,
-             storeFront.UTF8String,
-             pod.UTF8String);
-    if (messageOut) *messageOut = [NSString stringWithFormat:@"Signed in as %@.", accountEmail];
-    return true;
-}
-
-NSDictionary<NSString *, NSString *> *ipadecryptor_resolve_app_store_input(NSString *input,
-                                                                           NSString **messageOut)
-{
-    NSString *appID = ipadec_extract_app_store_id(input);
-    if (appID.length == 0) {
-        if (messageOut) *messageOut = @"Paste an App Store link containing /id123456789, or enter the numeric App Store ID.";
-        log_user("[IPADEC] App Store input did not contain an app id: %s\n",
-                 ipadec_trimmed(input).UTF8String);
-        return nil;
-    }
-
-    NSString *country = ipadec_country_from_app_store_input(input);
-    NSURLComponents *components = [NSURLComponents componentsWithString:@"https://itunes.apple.com/lookup"];
-    components.queryItems = @[
-        [NSURLQueryItem queryItemWithName:@"id" value:appID],
-        [NSURLQueryItem queryItemWithName:@"entity" value:@"software,iPadSoftware"],
-        [NSURLQueryItem queryItemWithName:@"media" value:@"software"],
-        [NSURLQueryItem queryItemWithName:@"limit" value:@"1"],
-        [NSURLQueryItem queryItemWithName:@"country" value:country ?: @"US"],
-    ];
-    NSURL *url = components.URL;
-    if (!url) {
-        if (messageOut) *messageOut = @"Could not build App Store lookup URL.";
-        return nil;
-    }
-
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
-    request.timeoutInterval = 20.0;
-    [request setValue:@"Cyanide IPADecryptor/0.1" forHTTPHeaderField:@"User-Agent"];
-
-    __block NSData *data = nil;
-    __block NSURLResponse *response = nil;
-    __block NSError *error = nil;
-    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-    NSURLSessionDataTask *task = [NSURLSession.sharedSession dataTaskWithRequest:request
-                                                               completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
-        data = d;
-        response = r;
-        error = e;
-        dispatch_semaphore_signal(sem);
-    }];
-    [task resume];
-    long waited = dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(25 * NSEC_PER_SEC)));
-    if (waited != 0) {
-        [task cancel];
-        if (messageOut) *messageOut = @"App Store lookup timed out.";
-        log_user("[IPADEC] App Store lookup timed out for id=%s country=%s\n",
-                 appID.UTF8String,
-                 country.UTF8String);
-        return nil;
-    }
-
-    NSInteger status = [response isKindOfClass:NSHTTPURLResponse.class]
-        ? ((NSHTTPURLResponse *)response).statusCode
-        : 0;
-    if (error || status != 200 || data.length == 0) {
-        NSString *msg = error.localizedDescription ?: [NSString stringWithFormat:@"HTTP %ld", (long)status];
-        if (messageOut) *messageOut = [NSString stringWithFormat:@"App Store lookup failed: %@", msg];
-        log_user("[IPADEC] App Store lookup failed id=%s country=%s status=%ld error=%s\n",
-                 appID.UTF8String,
-                 country.UTF8String,
-                 (long)status,
-                 msg.UTF8String);
-        return nil;
-    }
-
-    NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
-    NSArray *results = [json isKindOfClass:NSDictionary.class] ? json[@"results"] : nil;
-    NSDictionary *result = [results isKindOfClass:NSArray.class] && results.count > 0 ? results.firstObject : nil;
-    if (![result isKindOfClass:NSDictionary.class]) {
-        if (messageOut) *messageOut = [NSString stringWithFormat:@"App Store lookup found no app for id %@.", appID];
-        log_user("[IPADEC] App Store lookup empty id=%s country=%s\n",
-                 appID.UTF8String,
-                 country.UTF8String);
-        return nil;
-    }
-
-    NSString *bundleID = ipadec_nonempty_string(result[@"bundleId"]);
-    NSString *name = ipadec_nonempty_string(result[@"trackName"]) ?: bundleID ?: appID;
-    NSString *version = ipadec_nonempty_string(result[@"version"]) ?: @"";
-    NSString *trackURL = ipadec_nonempty_string(result[@"trackViewUrl"]) ?: ipadec_trimmed(input);
-    NSString *fileSize = ipadec_string_from_json_value(result[@"fileSizeBytes"]) ?: @"";
-    NSString *price = ipadec_string_from_json_value(result[@"price"]) ?: @"";
-    if (bundleID.length == 0) {
-        if (messageOut) *messageOut = @"App Store lookup returned metadata without a bundle ID.";
-        return nil;
-    }
-
-    NSMutableDictionary<NSString *, NSString *> *out = [NSMutableDictionary dictionary];
-    out[kIPADecryptorKeyAppStoreID] = appID;
-    out[kIPADecryptorKeyBundleID] = bundleID;
-    out[kIPADecryptorKeyName] = name;
-    out[kIPADecryptorKeyVersion] = version;
-    out[kIPADecryptorKeyTrackURL] = trackURL;
-    out[kIPADecryptorKeyCountry] = country ?: @"US";
-    if (fileSize.length > 0) out[kIPADecryptorKeyFileSizeBytes] = fileSize;
-    if (price.length > 0) out[kIPADecryptorKeyPrice] = price;
-
-    log_user("[IPADEC] App Store resolved id=%s country=%s -> %s %s (%s)%s%s\n",
-             appID.UTF8String,
-             (country ?: @"US").UTF8String,
-             name.UTF8String,
-             version.UTF8String,
-             bundleID.UTF8String,
-             fileSize.length > 0 ? " size=" : "",
-             fileSize.length > 0 ? fileSize.UTF8String : "");
-
-    if (messageOut) {
-        *messageOut = [NSString stringWithFormat:@"Resolved %@ %@ (%@).",
-                                                 name,
-                                                 version.length > 0 ? version : @"",
-                                                 bundleID];
-    }
-    return out;
-}
-
-static NSURL *ipadec_store_url(NSDictionary *acc, NSString *path, BOOL guidQuery)
-{
-    NSString *pod = acc[@"pod"] ?: @"";
-    NSString *host = pod.length > 0
-        ? [NSString stringWithFormat:@"p%@-buy.itunes.apple.com", pod]
-        : @"buy.itunes.apple.com";
-    NSString *url = [NSString stringWithFormat:@"https://%@%@", host, path];
-    if (guidQuery) {
-        url = [url stringByAppendingFormat:@"?guid=%@", ipadec_guid()];
-    }
-    return [NSURL URLWithString:url];
-}
-
-static NSDictionary<NSString *, NSString *> *ipadec_store_headers(NSDictionary *acc, BOOL includeToken)
-{
-    NSMutableDictionary *headers = [NSMutableDictionary dictionary];
-    headers[@"Content-Type"] = @"application/x-apple-plist";
-    headers[@"iCloud-DSID"] = acc[@"dsid"] ?: @"";
-    headers[@"X-Dsid"] = acc[@"dsid"] ?: @"";
-    headers[@"X-Apple-Store-Front"] = acc[@"storeFront"] ?: kIPADefaultUSStoreFront;
-    if (includeToken) headers[@"X-Token"] = acc[@"passwordToken"] ?: @"";
-    return headers;
-}
-
-static BOOL ipadec_purchase_free_app(NSDictionary<NSString *, NSString *> *app,
-                                     NSDictionary *acc,
-                                     NSString **messageOut)
-{
-    double price = [app[kIPADecryptorKeyPrice] doubleValue];
-    if (price > 0.0) {
-        if (messageOut) *messageOut = @"This app is paid; automatic purchase is not supported. Buy/install it with the App Store account first.";
-        return false;
-    }
-
-    NSString *appID = app[kIPADecryptorKeyAppStoreID];
-    if (appID.length == 0) {
-        if (messageOut) *messageOut = @"App Store ID missing for purchase.";
-        return false;
-    }
-
-    NSDictionary *payload = @{
-        @"appExtVrsId": @"0",
-        @"hasAskedToFulfillPreorder": @"true",
-        @"buyWithoutAuthorization": @"true",
-        @"hasDoneAgeCheck": @"true",
-        @"guid": ipadec_guid(),
-        @"needDiv": @"0",
-        @"origPage": [NSString stringWithFormat:@"Software-%@", appID],
-        @"origPageLocation": @"Buy",
-        @"price": @"0",
-        @"pricingParameters": @"STDQ",
-        @"productType": @"C",
-        @"salableAdamId": @([appID longLongValue]),
-    };
-    NSString *plistMessage = nil;
-    NSData *body = ipadec_plist_body(payload, &plistMessage);
-    if (!body) {
-        if (messageOut) *messageOut = plistMessage ?: @"purchase plist encode failed";
-        return false;
-    }
-
-    NSHTTPURLResponse *http = nil;
-    NSString *sendMessage = nil;
-    NSData *data = ipadec_send_sync(@"POST",
-                                    ipadec_store_url(acc, @"/WebObjects/MZFinance.woa/wa/buyProduct", NO),
-                                    ipadec_store_headers(acc, YES),
-                                    body,
-                                    &http,
-                                    &sendMessage);
-    if (!data) {
-        if (messageOut) *messageOut = [NSString stringWithFormat:@"purchase request failed: %@", sendMessage ?: @"unknown"];
-        return false;
-    }
-
-    NSString *decodeMessage = nil;
-    id decoded = ipadec_plist_object_from_data(data, &decodeMessage);
-    NSDictionary *out = [decoded isKindOfClass:NSDictionary.class] ? decoded : nil;
-    if (!out) {
-        if (messageOut) *messageOut = [NSString stringWithFormat:@"purchase decode failed: %@", decodeMessage ?: @"unknown"];
-        return false;
-    }
-
-    NSString *failure = ipadec_string_from_json_value(out[@"failureType"]) ?: @"";
-    NSString *customer = ipadec_nonempty_string(out[@"customerMessage"]) ?: @"";
-    NSString *docType = ipadec_nonempty_string(out[@"jingleDocType"]) ?: @"";
-    NSInteger status = [out[@"status"] respondsToSelector:@selector(integerValue)] ? [out[@"status"] integerValue] : -1;
-
-    if ([failure isEqualToString:@"5002"] || http.statusCode == 500) {
-        log_user("[IPADEC] App Store license already exists for %s.\n", appID.UTF8String);
-        return true;
-    }
-    if ([failure isEqualToString:@"2034"] ||
-        [failure isEqualToString:@"2042"] ||
-        [failure isEqualToString:@"1008"] ||
-        [customer isEqualToString:@"Your password has changed."]) {
-        if (messageOut) *messageOut = @"App Store token expired. Sign in again.";
-        return false;
-    }
-    if (failure.length > 0) {
-        if (messageOut) *messageOut = customer.length > 0 ? customer : @"purchase failed";
-        return false;
-    }
-    if (![docType isEqualToString:@"purchaseSuccess"] || status != 0) {
-        if (messageOut) *messageOut = @"purchase failed";
-        return false;
-    }
-
-    log_user("[IPADEC] App Store license acquired for %s.\n", appID.UTF8String);
-    return true;
-}
-
-static NSDictionary *ipadec_prepare_download_ticket(NSDictionary<NSString *, NSString *> *app,
-                                                   NSDictionary *acc,
-                                                   BOOL allowPurchase,
-                                                   NSString **messageOut)
-{
-    NSString *appID = app[kIPADecryptorKeyAppStoreID];
-    if (appID.length == 0) {
-        if (messageOut) *messageOut = @"App Store ID missing.";
-        return nil;
-    }
-
-    NSDictionary *payload = @{
-        @"creditDisplay": @"",
-        @"guid": ipadec_guid(),
-        @"salableAdamId": @([appID longLongValue]),
-    };
-    NSString *plistMessage = nil;
-    NSData *body = ipadec_plist_body(payload, &plistMessage);
-    if (!body) {
-        if (messageOut) *messageOut = plistMessage ?: @"download plist encode failed";
-        return nil;
-    }
-
-    log_user("[IPADEC] Requesting App Store download ticket for id=%s.\n",
-             appID.UTF8String);
-    NSHTTPURLResponse *http = nil;
-    NSString *sendMessage = nil;
-    NSData *data = ipadec_send_sync(@"POST",
-                                    ipadec_store_url(acc, @"/WebObjects/MZFinance.woa/wa/volumeStoreDownloadProduct", YES),
-                                    ipadec_store_headers(acc, YES),
-                                    body,
-                                    &http,
-                                    &sendMessage);
-    (void)http;
-    if (!data) {
-        if (messageOut) *messageOut = [NSString stringWithFormat:@"download ticket request failed: %@", sendMessage ?: @"unknown"];
-        return nil;
-    }
-
-    NSString *decodeMessage = nil;
-    id obj = ipadec_plist_object_from_data(data, &decodeMessage);
-    NSDictionary *out = [obj isKindOfClass:NSDictionary.class] ? obj : nil;
-    if (!out) {
-        if (messageOut) *messageOut = [NSString stringWithFormat:@"download ticket decode failed: %@", decodeMessage ?: @"unknown"];
-        return nil;
-    }
-
-    NSString *failure = ipadec_string_from_json_value(out[@"failureType"]) ?: @"";
-    NSString *customer = ipadec_nonempty_string(out[@"customerMessage"]) ?: @"";
-    if ([failure isEqualToString:@"2034"] ||
-        [failure isEqualToString:@"2042"] ||
-        [failure isEqualToString:@"1008"] ||
-        [failure isEqualToString:@"5002"]) {
-        if (messageOut) *messageOut = @"App Store token expired. Sign in again.";
-        return nil;
-    }
-    if ([failure isEqualToString:@"9610"]) {
-        if (!allowPurchase) {
-            if (messageOut) *messageOut = @"license required";
-            return nil;
-        }
-        NSString *purchaseMessage = nil;
-        if (!ipadec_purchase_free_app(app, acc, &purchaseMessage)) {
-            if (messageOut) *messageOut = purchaseMessage ?: @"license acquisition failed";
-            return nil;
-        }
-        return ipadec_prepare_download_ticket(app, acc, NO, messageOut);
-    }
-    if (failure.length > 0) {
-        if (messageOut) *messageOut = customer.length > 0 ? customer : [NSString stringWithFormat:@"download ticket failed: %@", failure];
-        return nil;
-    }
-
-    NSArray *items = [out[@"songList"] isKindOfClass:NSArray.class] ? out[@"songList"] : nil;
-    NSDictionary *item = [items.firstObject isKindOfClass:NSDictionary.class] ? items.firstObject : nil;
-    NSString *url = ipadec_nonempty_string(item[@"URL"]);
-    if (url.length == 0) {
-        if (messageOut) *messageOut = @"download ticket contained no CDN URL";
-        return nil;
-    }
-
-    NSDictionary *metadata = [item[@"metadata"] isKindOfClass:NSDictionary.class] ? item[@"metadata"] : @{};
-    NSArray *sinfs = [item[@"sinfs"] isKindOfClass:NSArray.class] ? item[@"sinfs"] : @[];
-    log_user("[IPADEC] Download ticket OK: version=%s externalVersion=%s sinfs=%lu url=%s\n",
-             ipadec_string_from_json_value(metadata[@"bundleShortVersionString"]).UTF8String ?: "",
-             ipadec_string_from_json_value(metadata[@"softwareVersionExternalIdentifier"]).UTF8String ?: "",
-             (unsigned long)sinfs.count,
-             url.UTF8String);
-    return item;
-}
-
-static int64_t ipadec_ticket_file_size(NSDictionary *ticket)
-{
-    NSDictionary *assetInfo = [ticket[@"asset-info"] isKindOfClass:NSDictionary.class] ? ticket[@"asset-info"] : nil;
-    id v = assetInfo[@"file-size"];
-    if ([v respondsToSelector:@selector(longLongValue)]) return [v longLongValue];
-    return 0;
-}
-
-static BOOL ipadec_download_cdn_url(NSString *urlString,
-                                    NSString *outPath,
-                                    int64_t expectedSize,
-                                    NSString **messageOut)
-{
-    NSURL *url = [NSURL URLWithString:urlString ?: @""];
-    if (!url || outPath.length == 0) {
-        if (messageOut) *messageOut = @"CDN URL or output path missing.";
-        return false;
-    }
-
-    NSString *tmpPath = [outPath stringByAppendingString:@".tmp"];
-    [NSFileManager.defaultManager removeItemAtPath:tmpPath error:nil];
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
-    request.timeoutInterval = 120.0;
-    [request setValue:kIPADefaultUserAgent forHTTPHeaderField:@"User-Agent"];
-
-    __block BOOL stagedDownload = NO;
-    __block NSURLResponse *response = nil;
-    __block NSError *error = nil;
-    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-    NSURLSessionDownloadTask *task = [NSURLSession.sharedSession downloadTaskWithRequest:request
-                                                                       completionHandler:^(NSURL *location, NSURLResponse *r, NSError *e) {
-        response = r;
-        error = e;
-        if (!error && location.path.length > 0) {
-            NSError *stageError = nil;
-            [NSFileManager.defaultManager createDirectoryAtPath:tmpPath.stringByDeletingLastPathComponent
-                                    withIntermediateDirectories:YES
-                                                     attributes:nil
-                                                          error:nil];
-            [NSFileManager.defaultManager removeItemAtPath:tmpPath error:nil];
-            stagedDownload = [NSFileManager.defaultManager moveItemAtURL:location
-                                                                    toURL:[NSURL fileURLWithPath:tmpPath]
-                                                                    error:&stageError];
-            if (!stagedDownload && stageError) error = stageError;
-        }
-        dispatch_semaphore_signal(sem);
-    }];
-    [task resume];
-    long waited = dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(900 * NSEC_PER_SEC)));
-    if (waited != 0) {
-        [task cancel];
-        if (messageOut) *messageOut = @"CDN download timed out.";
-        return false;
-    }
-    NSInteger status = [response isKindOfClass:NSHTTPURLResponse.class]
-        ? ((NSHTTPURLResponse *)response).statusCode
-        : 0;
-    if (error || status < 200 || status >= 300 || !stagedDownload) {
-        NSString *msg = error.localizedDescription ?: [NSString stringWithFormat:@"HTTP %ld", (long)status];
-        if (messageOut) *messageOut = [NSString stringWithFormat:@"CDN download failed: %@", msg];
-        return false;
-    }
-
-    NSError *fmError = nil;
-    [NSFileManager.defaultManager createDirectoryAtPath:outPath.stringByDeletingLastPathComponent
-                            withIntermediateDirectories:YES
-                                             attributes:nil
-                                                  error:nil];
-    [NSFileManager.defaultManager removeItemAtPath:outPath error:nil];
-    if (![NSFileManager.defaultManager moveItemAtURL:[NSURL fileURLWithPath:tmpPath]
-                                              toURL:[NSURL fileURLWithPath:outPath]
-                                              error:&fmError]) {
-        if (messageOut) *messageOut = [NSString stringWithFormat:@"move IPA failed: %@", fmError.localizedDescription ?: @"unknown"];
-        return false;
-    }
-
-    NSDictionary *attrs = [NSFileManager.defaultManager attributesOfItemAtPath:outPath error:nil];
-    unsigned long long size = [attrs fileSize];
-    log_user("[IPADEC] CDN download complete: %s (%llu bytes%s%lld%s)\n",
-             outPath.UTF8String,
-             size,
-             expectedSize > 0 ? " / expected " : "",
-             expectedSize > 0 ? (long long)expectedSize : 0,
-             expectedSize > 0 ? "" : "");
-    if (expectedSize > 0 && llabs((long long)size - (long long)expectedSize) > 4096) {
-        log_user("[IPADEC] Warning: downloaded size differs from ticket by %lld bytes.\n",
-                 (long long)size - (long long)expectedSize);
-    }
-    return true;
-}
-
-bool ipadecryptor_download_app_store_ipa(NSString *input,
-                                         NSString **downloadedPathOut,
-                                         NSString **messageOut)
-{
-    NSString *resolveMessage = nil;
-    NSDictionary<NSString *, NSString *> *app = ipadecryptor_resolve_app_store_input(input, &resolveMessage);
-    if (!app) {
-        if (messageOut) *messageOut = resolveMessage ?: @"App Store lookup failed.";
-        return false;
-    }
-
-    NSDictionary *acc = ipadec_saved_account();
-    if (!acc) {
-        if (messageOut) *messageOut = @"Sign in to App Store first, then retry the download.";
-        log_user("[IPADEC] Download blocked: no saved App Store account token.\n");
-        return false;
-    }
-
-    NSString *bundleID = app[kIPADecryptorKeyBundleID];
-    NSString *version = app[kIPADecryptorKeyVersion].length > 0 ? app[kIPADecryptorKeyVersion] : @"latest";
-    NSString *outName = [NSString stringWithFormat:@"%@_%@.encrypted.ipa", bundleID, version];
-    NSString *outPath = [ipadecryptor_default_output_directory() stringByAppendingPathComponent:outName];
-    if (downloadedPathOut) *downloadedPathOut = outPath;
-
-    log_user("[IPADEC] App Store IPA download requested for %s id=%s -> %s\n",
-             bundleID.UTF8String,
-             app[kIPADecryptorKeyAppStoreID].UTF8String,
-             outPath.UTF8String);
-
-    NSString *ticketMessage = nil;
-    NSDictionary *ticket = ipadec_prepare_download_ticket(app, acc, YES, &ticketMessage);
-    if (!ticket) {
-        if (messageOut) *messageOut = ticketMessage ?: @"Could not get App Store download ticket.";
-        log_user("[IPADEC] Download ticket failed: %s\n",
-                 (ticketMessage ?: @"unknown").UTF8String);
-        return false;
-    }
-
-    NSString *cdnURL = ipadec_nonempty_string(ticket[@"URL"]);
-    NSString *downloadMessage = nil;
-    if (!ipadec_download_cdn_url(cdnURL, outPath, ipadec_ticket_file_size(ticket), &downloadMessage)) {
-        if (messageOut) *messageOut = downloadMessage ?: @"CDN download failed.";
-        log_user("[IPADEC] IPA download failed: %s\n", (downloadMessage ?: @"unknown").UTF8String);
-        return false;
-    }
-
-    NSArray *sinfs = [ticket[@"sinfs"] isKindOfClass:NSArray.class] ? ticket[@"sinfs"] : @[];
-    log_user("[IPADEC] Downloaded encrypted IPA. SINF/iTunesMetadata patching and install/decrypt stages are next. sinfs=%lu\n",
-             (unsigned long)sinfs.count);
-    if (messageOut) {
-        *messageOut = [NSString stringWithFormat:@"Downloaded encrypted IPA to %@. Patch/install/decrypt stages are next.", outPath.lastPathComponent];
-    }
-    return true;
-}
 
 static NSString *ipadec_macho_summary(IPADecryptorMachOInfo info)
 {
@@ -1560,6 +441,1436 @@ static NSString *ipadec_macho_summary(IPADecryptorMachOInfo info)
                                       info.cryptid,
                                       info.cryptoff,
                                       info.cryptsize];
+}
+
+// MARK: - FairPlay dump (lara decrypt.m → Cyanide KRW)
+
+typedef struct {
+    uint32_t cryptid;
+    uint32_t cryptoff;
+    uint32_t cryptsize;
+    uint64_t text_vmaddr;
+    uint64_t text_fileoff;
+    uint64_t text_filesize;
+    uint64_t binary_size;
+    bool is_64;
+    uint32_t ncmds;
+    uint8_t uuid[16];
+    bool has_uuid;
+} IPADecDumpCtx;
+
+static bool ipadec_ensure_sandbox_for_dump(void)
+{
+    if (check_sandbox_var_rw() == 0) return true;
+    if (patch_sandbox_ext() == 0 && check_sandbox_var_rw() == 0) {
+        log_user("[IPADEC] sandbox ok via patch_sandbox_ext\n");
+        return true;
+    }
+    static const char *kDonors[] = {
+        "sysdiagnosed", "installd", "nehelper", "mobile_installation_proxy", NULL
+    };
+    for (int i = 0; kDonors[i]; i++) {
+        if (borrow_sandbox_ext(kDonors[i]) == 0 && check_sandbox_var_rw() == 0) {
+            log_user("[IPADEC] sandbox ok via borrow_sandbox_ext(%s)\n", kDonors[i]);
+            return true;
+        }
+    }
+    log_user("[IPADEC] WARNING: /private/var RW not confirmed; copy may fail on some paths\n");
+    return false;
+}
+
+static int ipadec_launch_app(const char *bundleID)
+{
+    if (!bundleID || !bundleID[0]) return -1;
+    Class cls = objc_getClass("LSApplicationWorkspace");
+    if (!cls) {
+        log_user("[IPADEC] LSApplicationWorkspace not found\n");
+        return -1;
+    }
+    id ws = ((id (*)(id, SEL))objc_msgSend)((id)cls, sel_registerName("defaultWorkspace"));
+    if (!ws) {
+        log_user("[IPADEC] defaultWorkspace returned nil\n");
+        return -1;
+    }
+    NSString *bid = [[NSString alloc] initWithUTF8String:bundleID];
+    BOOL ok = ((BOOL (*)(id, SEL, id))objc_msgSend)(ws, sel_registerName("openApplicationWithBundleID:"), bid);
+    if (!ok) {
+        log_user("[IPADEC] openApplicationWithBundleID failed for %s\n", bundleID);
+        return -1;
+    }
+    return 0;
+}
+
+// Normalize paths for comparison (/var vs /private/var).
+static NSString *ipadec_normalize_path(NSString *path)
+{
+    if (path.length == 0) return @"";
+    NSString *s = path.stringByStandardizingPath;
+    // Prefer not resolving final symlink (exec may be a symlink); only tidy components.
+    if ([s hasPrefix:@"/var/"] || [s isEqualToString:@"/var"]) {
+        s = [@"/private" stringByAppendingString:s];
+    } else if ([s hasPrefix:@"/private/var/"]) {
+        // already canonical form used by many tools
+    }
+    // Also produce a /var form for dual compare in match helper.
+    return s;
+}
+
+static NSString *ipadec_path_var_form(NSString *path)
+{
+    NSString *s = ipadec_normalize_path(path);
+    if ([s hasPrefix:@"/private/var/"]) {
+        return [s substringFromIndex:[@"/private" length]];
+    }
+    return s;
+}
+
+// Optional: userspace path for a pid. Often empty under iOS sandbox for other apps.
+static NSString *ipadec_pid_executable_path(pid_t pid)
+{
+    if (pid <= 0) return nil;
+    char buf[PROC_PIDPATHINFO_MAXSIZE];
+    memset(buf, 0, sizeof(buf));
+    int n = proc_pidpath(pid, buf, sizeof(buf));
+    if (n <= 0 || buf[0] == '\0') return nil;
+    return [NSString stringWithUTF8String:buf];
+}
+
+static BOOL ipadec_exec_paths_match(NSString *expected, NSString *actual)
+{
+    if (expected.length == 0 || actual.length == 0) return NO;
+    NSString *a1 = ipadec_normalize_path(expected);
+    NSString *b1 = ipadec_normalize_path(actual);
+    if ([a1 isEqualToString:b1]) return YES;
+    NSString *a2 = ipadec_path_var_form(expected);
+    NSString *b2 = ipadec_path_var_form(actual);
+    if ([a2 isEqualToString:b2] || [a1 isEqualToString:b2] || [a2 isEqualToString:b1]) return YES;
+
+    // Match trailing Bundle/Application/<UUID>/<App>.app/<Exec> (3–4 components).
+    NSArray<NSString *> *ap = a1.pathComponents;
+    NSArray<NSString *> *bp = b1.pathComponents;
+    if (ap.count >= 3 && bp.count >= 3) {
+        NSUInteger n = MIN(4, MIN(ap.count, bp.count));
+        BOOL tailMatch = YES;
+        for (NSUInteger i = 0; i < n; i++) {
+            if (![ap[ap.count - 1 - i] isEqualToString:bp[bp.count - 1 - i]]) {
+                tailMatch = NO;
+                break;
+            }
+        }
+        if (tailMatch) return YES;
+    }
+    return NO;
+}
+
+static BOOL ipadec_p_name_matches_exec(const char *p_name, NSString *execName)
+{
+    if (!p_name || !p_name[0] || execName.length == 0) return NO;
+    if (strcmp(p_name, execName.UTF8String) == 0) return YES;
+    // lara: truncate at first '.' and retry (some short names).
+    NSString *shortName = execName;
+    NSRange dot = [execName rangeOfString:@"."];
+    if (dot.location != NSNotFound && dot.location > 0) {
+        shortName = [execName substringToIndex:dot.location];
+        if (strcmp(p_name, shortName.UTF8String) == 0) return YES;
+    }
+    return NO;
+}
+
+// Walk kernel proc list (requires KRW). Returns candidates with matching p_name.
+// Prefer path-confirmed hits; fall back to name-only (UUID gate protects dump).
+static pid_t ipadec_find_pid_for_exec_path(NSString *execPath)
+{
+    if (execPath.length == 0) return -1;
+    if (!kexploit_krw_ready()) {
+        log_user("[IPADEC] KRW not ready for proc walk\n");
+        return -1;
+    }
+
+    NSString *execName = execPath.lastPathComponent;
+    if (execName.length == 0) return -1;
+
+    __block pid_t pathMatched = -1;
+    __block pid_t nameOnly = -1;
+    __block int nameHits = 0;
+    __block int pathRejected = 0;
+
+    void (^consider)(uint64_t) = ^(uint64_t proc) {
+        if (pathMatched > 0) return;
+        if (!is_kaddr_valid(proc)) return;
+        char *p_name = proc_get_p_name(proc);
+        if (!ipadec_p_name_matches_exec(p_name, execName)) return;
+
+        pid_t pid = (pid_t)kread32(proc + off_proc_p_pid);
+        if (pid <= 0) return;
+
+        NSString *livePath = ipadec_pid_executable_path(pid);
+        if (livePath.length > 0) {
+            if (ipadec_exec_paths_match(execPath, livePath)) {
+                pathMatched = pid;
+                log_user("[IPADEC] pid %d path-confirmed: %s\n",
+                         (int)pid, livePath.UTF8String);
+            } else {
+                pathRejected++;
+                log_user("[IPADEC] pid %d name=%s path-mismatch want=%s got=%s\n",
+                         (int)pid, p_name,
+                         execPath.UTF8String ?: "(nil)",
+                         livePath.UTF8String);
+            }
+            return;
+        }
+
+        // proc_pidpath often empty for other apps on iOS — keep as name candidate.
+        nameHits++;
+        if (nameOnly <= 0) nameOnly = pid;
+        log_user("[IPADEC] pid %d name-only candidate (no proc_pidpath): %s\n",
+                 (int)pid, p_name);
+    };
+
+    // Walk forward + backward from self (same pattern as proc_find_by_name).
+    uint64_t proc = proc_self();
+    for (int i = 0; i < 4096 && is_kaddr_valid(proc); i++) {
+        consider(proc);
+        if (pathMatched > 0) break;
+        uint64_t next = kread64(proc + off_proc_p_list_le_next);
+        if (!is_kaddr_valid(next) || next == proc) break;
+        proc = next;
+    }
+    if (pathMatched <= 0) {
+        proc = proc_self();
+        for (int i = 0; i < 4096 && is_kaddr_valid(proc); i++) {
+            consider(proc);
+            if (pathMatched > 0) break;
+            uint64_t prev = kread64(proc + off_proc_p_list_le_prev);
+            if (!is_kaddr_valid(prev) || prev == proc) break;
+            proc = prev;
+        }
+    }
+
+    if (pathMatched > 0) return pathMatched;
+
+    if (nameOnly > 0) {
+        // Safe enough with LC_UUID image gate: wrong same-name process fails dump.
+        log_user("[IPADEC] using name-only pid %d for %s (path unavailable; UUID gate will verify image) nameHits=%d pathRejected=%d\n",
+                 (int)nameOnly, execName.UTF8String, nameHits, pathRejected);
+        return nameOnly;
+    }
+
+    // Last resort: userspace list + path (rarely works for other apps).
+    int bytes = proc_listpids(PROC_ALL_PIDS, 0, NULL, 0);
+    if (bytes > 0) {
+        pid_t *pids = (pid_t *)calloc(1, (size_t)bytes);
+        if (pids) {
+            int got = proc_listpids(PROC_ALL_PIDS, 0, pids, bytes);
+            int count = got > 0 ? (got / (int)sizeof(pid_t)) : 0;
+            for (int i = 0; i < count; i++) {
+                pid_t pid = pids[i];
+                if (pid <= 0) continue;
+                NSString *path = ipadec_pid_executable_path(pid);
+                if (path.length == 0) continue;
+                if (ipadec_exec_paths_match(execPath, path)) {
+                    free(pids);
+                    log_user("[IPADEC] matched pid %d via proc_listpids path=%s\n",
+                             (int)pid, path.UTF8String);
+                    return pid;
+                }
+            }
+            free(pids);
+        }
+    }
+
+    log_user("[IPADEC] no live process for exec %s (path=%s)\n",
+             execName.UTF8String, execPath.UTF8String ?: "(nil)");
+    return -1;
+}
+
+static pid_t ipadec_ensure_target_running(NSString *bundleID, NSString *execPath)
+{
+    pid_t pid = ipadec_find_pid_for_exec_path(execPath);
+    if (pid > 0) return pid;
+
+    log_user("[IPADEC] process not running for %s; launching %s\n",
+             execPath.lastPathComponent.UTF8String ?: "(nil)",
+             bundleID.UTF8String);
+    if (ipadec_launch_app(bundleID.UTF8String) != 0) {
+        return -1;
+    }
+
+    // Give the target time to map its main image, then try to return to Cyanide
+    // (same timing pattern as lara DecryptView).
+    usleep(2500 * 1000);
+    NSString *selfBID = NSBundle.mainBundle.bundleIdentifier;
+    if (selfBID.length > 0) {
+        (void)ipadec_launch_app(selfBID.UTF8String);
+        usleep(500 * 1000);
+    }
+
+    for (int attempt = 0; attempt < 30; attempt++) {
+        pid = ipadec_find_pid_for_exec_path(execPath);
+        if (pid > 0) return pid;
+        usleep(250 * 1000);
+    }
+    return -1;
+}
+
+static int ipadec_read_file(const char *path, uint8_t **out, uint64_t *out_size)
+{
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) return -1;
+    off_t fsz = lseek(fd, 0, SEEK_END);
+    if (fsz <= 0) {
+        close(fd);
+        return -1;
+    }
+    lseek(fd, 0, SEEK_SET);
+    uint8_t *buf = (uint8_t *)malloc((size_t)fsz);
+    if (!buf) {
+        close(fd);
+        return -1;
+    }
+    ssize_t n = read(fd, buf, (size_t)fsz);
+    close(fd);
+    if (n != fsz) {
+        free(buf);
+        return -1;
+    }
+    *out = buf;
+    *out_size = (uint64_t)fsz;
+    return 0;
+}
+
+static int ipadec_write_file(const char *path, const uint8_t *data, uint64_t size)
+{
+    // Preserve existing mode when overwriting (copy already set +x on binaries).
+    mode_t mode = 0644;
+    struct stat st;
+    BOOL had = (path && stat(path, &st) == 0);
+    if (had) mode = st.st_mode & 07777;
+
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, mode ? mode : 0644);
+    if (fd < 0) {
+        log_user("[IPADEC] open for write failed: %s\n", path);
+        return -1;
+    }
+    if (had) {
+        (void)fchmod(fd, mode);
+    }
+    ssize_t n = write(fd, data, (size_t)size);
+    close(fd);
+    if (n != (ssize_t)size) {
+        log_user("[IPADEC] write failed: %s\n", path);
+        return -1;
+    }
+    return 0;
+}
+
+static int ipadec_parse_macho_dump(uint8_t *buf, uint64_t size, IPADecDumpCtx *ctx)
+{
+    memset(ctx, 0, sizeof(*ctx));
+    if (!buf || size < 4) return -1;
+    uint32_t magic = *(uint32_t *)buf;
+
+    if (magic == FAT_MAGIC || magic == FAT_CIGAM) {
+        if (size < sizeof(struct fat_header)) return -1;
+        struct fat_header *fh = (struct fat_header *)buf;
+        uint32_t narch = OSSwapBigToHostInt32(fh->nfat_arch);
+        if (narch == 0 || narch > 64) return -1;
+        uint64_t archs_bytes = (uint64_t)narch * sizeof(struct fat_arch);
+        if (sizeof(struct fat_header) + archs_bytes > size) return -1;
+        struct fat_arch *archs = (struct fat_arch *)(buf + sizeof(struct fat_header));
+        for (uint32_t i = 0; i < narch; i++) {
+            if (OSSwapBigToHostInt32(archs[i].cputype) == CPU_TYPE_ARM64) {
+                uint32_t offset = OSSwapBigToHostInt32(archs[i].offset);
+                uint32_t arch_size = OSSwapBigToHostInt32(archs[i].size);
+                if (arch_size == 0) continue;
+                if ((uint64_t)offset + arch_size > size) continue;
+                return ipadec_parse_macho_dump(buf + offset, arch_size, ctx);
+            }
+        }
+        return -1;
+    }
+
+    if (magic != MH_MAGIC_64 && magic != MH_MAGIC) return -1;
+
+    ctx->is_64 = (magic == MH_MAGIC_64);
+    uint64_t header_size = ctx->is_64 ? sizeof(struct mach_header_64) : sizeof(struct mach_header);
+    if (size < header_size) return -1;
+
+    struct mach_header_64 *header64 = (struct mach_header_64 *)buf;
+    struct mach_header *header32 = (struct mach_header *)buf;
+    ctx->ncmds = ctx->is_64 ? header64->ncmds : header32->ncmds;
+    uint32_t sizeofcmds = ctx->is_64 ? header64->sizeofcmds : header32->sizeofcmds;
+    if (ctx->ncmds == 0 || ctx->ncmds > 0x10000) return -1;
+    if (header_size + (uint64_t)sizeofcmds > size) return -1;
+
+    uint64_t off = header_size;
+    uint64_t cmds_end = header_size + sizeofcmds;
+    bool found_encryption = false;
+    bool found_text = false;
+
+    for (uint32_t i = 0; i < ctx->ncmds; i++) {
+        if (off + sizeof(struct load_command) > cmds_end ||
+            off + sizeof(struct load_command) > size) {
+            return -1;
+        }
+        struct load_command *lc = (struct load_command *)(buf + off);
+        uint32_t cmd = lc->cmd;
+        uint32_t cmdsize = lc->cmdsize;
+        // Load commands must be 4/8-byte aligned and large enough for the header.
+        if (cmdsize < sizeof(struct load_command) || (cmdsize & 3u) != 0) return -1;
+        if (off + cmdsize > cmds_end || off + cmdsize > size) return -1;
+
+        if (cmd == LC_ENCRYPTION_INFO_64 && ctx->is_64) {
+            if (cmdsize < sizeof(struct encryption_info_command_64)) return -1;
+            struct encryption_info_command_64 *eic = (struct encryption_info_command_64 *)lc;
+            ctx->cryptid = eic->cryptid;
+            ctx->cryptoff = eic->cryptoff;
+            ctx->cryptsize = eic->cryptsize;
+            found_encryption = true;
+        } else if (cmd == LC_ENCRYPTION_INFO && !ctx->is_64) {
+            if (cmdsize < sizeof(struct encryption_info_command)) return -1;
+            struct encryption_info_command *eic = (struct encryption_info_command *)lc;
+            ctx->cryptid = eic->cryptid;
+            ctx->cryptoff = eic->cryptoff;
+            ctx->cryptsize = eic->cryptsize;
+            found_encryption = true;
+        } else if (cmd == LC_SEGMENT_64 && ctx->is_64) {
+            if (cmdsize < sizeof(struct segment_command_64)) return -1;
+            struct segment_command_64 *seg = (struct segment_command_64 *)lc;
+            if (strncmp(seg->segname, "__TEXT", 16) == 0) {
+                ctx->text_vmaddr = seg->vmaddr;
+                ctx->text_fileoff = seg->fileoff;
+                ctx->text_filesize = seg->filesize;
+                found_text = true;
+            }
+        } else if (cmd == LC_SEGMENT && !ctx->is_64) {
+            if (cmdsize < sizeof(struct segment_command)) return -1;
+            struct segment_command *seg = (struct segment_command *)lc;
+            if (strncmp(seg->segname, "__TEXT", 16) == 0) {
+                ctx->text_vmaddr = seg->vmaddr;
+                ctx->text_fileoff = seg->fileoff;
+                ctx->text_filesize = seg->filesize;
+                found_text = true;
+            }
+        } else if (cmd == LC_UUID) {
+            if (cmdsize < sizeof(struct uuid_command)) return -1;
+            struct uuid_command *uc = (struct uuid_command *)lc;
+            memcpy(ctx->uuid, uc->uuid, 16);
+            ctx->has_uuid = true;
+        }
+        off += cmdsize;
+    }
+
+    if (!found_encryption || !found_text) return -1;
+    // crypt range must sit inside the image we will rewrite.
+    if ((uint64_t)ctx->cryptoff + (uint64_t)ctx->cryptsize > size) return -1;
+    ctx->binary_size = size;
+    return 0;
+}
+
+// Parse LC_UUID from an in-memory Mach-O (or arm64 slice of a FAT) header buffer.
+static int ipadec_extract_uuid_from_buffer(const uint8_t *buf, size_t size, uint8_t uuid_out[16])
+{
+    if (!buf || size < 4 || !uuid_out) return -1;
+    uint32_t magic = 0;
+    memcpy(&magic, buf, sizeof(magic));
+
+    if (magic == FAT_MAGIC || magic == FAT_CIGAM) {
+        if (size < sizeof(struct fat_header)) return -1;
+        struct fat_header fh;
+        memcpy(&fh, buf, sizeof(fh));
+        uint32_t narch = OSSwapBigToHostInt32(fh.nfat_arch);
+        if (narch == 0 || narch > 64) return -1;
+        uint64_t archs_bytes = (uint64_t)narch * sizeof(struct fat_arch);
+        if (sizeof(struct fat_header) + archs_bytes > size) return -1;
+        const struct fat_arch *archs =
+            (const struct fat_arch *)(buf + sizeof(struct fat_header));
+        for (uint32_t i = 0; i < narch; i++) {
+            if (OSSwapBigToHostInt32(archs[i].cputype) != CPU_TYPE_ARM64) continue;
+            uint32_t offset = OSSwapBigToHostInt32(archs[i].offset);
+            uint32_t arch_size = OSSwapBigToHostInt32(archs[i].size);
+            if (arch_size == 0 || (uint64_t)offset + arch_size > size) continue;
+            return ipadec_extract_uuid_from_buffer(buf + offset, arch_size, uuid_out);
+        }
+        return -1;
+    }
+
+    if (magic != MH_MAGIC_64 && magic != MH_MAGIC) return -1;
+    bool is64 = (magic == MH_MAGIC_64);
+    size_t header_size = is64 ? sizeof(struct mach_header_64) : sizeof(struct mach_header);
+    if (size < header_size) return -1;
+
+    uint32_t ncmds = 0;
+    uint32_t sizeofcmds = 0;
+    if (is64) {
+        struct mach_header_64 mh;
+        memcpy(&mh, buf, sizeof(mh));
+        ncmds = mh.ncmds;
+        sizeofcmds = mh.sizeofcmds;
+    } else {
+        struct mach_header mh;
+        memcpy(&mh, buf, sizeof(mh));
+        ncmds = mh.ncmds;
+        sizeofcmds = mh.sizeofcmds;
+    }
+    if (ncmds == 0 || ncmds > 0x10000) return -1;
+    if (header_size + (size_t)sizeofcmds > size) return -1;
+
+    size_t off = header_size;
+    size_t cmds_end = header_size + sizeofcmds;
+    for (uint32_t i = 0; i < ncmds; i++) {
+        if (off + sizeof(struct load_command) > cmds_end) return -1;
+        struct load_command lc;
+        memcpy(&lc, buf + off, sizeof(lc));
+        if (lc.cmdsize < sizeof(struct load_command) || (lc.cmdsize & 3u) != 0) return -1;
+        if (off + lc.cmdsize > cmds_end) return -1;
+        if (lc.cmd == LC_UUID) {
+            if (lc.cmdsize < sizeof(struct uuid_command)) return -1;
+            struct uuid_command uc;
+            memcpy(&uc, buf + off, sizeof(uc));
+            memcpy(uuid_out, uc.uuid, 16);
+            return 0;
+        }
+        off += lc.cmdsize;
+    }
+    return -1;
+}
+
+// Map enough pages from a candidate image base to parse its LC_UUID.
+static int ipadec_read_uuid_from_vm_image(uint64_t vmMap, uint64_t base, uint8_t uuid_out[16])
+{
+    if (base == 0 || base >= 0xffffff8000000000ULL) return -1;
+
+    // Peek first page for header + sizeofcmds.
+    uint64_t page0 = base & ~((uint64_t)PAGE_SIZE - 1);
+    uint64_t page_off = base - page0;
+    struct VMShmem sh0 = vm_map_remote_page(vmMap, page0);
+    if (!sh0.used) return -1;
+
+    const uint8_t *p0 = (const uint8_t *)(uintptr_t)sh0.localAddress;
+    if (page_off + 4 > PAGE_SIZE) {
+        mach_vm_deallocate(mach_task_self_, sh0.localAddress, PAGE_SIZE);
+        return -1;
+    }
+
+    uint32_t magic = 0;
+    memcpy(&magic, p0 + page_off, sizeof(magic));
+    if (magic != MH_MAGIC_64 && magic != MH_MAGIC &&
+        magic != FAT_MAGIC && magic != FAT_CIGAM) {
+        mach_vm_deallocate(mach_task_self_, sh0.localAddress, PAGE_SIZE);
+        return -1;
+    }
+
+    size_t need = PAGE_SIZE; // at least one page from base
+    if (magic == MH_MAGIC_64 || magic == MH_MAGIC) {
+        bool is64 = (magic == MH_MAGIC_64);
+        size_t header_size = is64 ? sizeof(struct mach_header_64) : sizeof(struct mach_header);
+        if (page_off + header_size <= PAGE_SIZE) {
+            uint32_t sizeofcmds = 0;
+            if (is64) {
+                struct mach_header_64 mh;
+                memcpy(&mh, p0 + page_off, sizeof(mh));
+                sizeofcmds = mh.sizeofcmds;
+            } else {
+                struct mach_header mh;
+                memcpy(&mh, p0 + page_off, sizeof(mh));
+                sizeofcmds = mh.sizeofcmds;
+            }
+            size_t header_and_cmds = header_size + (size_t)sizeofcmds;
+            // Cap: refuse absurd load-command blobs.
+            if (header_and_cmds > 256 * 1024) {
+                mach_vm_deallocate(mach_task_self_, sh0.localAddress, PAGE_SIZE);
+                return -1;
+            }
+            need = header_and_cmds;
+        }
+    } else {
+        // FAT: need fat header + arch table + first arm64 slice header region.
+        // Read up to 64KiB from base — enough for fat + slice start in practice.
+        need = 64 * 1024;
+    }
+
+    uint8_t *buf = (uint8_t *)calloc(1, need);
+    if (!buf) {
+        mach_vm_deallocate(mach_task_self_, sh0.localAddress, PAGE_SIZE);
+        return -1;
+    }
+
+    // Copy from first mapped page.
+    size_t first_cpy = PAGE_SIZE - (size_t)page_off;
+    if (first_cpy > need) first_cpy = need;
+    memcpy(buf, p0 + page_off, first_cpy);
+    mach_vm_deallocate(mach_task_self_, sh0.localAddress, PAGE_SIZE);
+
+    size_t filled = first_cpy;
+    while (filled < need) {
+        uint64_t addr = base + filled;
+        uint64_t pg = addr & ~((uint64_t)PAGE_SIZE - 1);
+        uint64_t off_in_pg = addr - pg;
+        struct VMShmem sh = vm_map_remote_page(vmMap, pg);
+        if (!sh.used) {
+            free(buf);
+            return -1;
+        }
+        size_t cpy = PAGE_SIZE - (size_t)off_in_pg;
+        if (cpy > need - filled) cpy = need - filled;
+        memcpy(buf + filled, (const void *)(uintptr_t)(sh.localAddress + off_in_pg), cpy);
+        mach_vm_deallocate(mach_task_self_, sh.localAddress, PAGE_SIZE);
+        filled += cpy;
+    }
+
+    int ret = ipadec_extract_uuid_from_buffer(buf, need, uuid_out);
+    free(buf);
+    return ret;
+}
+
+static BOOL ipadec_uuid_equal(const uint8_t a[16], const uint8_t b[16])
+{
+    return a && b && memcmp(a, b, 16) == 0;
+}
+
+static void ipadec_log_uuid(const char *label, const uint8_t uuid[16])
+{
+    if (!uuid) {
+        log_user("[IPADEC] %s: (nil)\n", label ?: "uuid");
+        return;
+    }
+    log_user("[IPADEC] %s: %02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x\n",
+             label ?: "uuid",
+             uuid[0], uuid[1], uuid[2], uuid[3],
+             uuid[4], uuid[5], uuid[6], uuid[7],
+             uuid[8], uuid[9], uuid[10], uuid[11],
+             uuid[12], uuid[13], uuid[14], uuid[15]);
+}
+
+// Locate the mapped image whose LC_UUID matches the on-disk main binary.
+// Prefer fileoff alias heuristic as a filter, but NEVER accept a candidate
+// without UUID equality. No "first Mach-O wins" fallback.
+static int ipadec_find_text_segment_in_vm_map(uint64_t vmMap,
+                                             uint64_t fileoff,
+                                             const uint8_t expected_uuid[16],
+                                             bool has_uuid,
+                                             uint64_t *out_addr)
+{
+    if (!out_addr || !has_uuid || !expected_uuid) return -1;
+    *out_addr = 0;
+
+    __block uint64_t found_addr = 0;
+    __block BOOL done = NO;
+
+    // Pass 1: fileoff-hint candidates (same heuristic as before, UUID-gated).
+    // Address filter: only skip null / kernel map; UUID is the real gate.
+    vm_map_iterate_entries(vmMap, ^(uint64_t start, uint64_t end, uint64_t entry, BOOL *stop) {
+        (void)end;
+        if (done) return;
+        if (start == 0 || start >= 0xffffff8000000000ULL) return;
+
+        uint64_t alias_offset = kread64(entry + off_vm_map_entry_vme_alias);
+        if ((alias_offset >> 12) != (fileoff >> 14)) return;
+
+        uint8_t live_uuid[16];
+        if (ipadec_read_uuid_from_vm_image(vmMap, start, live_uuid) != 0) return;
+        if (!ipadec_uuid_equal(expected_uuid, live_uuid)) return;
+
+        found_addr = start;
+        done = YES;
+        *stop = YES;
+    });
+
+    // Pass 2: any user Mach-O mapping with matching UUID (no fileoff filter).
+    if (found_addr == 0) {
+        vm_map_iterate_entries(vmMap, ^(uint64_t start, uint64_t end, uint64_t entry, BOOL *stop) {
+            (void)end;
+            (void)entry;
+            if (done) return;
+            if (start == 0 || start >= 0xffffff8000000000ULL) return;
+
+            uint8_t live_uuid[16];
+            if (ipadec_read_uuid_from_vm_image(vmMap, start, live_uuid) != 0) return;
+            if (!ipadec_uuid_equal(expected_uuid, live_uuid)) return;
+
+            found_addr = start;
+            done = YES;
+            *stop = YES;
+        });
+    }
+
+    if (found_addr == 0) {
+        log_user("[IPADEC] no VM image with matching LC_UUID\n");
+        return -1;
+    }
+
+    *out_addr = found_addr;
+    return 0;
+}
+
+static int ipadec_decrypt_to_output(pid_t pid,
+                                    uint8_t *file_buf,
+                                    uint64_t file_size,
+                                    IPADecDumpCtx *ctx,
+                                    const char *outputPath)
+{
+    uint64_t proc = proc_find(pid);
+    if (proc == 0) {
+        log_user("[IPADEC] process pid %d not found\n", (int)pid);
+        return -1;
+    }
+
+    uint64_t task = proc_task(proc);
+    if (task == 0) {
+        log_user("[IPADEC] failed to get task for pid %d\n", (int)pid);
+        return -1;
+    }
+
+    uint64_t vmMap = task_get_vm_map(task);
+    if (vmMap == 0) {
+        log_user("[IPADEC] failed to get vm_map for pid %d\n", (int)pid);
+        return -1;
+    }
+
+    if (!ctx->has_uuid) {
+        log_user("[IPADEC] disk image has no LC_UUID; refuse ambiguous VM match\n");
+        return -1;
+    }
+    ipadec_log_uuid("disk LC_UUID", ctx->uuid);
+
+    uint64_t text_addr = 0;
+    if (ipadec_find_text_segment_in_vm_map(vmMap, ctx->text_fileoff,
+                                           ctx->uuid, ctx->has_uuid,
+                                           &text_addr) != 0) {
+        log_user("[IPADEC] failed to find UUID-matched main image in process memory\n");
+        return -1;
+    }
+    log_user("[IPADEC] text base in target (UUID-matched): 0x%llx\n", text_addr);
+
+    uint8_t *decrypted = (uint8_t *)malloc((size_t)file_size);
+    if (!decrypted) {
+        log_user("[IPADEC] malloc failed for decrypted buffer\n");
+        return -1;
+    }
+    memcpy(decrypted, file_buf, (size_t)file_size);
+
+    uint64_t segment_fileoff = ctx->text_fileoff;
+    uint32_t page_size = (uint32_t)PAGE_SIZE;
+    uint32_t start_page = ctx->cryptoff / page_size;
+    uint32_t end_page = (ctx->cryptoff + ctx->cryptsize + page_size - 1) / page_size;
+    uint32_t total_pages = end_page > start_page ? (end_page - start_page) : 1;
+    uint32_t pages_done = 0;
+    uint32_t pages_ok = 0;
+
+    for (uint32_t pg = start_page; pg < end_page; pg++) {
+        uint64_t pg_file_start = (uint64_t)pg * page_size;
+        uint64_t pg_virt = text_addr + pg_file_start - segment_fileoff;
+
+        struct VMShmem shmem = vm_map_remote_page(vmMap, pg_virt);
+        if (!shmem.used) {
+            shmem = vm_map_remote_page(vmMap, pg_virt & ~(uint64_t)(page_size - 1));
+            if (!shmem.used) {
+                pages_done++;
+                log_user("[IPADEC] crypt page map miss pg=%u virt=0x%llx fileoff=0x%llx\n",
+                         pg, pg_virt, pg_file_start);
+                continue;
+            }
+        }
+
+        uint64_t copy_off = pg_file_start;
+        uint32_t copy_size = page_size;
+        if (copy_off + copy_size > file_size)
+            copy_size = (uint32_t)(file_size - copy_off);
+
+        memcpy(decrypted + copy_off, (void *)(uintptr_t)shmem.localAddress, copy_size);
+        mach_vm_deallocate(mach_task_self_, shmem.localAddress, PAGE_SIZE);
+        pages_ok++;
+        pages_done++;
+        if ((pages_done % 64) == 0 || pages_done == total_pages) {
+            log_user("[IPADEC] dump progress %u/%u pages (ok=%u)\n",
+                     pages_done, total_pages, pages_ok);
+        }
+    }
+
+    // Integrity gate: partial crypt dumps must not be labeled decrypted.
+    // Keep a .partial debug image (cryptid still set) for inspection.
+    if (pages_ok != total_pages) {
+        NSString *partialPath = [[NSString stringWithUTF8String:outputPath ?: ""]
+                                 stringByAppendingString:@".partial"];
+        if (partialPath.length > 0) {
+            (void)ipadec_write_file(partialPath.UTF8String, decrypted, file_size);
+            log_user("[IPADEC] incomplete crypt dump: %u/%u pages ok; debug copy: %s (cryptid left set)\n",
+                     pages_ok, total_pages, partialPath.UTF8String);
+        } else {
+            log_user("[IPADEC] incomplete crypt dump: %u/%u pages ok (cryptid left set)\n",
+                     pages_ok, total_pages);
+        }
+        free(decrypted);
+        return -1;
+    }
+
+    uint64_t crypto_off = ctx->is_64 ? sizeof(struct mach_header_64) : sizeof(struct mach_header);
+    bool cleared = false;
+    for (uint32_t i = 0; i < ctx->ncmds; i++) {
+        if (crypto_off + sizeof(struct load_command) > file_size) break;
+        struct load_command *lc = (struct load_command *)(decrypted + crypto_off);
+        uint32_t cmdsize = lc->cmdsize;
+        if (cmdsize < sizeof(struct load_command) || (cmdsize & 3u) != 0) break;
+        if (crypto_off + cmdsize > file_size) break;
+        if (lc->cmd == LC_ENCRYPTION_INFO_64 && ctx->is_64) {
+            if (cmdsize < sizeof(struct encryption_info_command_64)) break;
+            ((struct encryption_info_command_64 *)lc)->cryptid = 0;
+            cleared = true;
+            break;
+        } else if (lc->cmd == LC_ENCRYPTION_INFO && !ctx->is_64) {
+            if (cmdsize < sizeof(struct encryption_info_command)) break;
+            ((struct encryption_info_command *)lc)->cryptid = 0;
+            cleared = true;
+            break;
+        }
+        crypto_off += cmdsize;
+    }
+    if (!cleared) {
+        free(decrypted);
+        log_user("[IPADEC] failed to clear cryptid after full dump\n");
+        return -1;
+    }
+
+    if (ipadec_write_file(outputPath, decrypted, file_size) != 0) {
+        free(decrypted);
+        return -1;
+    }
+
+    free(decrypted);
+    log_user("[IPADEC] wrote decrypted binary (%u/%u pages) -> %s\n",
+             pages_ok, total_pages, outputPath);
+    return 0;
+}
+
+static int ipadec_decrypt_binary_pid(const char *binaryPath, pid_t process_pid, const char *outputPath)
+{
+    if (!kexploit_krw_ready()) {
+        log_user("[IPADEC] KRW not ready\n");
+        return -1;
+    }
+
+    uint8_t *file_buf = NULL;
+    uint64_t file_size = 0;
+
+    // Disk image is required: LC_UUID must come from a known file, never from
+    // an arbitrary first Mach-O found in the process VM.
+    if (ipadec_read_file(binaryPath, &file_buf, &file_size) != 0) {
+        log_user("[IPADEC] cannot read binary from disk (refuse UUID-less VM dump): %s\n",
+                 binaryPath);
+        return -1;
+    }
+
+    IPADecDumpCtx ctx;
+    if (ipadec_parse_macho_dump(file_buf, file_size, &ctx) != 0) {
+        free(file_buf);
+        log_user("[IPADEC] failed to parse mach-o: %s\n", binaryPath);
+        return -1;
+    }
+    if (ctx.cryptid == 0) {
+        log_user("[IPADEC] binary not encrypted (cryptid=0): %s\n", binaryPath);
+        int copyRet = 0;
+        if (strcmp(binaryPath, outputPath) != 0) {
+            copyRet = ipadec_write_file(outputPath, file_buf, file_size);
+        }
+        free(file_buf);
+        return copyRet;
+    }
+    if (!ctx.has_uuid) {
+        free(file_buf);
+        log_user("[IPADEC] disk image has no LC_UUID; refuse dump: %s\n", binaryPath);
+        return -1;
+    }
+
+    int ret = ipadec_decrypt_to_output(process_pid, file_buf, file_size, &ctx, outputPath);
+    free(file_buf);
+    return ret;
+}
+
+static int ipadec_is_encrypted_path(const char *binaryPath)
+{
+    uint8_t *buf = NULL;
+    uint64_t size = 0;
+    if (ipadec_read_file(binaryPath, &buf, &size) != 0) return -1;
+    IPADecDumpCtx ctx;
+    int ret = ipadec_parse_macho_dump(buf, size, &ctx);
+    free(buf);
+    if (ret != 0) return -1;
+    return ctx.cryptid != 0 ? 1 : 0;
+}
+
+// MARK: - Bundle copy + store-only ZIP IPA writer
+
+// Fail-closed recursive copy that preserves file modes (needed for +x on
+// CFBundleExecutable / framework binaries). Uses copyfile(3), not NSData 0644.
+static BOOL ipadec_copy_item(NSString *src, NSString *dst, NSError **error)
+{
+    if (src.length == 0 || dst.length == 0) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"IPADecryptor"
+                                         code:10
+                                     userInfo:@{ NSLocalizedDescriptionKey: @"Empty copy path" }];
+        }
+        return NO;
+    }
+
+    NSFileManager *fm = NSFileManager.defaultManager;
+    BOOL isDir = NO;
+    if (![fm fileExistsAtPath:src isDirectory:&isDir]) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"IPADecryptor"
+                                         code:11
+                                     userInfo:@{ NSLocalizedDescriptionKey:
+                                         [NSString stringWithFormat:@"Source missing: %@", src] }];
+        }
+        return NO;
+    }
+
+    // Ensure parent of destination exists for both files and top-level dirs.
+    NSString *parent = dst.stringByDeletingLastPathComponent;
+    if (parent.length > 0 && ![fm fileExistsAtPath:parent]) {
+        NSError *mkErr = nil;
+        if (![fm createDirectoryAtPath:parent
+           withIntermediateDirectories:YES
+                            attributes:nil
+                                 error:&mkErr]) {
+            if (error) *error = mkErr;
+            return NO;
+        }
+    }
+
+    // Remove stale destination so copyfile does not merge partially.
+    [fm removeItemAtPath:dst error:nil];
+
+    copyfile_flags_t flags = COPYFILE_ALL | COPYFILE_NOFOLLOW_SRC;
+    if (isDir) flags |= COPYFILE_RECURSIVE;
+
+    if (copyfile(src.fileSystemRepresentation, dst.fileSystemRepresentation, NULL, flags) != 0) {
+        if (error) {
+            *error = [NSError errorWithDomain:NSPOSIXErrorDomain
+                                         code:errno
+                                     userInfo:@{ NSLocalizedDescriptionKey:
+                                         [NSString stringWithFormat:@"copyfile failed for %@: %s",
+                                          src.lastPathComponent, strerror(errno)] }];
+        }
+        return NO;
+    }
+
+    // Verify destination landed.
+    if (![fm fileExistsAtPath:dst isDirectory:&isDir]) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"IPADecryptor"
+                                         code:12
+                                     userInfo:@{ NSLocalizedDescriptionKey:
+                                         [NSString stringWithFormat:@"Copy produced no destination: %@", dst] }];
+        }
+        return NO;
+    }
+    return YES;
+}
+
+// Unix mode → ZIP "external file attributes" (host = Unix: mode in high 16 bits).
+// Uses lstat so symlink entries keep S_IFLNK, not the target type.
+static uint32_t ipadec_zip_external_attrs_from_lstat(const struct stat *st, BOOL isDirFallback)
+{
+    mode_t mode = isDirFallback ? (S_IFDIR | 0755) : (S_IFREG | 0644);
+    if (st) mode = st->st_mode;
+    return ((uint32_t)(mode & 0xFFFF)) << 16;
+}
+
+static BOOL ipadec_readlink_target(NSString *path, NSData **targetOut, NSError **error)
+{
+    const char *cpath = path.fileSystemRepresentation;
+    struct stat st;
+    if (lstat(cpath, &st) != 0 || !S_ISLNK(st.st_mode)) {
+        if (error) {
+            *error = [NSError errorWithDomain:NSPOSIXErrorDomain
+                                         code:errno
+                                     userInfo:@{ NSLocalizedDescriptionKey:
+                                         [NSString stringWithFormat:@"readlink lstat failed: %@", path] }];
+        }
+        return NO;
+    }
+
+    // st_size is the link target length on Darwin; +1 room detects truncation.
+    size_t alloc = (st.st_size > 0) ? ((size_t)st.st_size + 1) : ((size_t)PATH_MAX + 1);
+    if (alloc > 1u << 20) { // refuse absurd targets
+        if (error) {
+            *error = [NSError errorWithDomain:@"IPADecryptor"
+                                         code:14
+                                     userInfo:@{ NSLocalizedDescriptionKey:
+                                         [NSString stringWithFormat:@"symlink target too large: %@", path] }];
+        }
+        return NO;
+    }
+
+    char *buf = (char *)malloc(alloc);
+    if (!buf) {
+        if (error) {
+            *error = [NSError errorWithDomain:NSPOSIXErrorDomain
+                                         code:ENOMEM
+                                     userInfo:@{ NSLocalizedDescriptionKey: @"readlink malloc failed" }];
+        }
+        return NO;
+    }
+
+    ssize_t n = readlink(cpath, buf, alloc);
+    if (n < 0) {
+        free(buf);
+        if (error) {
+            *error = [NSError errorWithDomain:NSPOSIXErrorDomain
+                                         code:errno
+                                     userInfo:@{ NSLocalizedDescriptionKey:
+                                         [NSString stringWithFormat:@"readlink failed: %@", path] }];
+        }
+        return NO;
+    }
+    // If the buffer filled completely, target may be truncated — fail closed.
+    if ((size_t)n >= alloc) {
+        free(buf);
+        if (error) {
+            *error = [NSError errorWithDomain:@"IPADecryptor"
+                                         code:14
+                                     userInfo:@{ NSLocalizedDescriptionKey:
+                                         [NSString stringWithFormat:@"symlink target truncated: %@", path] }];
+        }
+        return NO;
+    }
+
+    if (targetOut) *targetOut = [NSData dataWithBytes:buf length:(NSUInteger)n];
+    free(buf);
+    return YES;
+}
+
+static void ipadec_set_zip_error(NSError **error, NSInteger code, NSString *message)
+{
+    if (!error) return;
+    *error = [NSError errorWithDomain:@"IPADecryptor"
+                                 code:code
+                             userInfo:@{ NSLocalizedDescriptionKey: message ?: @"ZIP error" }];
+}
+
+static void ipadec_write_le16(NSMutableData *d, uint16_t v)
+{
+    uint8_t b[2] = { (uint8_t)(v & 0xff), (uint8_t)((v >> 8) & 0xff) };
+    [d appendBytes:b length:2];
+}
+
+static void ipadec_write_le32(NSMutableData *d, uint32_t v)
+{
+    uint8_t b[4] = {
+        (uint8_t)(v & 0xff),
+        (uint8_t)((v >> 8) & 0xff),
+        (uint8_t)((v >> 16) & 0xff),
+        (uint8_t)((v >> 24) & 0xff)
+    };
+    [d appendBytes:b length:4];
+}
+
+// Stream CRC32 for a file without loading it fully into memory.
+static BOOL ipadec_crc32_and_size_of_file(NSString *path, uint32_t *crcOut, uint64_t *sizeOut)
+{
+    FILE *fp = fopen(path.fileSystemRepresentation, "rb");
+    if (!fp) return NO;
+    uLong crc = crc32(0L, Z_NULL, 0);
+    uint64_t total = 0;
+    uint8_t buf[256 * 1024];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), fp)) > 0) {
+        crc = crc32(crc, buf, (uInt)n);
+        total += n;
+    }
+    int err = ferror(fp);
+    fclose(fp);
+    if (err) return NO;
+    if (crcOut) *crcOut = (uint32_t)crc;
+    if (sizeOut) *sizeOut = total;
+    return YES;
+}
+
+// Stream-copy regular file body (O_RDONLY | O_NOFOLLOW when available).
+static BOOL ipadec_stream_copy_file_to_handle(NSString *path, NSFileHandle *fh, uint64_t expectedSize)
+{
+    int fd = open(path.fileSystemRepresentation, O_RDONLY | O_NOFOLLOW);
+    if (fd < 0) {
+        // Fallback without NOFOLLOW for platforms/paths that reject it.
+        fd = open(path.fileSystemRepresentation, O_RDONLY);
+    }
+    if (fd < 0) return NO;
+    uint64_t total = 0;
+    uint8_t buf[256 * 1024];
+    ssize_t n;
+    while ((n = read(fd, buf, sizeof(buf))) > 0) {
+        @autoreleasepool {
+            [fh writeData:[NSData dataWithBytes:buf length:(NSUInteger)n]];
+        }
+        total += (uint64_t)n;
+    }
+    int err = (n < 0) ? errno : 0;
+    close(fd);
+    if (err) return NO;
+    return total == expectedSize;
+}
+
+typedef NS_ENUM(NSInteger, IPAZipEntryKind) {
+    IPAZipEntryFile = 0,
+    IPAZipEntryDir,
+    IPAZipEntrySymlink,
+};
+
+// Store-only classic ZIP: stream per entry; fail-closed; write to .tmp then atomic rename.
+// Symlinks are stored as Unix symlink entries (payload = link target), not followed.
+static BOOL ipadec_create_zip_from_directory(NSString *sourceDir, NSString *ipaPath, NSError **error)
+{
+    NSFileManager *fm = NSFileManager.defaultManager;
+    // Do not resolve the workdir root through final symlink hops for enumeration base;
+    // children are joined onto this path and classified with lstat.
+    NSString *root = sourceDir.stringByStandardizingPath;
+    NSDirectoryEnumerator *en = [fm enumeratorAtPath:root];
+    if (!en) {
+        ipadec_set_zip_error(error, 1, @"Cannot enumerate work directory");
+        return NO;
+    }
+
+    NSMutableArray<NSDictionary *> *entries = [NSMutableArray array];
+
+    for (NSString *rel in en) {
+        NSString *full = [root stringByAppendingPathComponent:rel];
+        struct stat st;
+        if (lstat(full.fileSystemRepresentation, &st) != 0) {
+            ipadec_set_zip_error(error, 6,
+                [NSString stringWithFormat:@"ZIP lstat failed: %@", rel]);
+            return NO;
+        }
+        if (S_ISLNK(st.st_mode)) {
+            [entries addObject:@{ @"rel": rel, @"kind": @(IPAZipEntrySymlink) }];
+        } else if (S_ISDIR(st.st_mode)) {
+            [entries addObject:@{ @"rel": rel, @"kind": @(IPAZipEntryDir) }];
+        } else if (S_ISREG(st.st_mode)) {
+            [entries addObject:@{ @"rel": rel, @"kind": @(IPAZipEntryFile) }];
+        } else {
+            ipadec_set_zip_error(error, 13,
+                [NSString stringWithFormat:@"ZIP unsupported file type: %@", rel]);
+            return NO;
+        }
+    }
+
+    NSUInteger totalPlanned = entries.count;
+    if (totalPlanned == 0) {
+        ipadec_set_zip_error(error, 5, @"ZIP had zero entries");
+        return NO;
+    }
+    if (totalPlanned > UINT16_MAX) {
+        ipadec_set_zip_error(error, 7,
+            [NSString stringWithFormat:
+                @"ZIP entry count %lu exceeds classic ZIP limit 65535",
+                (unsigned long)totalPlanned]);
+        return NO;
+    }
+
+    // Preflight: no silent skips.
+    for (NSDictionary *e in entries) {
+        NSString *rel = e[@"rel"];
+        NSString *full = [root stringByAppendingPathComponent:rel];
+        IPAZipEntryKind kind = (IPAZipEntryKind)[e[@"kind"] integerValue];
+        if (rel.length > UINT16_MAX) {
+            ipadec_set_zip_error(error, 10,
+                [NSString stringWithFormat:@"ZIP path name too long: %@", rel]);
+            return NO;
+        }
+        if (kind == IPAZipEntryFile) {
+            uint32_t crc = 0;
+            uint64_t fsize = 0;
+            if (!ipadec_crc32_and_size_of_file(full, &crc, &fsize)) {
+                ipadec_set_zip_error(error, 8,
+                    [NSString stringWithFormat:@"ZIP cannot read file: %@", rel]);
+                return NO;
+            }
+            if (fsize > UINT32_MAX) {
+                ipadec_set_zip_error(error, 9,
+                    [NSString stringWithFormat:
+                        @"ZIP file exceeds classic 4GiB store limit: %@", rel]);
+                return NO;
+            }
+            (void)crc;
+        } else if (kind == IPAZipEntrySymlink) {
+            NSData *target = nil;
+            NSError *rlErr = nil;
+            if (!ipadec_readlink_target(full, &target, &rlErr) || target.length == 0) {
+                ipadec_set_zip_error(error, 14,
+                    [NSString stringWithFormat:@"ZIP cannot readlink: %@", rel]);
+                return NO;
+            }
+            if (target.length > UINT32_MAX) {
+                ipadec_set_zip_error(error, 9,
+                    [NSString stringWithFormat:@"ZIP symlink target too large: %@", rel]);
+                return NO;
+            }
+        }
+    }
+
+    [fm createDirectoryAtPath:ipaPath.stringByDeletingLastPathComponent
+  withIntermediateDirectories:YES
+                   attributes:nil
+                        error:nil];
+
+    // Write to a temp path; only publish final name on full success.
+    NSString *tmpPath = [ipaPath stringByAppendingString:@".writing"];
+    [fm removeItemAtPath:tmpPath error:nil];
+    if (![fm createFileAtPath:tmpPath contents:nil attributes:nil]) {
+        ipadec_set_zip_error(error, 2, @"Cannot create temporary IPA file");
+        return NO;
+    }
+
+    NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:tmpPath];
+    if (!fh) {
+        [fm removeItemAtPath:tmpPath error:nil];
+        ipadec_set_zip_error(error, 3, @"Cannot open temporary IPA for writing");
+        return NO;
+    }
+
+    __block BOOL zipFailed = NO;
+    void (^failZip)(NSInteger, NSString *) = ^(NSInteger code, NSString *msg) {
+        zipFailed = YES;
+        [fh closeFile];
+        // Only discard the in-progress temp. Never touch a previous good ipaPath.
+        [fm removeItemAtPath:tmpPath error:nil];
+        ipadec_set_zip_error(error, code, msg);
+    };
+
+    NSMutableArray<NSData *> *cdEntries = [NSMutableArray array];
+    const uint32_t lfhSig = 0x04034b50;
+    const uint32_t cdSig = 0x02014b50;
+    const uint32_t eocdSig = 0x06054b50;
+    const uint16_t verMadeByUnix = (uint16_t)((3u << 8) | 20u);
+
+    for (NSDictionary *e in entries) {
+        if (zipFailed) break;
+        @autoreleasepool {
+            NSString *rel = e[@"rel"];
+            NSString *full = [root stringByAppendingPathComponent:rel];
+            IPAZipEntryKind kind = (IPAZipEntryKind)[e[@"kind"] integerValue];
+            struct stat st;
+            if (lstat(full.fileSystemRepresentation, &st) != 0) {
+                failZip(6, [NSString stringWithFormat:@"ZIP lstat mid-write failed: %@", rel]);
+                break;
+            }
+
+            NSString *zipName = rel;
+            if (kind == IPAZipEntryDir && ![zipName hasSuffix:@"/"]) {
+                zipName = [zipName stringByAppendingString:@"/"];
+            }
+            NSData *nameData = [zipName dataUsingEncoding:NSUTF8StringEncoding];
+            if (!nameData || nameData.length > UINT16_MAX) {
+                failZip(10, [NSString stringWithFormat:@"ZIP path encode failed: %@", rel]);
+                break;
+            }
+            uint16_t nameLen = (uint16_t)nameData.length;
+
+            uint32_t crc = 0;
+            uint32_t size32 = 0;
+            NSData *payload = nil; // symlink target only; files stream
+
+            if (kind == IPAZipEntryFile) {
+                uint64_t fsize = 0;
+                if (!ipadec_crc32_and_size_of_file(full, &crc, &fsize) || fsize > UINT32_MAX) {
+                    failZip(8, [NSString stringWithFormat:@"ZIP lost readability: %@", rel]);
+                    break;
+                }
+                size32 = (uint32_t)fsize;
+            } else if (kind == IPAZipEntrySymlink) {
+                NSError *rlErr = nil;
+                if (!ipadec_readlink_target(full, &payload, &rlErr) || !payload) {
+                    failZip(14, [NSString stringWithFormat:@"ZIP readlink mid-write: %@", rel]);
+                    break;
+                }
+                size32 = (uint32_t)payload.length;
+                uLong c = crc32(0L, Z_NULL, 0);
+                c = crc32(c, payload.bytes, (uInt)payload.length);
+                crc = (uint32_t)c;
+            } else {
+                // directory: empty payload
+                crc = 0;
+                size32 = 0;
+            }
+
+            unsigned long long offsetULL = fh.offsetInFile;
+            unsigned long long after =
+                offsetULL + 30ull + (unsigned long long)nameLen + (unsigned long long)size32;
+            if (offsetULL > UINT32_MAX || after > UINT32_MAX) {
+                failZip(11, [NSString stringWithFormat:
+                    @"ZIP would exceed classic 4GiB limit at: %@", rel]);
+                break;
+            }
+            uint32_t offset = (uint32_t)offsetULL;
+            uint32_t extAttrs = ipadec_zip_external_attrs_from_lstat(&st, kind == IPAZipEntryDir);
+
+            NSMutableData *lfh = [NSMutableData data];
+            ipadec_write_le32(lfh, lfhSig);
+            ipadec_write_le16(lfh, 20);
+            ipadec_write_le16(lfh, 0);
+            ipadec_write_le16(lfh, 0); // store
+            ipadec_write_le16(lfh, 0);
+            ipadec_write_le16(lfh, 0);
+            ipadec_write_le32(lfh, crc);
+            ipadec_write_le32(lfh, size32);
+            ipadec_write_le32(lfh, size32);
+            ipadec_write_le16(lfh, nameLen);
+            ipadec_write_le16(lfh, 0);
+            [fh writeData:lfh];
+            [fh writeData:nameData];
+
+            if (kind == IPAZipEntryFile) {
+                if (!ipadec_stream_copy_file_to_handle(full, fh, size32)) {
+                    failZip(4, [NSString stringWithFormat:@"Failed streaming %@", rel]);
+                    break;
+                }
+            } else if (kind == IPAZipEntrySymlink) {
+                [fh writeData:payload];
+            }
+
+            NSMutableData *cd = [NSMutableData data];
+            ipadec_write_le32(cd, cdSig);
+            ipadec_write_le16(cd, verMadeByUnix);
+            ipadec_write_le16(cd, 20);
+            ipadec_write_le16(cd, 0);
+            ipadec_write_le16(cd, 0);
+            ipadec_write_le16(cd, 0);
+            ipadec_write_le16(cd, 0);
+            ipadec_write_le32(cd, crc);
+            ipadec_write_le32(cd, size32);
+            ipadec_write_le32(cd, size32);
+            ipadec_write_le16(cd, nameLen);
+            ipadec_write_le16(cd, 0);
+            ipadec_write_le16(cd, 0);
+            ipadec_write_le16(cd, 0);
+            ipadec_write_le16(cd, 0);
+            ipadec_write_le32(cd, extAttrs);
+            ipadec_write_le32(cd, offset);
+            [cd appendData:nameData];
+            [cdEntries addObject:cd];
+        }
+    }
+
+    if (zipFailed) return NO;
+
+    if (cdEntries.count != totalPlanned) {
+        failZip(12, @"ZIP entry count mismatch after write");
+        return NO;
+    }
+
+    unsigned long long cdOffsetULL = fh.offsetInFile;
+    if (cdOffsetULL > UINT32_MAX) {
+        failZip(11, @"ZIP central-directory offset exceeds classic 4GiB limit");
+        return NO;
+    }
+    uint32_t cdOffset = (uint32_t)cdOffsetULL;
+    uint64_t cdSize64 = 0;
+    for (NSData *cd in cdEntries) {
+        cdSize64 += cd.length;
+        if (cdSize64 > UINT32_MAX) {
+            failZip(11, @"ZIP central directory exceeds classic 4GiB limit");
+            return NO;
+        }
+        [fh writeData:cd];
+    }
+    uint32_t cdSize = (uint32_t)cdSize64;
+
+    uint16_t totalEntries = (uint16_t)cdEntries.count;
+    NSMutableData *eocd = [NSMutableData data];
+    ipadec_write_le32(eocd, eocdSig);
+    ipadec_write_le16(eocd, 0);
+    ipadec_write_le16(eocd, 0);
+    ipadec_write_le16(eocd, totalEntries);
+    ipadec_write_le16(eocd, totalEntries);
+    ipadec_write_le32(eocd, cdSize);
+    ipadec_write_le32(eocd, cdOffset);
+    ipadec_write_le16(eocd, 0);
+    [fh writeData:eocd];
+    [fh closeFile];
+
+    // Same-directory POSIX rename replaces the final name atomically when both
+    // exist — no remove-then-move window that can lose a previous good IPA.
+    if (rename(tmpPath.fileSystemRepresentation, ipaPath.fileSystemRepresentation) != 0) {
+        int saved = errno;
+        [fm removeItemAtPath:tmpPath error:nil];
+        // Leave any existing ipaPath untouched on publish failure.
+        ipadec_set_zip_error(error, 15,
+            [NSString stringWithFormat:@"Failed to publish IPA (rename): %s", strerror(saved)]);
+        return NO;
+    }
+    return YES;
+}
+
+// Collect Mach-O paths under an app bundle that may be FairPlay-encrypted:
+// main is handled separately; here: Frameworks (nested), PlugIns/*.appex, .dylib, etc.
+// Bundle executables come from Info.plist CFBundleExecutable when present.
+static NSArray<NSString *> *ipadec_collect_dependency_binaries(NSString *appRoot)
+{
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSMutableArray<NSString *> *out = [NSMutableArray array];
+    NSMutableSet<NSString *> *seen = [NSMutableSet set];
+
+    void (^addPath)(NSString *) = ^(NSString *path) {
+        if (path.length == 0) return;
+        BOOL isDir = NO;
+        if (![fm fileExistsAtPath:path isDirectory:&isDir] || isDir) return;
+        if ([seen containsObject:path]) return;
+        [seen addObject:path];
+        [out addObject:path];
+    };
+
+    NSDirectoryEnumerator *en = [fm enumeratorAtPath:appRoot];
+    for (NSString *rel in en) {
+        NSString *full = [appRoot stringByAppendingPathComponent:rel];
+        BOOL isDir = NO;
+        if (![fm fileExistsAtPath:full isDirectory:&isDir]) continue;
+        NSString *ext = full.pathExtension.lowercaseString;
+
+        if (isDir && ([ext isEqualToString:@"framework"] ||
+                      [ext isEqualToString:@"appex"] ||
+                      [ext isEqualToString:@"bundle"] ||
+                      [ext isEqualToString:@"xctest"])) {
+            NSString *infoPath = [full stringByAppendingPathComponent:@"Info.plist"];
+            NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:infoPath];
+            NSString *exec = ipadec_nonempty_string(info[@"CFBundleExecutable"]);
+            if (exec.length == 0) {
+                exec = full.lastPathComponent.stringByDeletingPathExtension;
+            }
+            if (exec.length > 0) {
+                addPath([full stringByAppendingPathComponent:exec]);
+            }
+            // Do not skip descendants: nested Frameworks live under *.framework/Frameworks.
+            continue;
+        }
+
+        if (!isDir && [ext isEqualToString:@"dylib"]) {
+            addPath(full);
+        }
+    }
+
+    [out sortUsingSelector:@selector(compare:)];
+    return out;
+}
+
+static NSString *ipadec_sanitize_ipa_name(NSString *name)
+{
+    NSString *base = name.length > 0 ? name : @"App";
+    NSCharacterSet *allowed = [NSCharacterSet characterSetWithCharactersInString:
+        @"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-"];
+    NSMutableString *out = [NSMutableString string];
+    for (NSUInteger i = 0; i < base.length; i++) {
+        unichar c = [base characterAtIndex:i];
+        if ([allowed characterIsMember:c]) {
+            [out appendFormat:@"%C", c];
+        } else if (c == ' ' || c == '\t') {
+            // drop whitespace
+        } else {
+            [out appendString:@"_"];
+        }
+    }
+    if (out.length == 0) [out appendString:@"App"];
+    return out;
 }
 
 bool ipadecryptor_probe_installed_app(NSString *bundleID, NSString **messageOut)
@@ -1612,24 +1923,182 @@ bool ipadecryptor_start_decrypt_installed_app(NSString *bundleID, NSString **mes
         return false;
     }
 
+    if (!kexploit_krw_ready()) {
+        if (messageOut) *messageOut = @"KRW not ready. Run the kernel chain first.";
+        log_user("[IPADEC] KRW not ready\n");
+        return false;
+    }
+
+    (void)ipadec_ensure_sandbox_for_dump();
+
     NSDictionary<NSString *, NSString *> *entry = ipadec_lookup_app(bundleID);
     NSString *bundlePath = entry[kIPADecryptorKeyBundlePath];
+    NSString *appName = entry[kIPADecryptorKeyName] ?: bundleID;
     NSString *execPath = ipadec_executable_path_for_bundle(bundlePath);
-    NSString *procName = execPath.lastPathComponent;
+    NSString *execName = execPath.lastPathComponent;
+    NSString *appBundleName = bundlePath.lastPathComponent; // Foo.app
 
-    log_user("[IPADEC] Decrypt pipeline scaffolded for %s.\n", bundleID.UTF8String);
-    if (procName.length > 0) {
-        uint64_t proc = proc_find_by_name(procName.UTF8String);
-        uint64_t task = proc ? proc_task(proc) : 0;
-        log_user("[IPADEC] Live process lookup %s: proc=0x%llx task=0x%llx\n",
-                 procName.UTF8String,
-                 proc,
-                 task);
+    if (execName.length == 0 || appBundleName.length == 0) {
+        if (messageOut) *messageOut = @"Could not resolve executable/bundle names.";
+        return false;
     }
-    log_user("[IPADEC] Next stages: launch/suspend target, mint usable task port from KRW, dump decrypted crypt ranges with mach_vm_read, rebuild Payload IPA.\n");
+
+    log_user("[IPADEC] Starting decrypt for %s\n", bundleID.UTF8String);
+
+    // Find live process: KRW p_name (lara-style), optional path confirm.
+    // Final dump safety is LC_UUID image match, not proc_pidpath (often empty on iOS).
+    pid_t pid = ipadec_ensure_target_running(bundleID, execPath);
+    if (pid <= 0) {
+        NSString *msg = @"Target process not found. Open the selected app once, keep it in memory, then retry decrypt.";
+        if (messageOut) *messageOut = msg;
+        log_user("[IPADEC] %s want=%s exec=%s\n",
+                 msg.UTF8String,
+                 execPath.UTF8String ?: "(nil)",
+                 execName.UTF8String ?: "(nil)");
+        return false;
+    }
+    {
+        NSString *livePath = ipadec_pid_executable_path(pid);
+        if (livePath.length > 0) {
+            if (!ipadec_exec_paths_match(execPath, livePath)) {
+                NSString *msg = [NSString stringWithFormat:
+                    @"Refusing dump: pid %d path %@ does not match selected %@",
+                    (int)pid, livePath, execPath];
+                if (messageOut) *messageOut = msg;
+                log_user("[IPADEC] %s\n", msg.UTF8String);
+                return false;
+            }
+            log_user("[IPADEC] Live process pid=%d path=%s\n",
+                     (int)pid, livePath.UTF8String);
+        } else {
+            log_user("[IPADEC] Live process pid=%d (path unavailable; UUID will verify image)\n",
+                     (int)pid);
+        }
+    }
+
+    NSString *outDir = ipadecryptor_default_output_directory();
+    NSString *workDir = [outDir stringByAppendingPathComponent:
+        [NSString stringWithFormat:@".tmp_%@", bundleID]];
+    NSString *destAppPath = [workDir stringByAppendingPathComponent:appBundleName];
+    NSString *payloadDir = [workDir stringByAppendingPathComponent:@"Payload"];
+    NSString *payloadAppPath = [payloadDir stringByAppendingPathComponent:appBundleName];
+    NSString *ipaName = [ipadec_sanitize_ipa_name(appName) stringByAppendingString:@".ipa"];
+    NSString *ipaPath = [outDir stringByAppendingPathComponent:ipaName];
+
+    NSFileManager *fm = NSFileManager.defaultManager;
+    [fm removeItemAtPath:workDir error:nil];
+    [fm createDirectoryAtPath:payloadDir withIntermediateDirectories:YES attributes:nil error:nil];
+
+    log_user("[IPADEC] Copying bundle to workdir (preserving modes)...\n");
+    NSError *copyErr = nil;
+    if (!ipadec_copy_item(bundlePath, destAppPath, &copyErr)) {
+        NSString *msg = [NSString stringWithFormat:@"Failed to copy app bundle: %@",
+                                                   copyErr.localizedDescription ?: @"unknown error"];
+        if (messageOut) *messageOut = msg;
+        log_user("[IPADEC] %s src=%s\n", msg.UTF8String, bundlePath.UTF8String);
+        [fm removeItemAtPath:workDir error:nil];
+        return false;
+    }
+    BOOL isDir = NO;
+    if (![fm fileExistsAtPath:destAppPath isDirectory:&isDir] || !isDir) {
+        NSString *msg = @"Copy reported success but destination bundle is missing.";
+        if (messageOut) *messageOut = msg;
+        log_user("[IPADEC] %s\n", msg.UTF8String);
+        [fm removeItemAtPath:workDir error:nil];
+        return false;
+    }
+
+    NSString *mainBinaryOut = [destAppPath stringByAppendingPathComponent:execName];
+    NSString *mainBinarySrc = [bundlePath stringByAppendingPathComponent:execName];
+    log_user("[IPADEC] Decrypting main binary only (dep image matching not enabled)...\n");
+    int mainRet = ipadec_decrypt_binary_pid(mainBinarySrc.UTF8String, pid, mainBinaryOut.UTF8String);
+    if (mainRet != 0) {
+        // Fallback: try decrypting using the already-copied file as the source image.
+        mainRet = ipadec_decrypt_binary_pid(mainBinaryOut.UTF8String, pid, mainBinaryOut.UTF8String);
+    }
+    if (mainRet != 0) {
+        NSString *msg = @"Failed to decrypt main binary (incomplete crypt dump or map miss). See *.partial if present.";
+        if (messageOut) *messageOut = msg;
+        log_user("[IPADEC] %s\n", msg.UTF8String);
+        NSString *failedDir = [outDir stringByAppendingPathComponent:
+            [NSString stringWithFormat:@".failed_%@", bundleID]];
+        [fm removeItemAtPath:failedDir error:nil];
+        [fm moveItemAtPath:workDir toPath:failedDir error:nil];
+        return false;
+    }
+
+    // Inventory encrypted deps for disclosure only. Do NOT dump them with the
+    // main-binary VM heuristic (shared __TEXT.fileoff=0 causes wrong image reads).
+    NSArray<NSString *> *depBinaries = ipadec_collect_dependency_binaries(destAppPath);
+    NSMutableArray<NSString *> *stillEncryptedDeps = [NSMutableArray array];
+    for (NSString *depPath in depBinaries) {
+        if ([depPath isEqualToString:mainBinaryOut]) continue;
+        int enc = ipadec_is_encrypted_path(depPath.UTF8String);
+        if (enc <= 0) continue;
+        NSString *rel = [depPath hasPrefix:destAppPath]
+            ? [depPath substringFromIndex:destAppPath.length]
+            : depPath.lastPathComponent;
+        if ([rel hasPrefix:@"/"]) rel = [rel substringFromIndex:1];
+        [stillEncryptedDeps addObject:rel];
+        log_user("[IPADEC] encrypted dependency left as-is (no image match): %s\n",
+                 rel.UTF8String);
+    }
+    if (stillEncryptedDeps.count > 0) {
+        log_user("[IPADEC] %lu encrypted dependency binary(ies) not dumped; main-only IPA\n",
+                 (unsigned long)stillEncryptedDeps.count);
+    }
+
+    NSError *moveErr = nil;
+    [fm removeItemAtPath:payloadAppPath error:nil];
+    if (![fm moveItemAtPath:destAppPath toPath:payloadAppPath error:&moveErr]) {
+        NSString *msg = [NSString stringWithFormat:@"Failed to stage Payload: %@",
+                                                   moveErr.localizedDescription ?: @"unknown error"];
+        if (messageOut) *messageOut = msg;
+        log_user("[IPADEC] %s\n", msg.UTF8String);
+        NSString *failedDir = [outDir stringByAppendingPathComponent:
+            [NSString stringWithFormat:@".failed_%@", bundleID]];
+        [fm removeItemAtPath:failedDir error:nil];
+        [fm moveItemAtPath:workDir toPath:failedDir error:nil];
+        return false;
+    }
+
+    log_user("[IPADEC] Writing IPA (streamed store ZIP, fail-closed)...\n");
+    NSError *zipErr = nil;
+    if (!ipadec_create_zip_from_directory(workDir, ipaPath, &zipErr)) {
+        NSString *msg = [NSString stringWithFormat:@"Failed to create IPA: %@",
+                                                   zipErr.localizedDescription ?: @"unknown error"];
+        if (messageOut) *messageOut = msg;
+        log_user("[IPADEC] %s\n", msg.UTF8String);
+        NSString *failedDir = [outDir stringByAppendingPathComponent:
+            [NSString stringWithFormat:@".failed_%@", bundleID]];
+        [fm removeItemAtPath:failedDir error:nil];
+        [fm moveItemAtPath:workDir toPath:failedDir error:nil];
+        return false;
+    }
+
+    [fm removeItemAtPath:workDir error:nil];
+    log_user("[IPADEC] IPA saved to %s\n", ipaPath.UTF8String);
+
+    // Durable last-output path for Settings share sheet.
+    [[NSUserDefaults standardUserDefaults] setObject:ipaPath
+                                              forKey:@"IPADecryptorLastOutputPath"];
+    [[NSUserDefaults standardUserDefaults] synchronize];
 
     if (messageOut) {
-        *messageOut = @"Scaffold ready: app selection and encryption probe work. Dump/IPA writer stages are not wired yet.";
+        if (stillEncryptedDeps.count > 0) {
+            NSString *list = stillEncryptedDeps.count <= 8
+                ? [stillEncryptedDeps componentsJoinedByString:@", "]
+                : [NSString stringWithFormat:@"%@, … (+%lu more)",
+                     [[stillEncryptedDeps subarrayWithRange:NSMakeRange(0, 8)]
+                      componentsJoinedByString:@", "],
+                     (unsigned long)(stillEncryptedDeps.count - 8)];
+            *messageOut = [NSString stringWithFormat:NSLocalizedString(
+                @"Main binary decrypted IPA saved to %@. %lu encrypted dependency binary(ies) left encrypted (image-matched dep dump not enabled yet): %@.", nil),
+                ipaPath, (unsigned long)stillEncryptedDeps.count, list];
+        } else {
+            *messageOut = [NSString stringWithFormat:NSLocalizedString(
+                @"Main-binary decrypted IPA saved to %@", nil), ipaPath];
+        }
     }
-    return false;
+    return true;
 }

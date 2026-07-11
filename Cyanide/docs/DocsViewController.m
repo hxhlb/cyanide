@@ -241,6 +241,11 @@ static NSString * const kCodeCellID    = @"DocsCodeCell";
 static NSString * const kHeaderID      = @"DocsSectionHeader";
 static NSString * const kFooterID      = @"DocsFooter";
 
+static NSString *docs_l10n(NSString *text)
+{
+    return text.length ? NSLocalizedString(text, nil) : text;
+}
+
 @interface DocsViewController ()
 @property (nonatomic, copy) NSArray<NSDictionary *> *sections;
 @end
@@ -250,8 +255,8 @@ static NSString * const kFooterID      = @"DocsFooter";
 - (void)viewDidLoad
 {
     [super viewDidLoad];
-    self.title = @"Docs";
-    self.navigationItem.title = @"Docs";
+    self.title = docs_l10n(@"Docs");
+    self.navigationItem.title = docs_l10n(@"Docs");
 
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 80.0;
@@ -601,7 +606,7 @@ static NSString * const kFooterID      = @"DocsFooter";
     if (isCode) {
         [cell configureCodeWithText:text filename:row[@"filename"]];
     } else {
-        [cell configureProseWithText:text];
+        [cell configureProseWithText:docs_l10n(text)];
     }
     return cell;
 }
@@ -612,7 +617,7 @@ static NSString * const kFooterID      = @"DocsFooter";
 {
     NSDictionary *info = self.sections[section];
     DocsSectionHeader *header = [tableView dequeueReusableHeaderFooterViewWithIdentifier:kHeaderID];
-    [header configureWithSymbol:info[@"symbol"] tint:info[@"tint"] title:info[@"title"]];
+    [header configureWithSymbol:info[@"symbol"] tint:info[@"tint"] title:docs_l10n(info[@"title"])];
     return header;
 }
 
@@ -621,7 +626,7 @@ static NSString * const kFooterID      = @"DocsFooter";
     NSString *text = self.sections[section][@"footer"];
     if (text.length == 0) return nil;
     DocsFooter *footer = [tableView dequeueReusableHeaderFooterViewWithIdentifier:kFooterID];
-    [footer configureWithText:text];
+    [footer configureWithText:docs_l10n(text)];
     return footer;
 }
 

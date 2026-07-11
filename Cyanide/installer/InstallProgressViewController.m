@@ -27,6 +27,15 @@ static NSString *install_l10n(NSString *text)
 
 @implementation InstallProgressViewController
 
+- (void)viewDidDisappear:(BOOL)animated
+{
+    [super viewDidDisappear:animated];
+    if (!(self.isBeingDismissed || self.navigationController.isBeingDismissed)) return;
+    dispatch_block_t callback = self.onDismiss;
+    self.onDismiss = nil;
+    if (callback) callback();
+}
+
 - (void)viewDidLoad
 {
     [super viewDidLoad];

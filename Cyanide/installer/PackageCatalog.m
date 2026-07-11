@@ -281,19 +281,18 @@ static const NSInteger kSecMoodWallpaper    = 29;
         notificationIsland.unstableWarning = @"⚠️ In development only — install is disabled because this does not work yet. Polls SpringBoard notification state over RemoteCall and may miss banners, duplicate activity updates, or destabilize SpringBoard.";
 
         Package *ipaDecryptor = [[Package alloc] initWithIdentifier:@"com.darksword.ipadecryptor"
-                                           name:@"IPA Decryptor"
-                               shortDescription:@"Decrypt installed App Store app payloads"
-                                longDescription:@"In-development local IPA decryptor. Select an installed user app or paste an App Store link, resolve it to a bundle ID, sign in for an App Store download token, fetch the encrypted IPA to Documents, probe FairPlay encryption metadata, then run the decrypt pipeline.\n\nCurrent build wires app discovery, App Store link resolution, sign-in, encrypted IPA fetching, and encryption probing first. SINF/iTunesMetadata patching, decrypted page dumping, and rebuilding the Payload IPA are being added behind this same settings tool."
+                                           name:NSLocalizedString(@"IPA Decryptor", nil)
+                               shortDescription:NSLocalizedString(@"Main-binary FairPlay dump → Payload IPA", nil)
+                                longDescription:NSLocalizedString(@"Main-binary IPA decryptor for apps already installed on this device. Run Kernel Chain (no tweak install), choose an app, probe FairPlay LC_ENCRYPTION_INFO, then Start Decrypt (Main Binary).\n\nDecrypt path: arm KRW → find the live process → UUID-matched dump of the main Mach-O via DarkSword KRW → clear cryptid → pack Payload/*.app into Documents/DecryptedIPAs/*.ipa → share sheet.\n\nNo App Store login or remote download. Scope: main executable only; encrypted frameworks/extensions stay encrypted until image-matched dependency dump lands.\n\nCredits: main dump flow adapted from lara decrypt.m (neonmodder123).", nil)
                                         version:version
-                                         author:@"londek / zeroxjf"
-                                       category:@"In Development"
+                                         author:@"londek / zeroxjf / neonmodder123"
+                                       category:@"Beta"
                                      symbolName:@"lock.open.fill"
                                            kind:PackageInstallKindDirectTool
                                      enabledKey:nil
-                                          isNew:NO];
+                                          isNew:YES];
         ipaDecryptor.settingsSection = kSecIPADecryptor;
-        ipaDecryptor.installDisabledReason = inDevelopmentDisabledReason;
-        ipaDecryptor.unstableWarning = @"⚠️ In development only — install is disabled because this does not work yet. Encrypted IPA download is experimental. SINF/iTunesMetadata patching, task-port dump, and IPA writer stages are not finished yet.";
+        ipaDecryptor.unstableWarning = NSLocalizedString(@"⚠️ Beta main-binary only — requires live KRW and a running target. Encrypted frameworks/extensions are NOT dumped.", nil);
 
         Package *stageStrip = [[Package alloc] initWithIdentifier:@"com.darksword.stagestrip"
                                            name:@"Dynamic Stage Lite"

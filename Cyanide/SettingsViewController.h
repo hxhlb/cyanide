@@ -104,8 +104,6 @@ extern NSString * const kSettingsRepoTweaksEnabled;
 
 extern NSString * const kSettingsExperimentalTweaksEnabled;
 
-extern NSString * const kSettingsLogUploadEnabled;
-
 extern NSString * const kSettingsActionsDidCompleteNotification;
 extern NSString * const kSettingsActionsDidCompleteSuccessKey;
 extern NSString * const kSettingsActionsDidCompleteMessageKey;

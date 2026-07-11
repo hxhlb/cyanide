@@ -1,10 +1,16 @@
 //
 //  ipadecryptor.h
-//  Cyanide private/in-dev IPA decryptor scaffold.
+//  Cyanide local IPA decryptor (FairPlay dump via DarkSword KRW).
 //
-//  Goal: keep the core "decrypt an installed FairPlay IPA" flow local to the
-//  device. v0 wires app discovery + Mach-O encryption probing first; task-port
-//  minting, mach_vm dumping, and IPA zip writing land behind the same API.
+//  Flow (installed apps / main-binary only):
+//  1. Discover installed user apps
+//  2. Run Kernel Chain (KRW + sandbox widen) if needed
+//  3. Launch target if needed; match live process by name / path
+//  4. Dump main Mach-O crypt pages (UUID-matched); clear cryptid
+//  5. Pack Payload/*.app into Documents/DecryptedIPAs/*.ipa
+//
+//  No App Store login or remote IPA download.
+//  Dependency dump intentionally disabled until image matching exists.
 //
 
 #ifndef ipadecryptor_h
@@ -17,21 +23,10 @@
 
 NSArray<NSDictionary<NSString *, NSString *> *> *ipadecryptor_installed_apps(void);
 NSArray<NSDictionary<NSString *, NSString *> *> *ipadecryptor_installed_apps_with_system_apps(BOOL includeSystemApps);
+/// Best-effort sandbox widen so installed-app enumeration can see /var/containers.
+bool ipadecryptor_prepare_for_app_enumeration(void);
 NSString *ipadecryptor_display_name_for_bundle(NSString *bundleID);
 NSString *ipadecryptor_default_output_directory(void);
-NSString *ipadecryptor_app_store_account_summary(void);
-bool ipadecryptor_has_app_store_account(void);
-bool ipadecryptor_login_app_store(NSString *email,
-                                  NSString *password,
-                                  NSString *authCode,
-                                  NSString **messageOut);
-void ipadecryptor_clear_app_store_account(void);
-
-NSDictionary<NSString *, NSString *> *ipadecryptor_resolve_app_store_input(NSString *input,
-                                                                           NSString **messageOut);
-bool ipadecryptor_download_app_store_ipa(NSString *input,
-                                         NSString **downloadedPathOut,
-                                         NSString **messageOut);
 
 bool ipadecryptor_probe_installed_app(NSString *bundleID, NSString **messageOut);
 bool ipadecryptor_start_decrypt_installed_app(NSString *bundleID, NSString **messageOut);
