@@ -18,6 +18,7 @@ extern uint64_t r_nsstr_retained(const char *str);
 
 static const NSUInteger kRepoTweaksMaxRepoBytes = 512 * 1024;
 static const NSUInteger kRepoTweaksMaxScriptBytes = 512 * 1024;
+static const int64_t kRepoTweaksRunTimeoutNsec = 30 * NSEC_PER_SEC;
 static NSString * const kRepoTweaksDefaultRepoURL = @"https://hxhlb.github.io/cyanide-repotweaks.json";
 static NSString * const kRepoTweaksDefaultReposSeedVersionKey = @"RepoTweaksDefaultReposSeedVersion";
 static NSString * const kRepoTweaksDefaultReposSeedVersion = @"5";
@@ -439,7 +440,32 @@ void repotweaks_seed_default_repos(void) {
     }
 }
 
+static void repotweaks_run_cleanup_locked(NSString *tweakID) {
+    JSContext *context = g_repo_contexts[tweakID];
+    if (!context) return;
+
+    JSValue *cleanup = context[@"cleanup"];
+    if (!cleanup || cleanup.isUndefined || cleanup.isNull) return;
+    if (!cleanup.isObject) {
+        log_user("[RepoTweaks][%s] Ignoring invalid cleanup export; expected a function.\n",
+                 tweakID.UTF8String);
+        return;
+    }
+
+    context.exception = nil;
+    [cleanup callWithArguments:@[]];
+    if (context.exception) {
+        log_user("[RepoTweaks][%s] cleanup() failed: %s\n",
+                 tweakID.UTF8String,
+                 context.exception.toString.UTF8String);
+        context.exception = nil;
+        return;
+    }
+    log_user("[RepoTweaks][%s] cleanup() completed.\n", tweakID.UTF8String);
+}
+
 static void repotweaks_cancel_tweak_locked(NSString *tweakID) {
+    repotweaks_run_cleanup_locked(tweakID);
     NSMutableDictionary *timers = g_repo_timers_registry[tweakID];
     for (id timerSource in timers.allValues) {
         dispatch_source_cancel((dispatch_source_t)timerSource);
@@ -651,7 +677,7 @@ bool repotweaks_run_isolated_js(NSString *tweakID, NSString *tweakName, NSString
         log_user("[RepoTweaks] Spawning sandbox for: %s\n", safeName.UTF8String);
         [context evaluateScript:jsCode];
         if (context.exception) ok = false;
-    }, 15 * NSEC_PER_SEC);
+    }, kRepoTweaksRunTimeoutNsec);
 
     if (!completed) {
         ok = false;
@@ -748,6 +774,23 @@ bool repotweaks_apply_in_session(void) {
         }
     }
     return executedAny;
+}
+
+bool repotweaks_any_enabled_tweaks(void) {
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    NSDictionary *allRepos = repotweaks_saved_caches(d);
+    for (NSString *url in allRepos) {
+        NSDictionary *repoData = [allRepos[url] isKindOfClass:NSDictionary.class] ? allRepos[url] : nil;
+        NSArray *tweaks = [repoData[@"tweaks"] isKindOfClass:NSArray.class] ? repoData[@"tweaks"] : @[];
+        for (NSDictionary *tweak in tweaks) {
+            NSString *tweakID = repotweaks_string_or_empty(tweak[@"id"]);
+            if (tweakID.length > 0 &&
+                [d boolForKey:repotweaks_enabled_defaults_key(url, tweakID)]) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 void repotweaks_refresh_repo(NSString *repoURL, void (^completion)(BOOL success, NSString *message)) {
@@ -931,21 +974,27 @@ BOOL repotweaks_download_script_sync(NSString *repoURL,
     return ok;
 }
 
+bool repotweaks_is_running_in_session(void) {
+    __block bool running = false;
+    bool completed = repotweaks_perform_sync_timeout(^{
+        running = g_repo_contexts.count > 0 || g_repo_timers_registry.count > 0;
+    }, 2 * NSEC_PER_SEC);
+    return completed && running;
+}
+
 bool repotweaks_stop_in_session(void) {
-    repotweaks_set_shutting_down(YES);
     uint64_t stopGeneration = repotweaks_current_generation();
 
     bool stopped = repotweaks_perform_sync_timeout(^{
         if (!repotweaks_generation_is_current(stopGeneration)) return;
-        log_user("[RepoTweaks] Safe stop: stopping timers.\n");
-        if (g_repo_timers_registry) {
-            for (NSString *tweakID in [g_repo_timers_registry allKeys]) {
-                repotweaks_cancel_tweak_locked(tweakID);
-            }
-            [g_repo_timers_registry removeAllObjects];
+        log_user("[RepoTweaks] Safe stop: running cleanup hooks and stopping timers.\n");
+        NSMutableSet<NSString *> *tweakIDs = [NSMutableSet setWithArray:g_repo_contexts.allKeys ?: @[]];
+        [tweakIDs addObjectsFromArray:g_repo_timers_registry.allKeys ?: @[]];
+        for (NSString *tweakID in tweakIDs) {
+            repotweaks_cancel_tweak_locked(tweakID);
         }
-        [g_repo_contexts removeAllObjects];
-    }, 2 * NSEC_PER_SEC);
+        repotweaks_set_shutting_down(YES);
+    }, 30 * NSEC_PER_SEC);
 
     if (!stopped) {
         log_user("[RepoTweaks] Safe stop timed out; a script may be stuck in a long-running loop.\n");

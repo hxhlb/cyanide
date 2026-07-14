@@ -184,8 +184,7 @@ static BOOL PackageRepoScriptRequiresNativeBridge(NSString *rawScript)
             if (self.repoNativeEnabledKey.length > 0) {
                 return [d boolForKey:self.repoNativeEnabledKey];
             }
-            return [d boolForKey:kSettingsQuickLoaderEnabled] &&
-                   quickloader_is_repo_tweak_installed(self.repoURL, self.repoTweakID);
+            return [d boolForKey:repotweaks_enabled_defaults_key(self.repoURL, self.repoTweakID)];
     }
 }
 
@@ -195,7 +194,7 @@ static BOOL PackageRepoScriptRequiresNativeBridge(NSString *rawScript)
         if (self.repoNativeEnabledKey.length > 0) {
             return self.isInstalled && !settings_tweak_is_applied(self.repoNativeEnabledKey);
         }
-        return self.isInstalled && !settings_tweak_is_applied(kSettingsQuickLoaderEnabled);
+        return self.isInstalled && !settings_tweak_is_applied(kSettingsRepoTweaksEnabled);
     }
     if (self.kind != PackageInstallKindToggle || !self.enabledKey) return NO;
     if ([self.enabledKey isEqualToString:kSettingsQuickLoaderEnabled] &&
@@ -299,13 +298,11 @@ static BOOL PackageRepoScriptRequiresNativeBridge(NSString *rawScript)
             }
 
             if (!installed) {
-                BOOL wasCurrent = quickloader_is_repo_tweak_installed(self.repoURL, self.repoTweakID);
-                quickloader_clear_repo_tweak_if_matches(self.repoURL, self.repoTweakID);
-                if (wasCurrent) {
-                    [d setBool:NO forKey:kSettingsQuickLoaderEnabled];
-                    [d synchronize];
-                    log_user("[INSTALLER] Removed QuickLoader repo tweak: %s\n", self.name.UTF8String);
-                }
+                [d setBool:NO forKey:repotweaks_enabled_defaults_key(self.repoURL, self.repoTweakID)];
+                [d setBool:repotweaks_any_enabled_tweaks() forKey:kSettingsRepoTweaksEnabled];
+                settings_mark_tweak_needs_apply(kSettingsRepoTweaksEnabled);
+                [d synchronize];
+                log_user("[INSTALLER] Repo JavaScript package removal prepared: %s\n", self.name.UTF8String);
                 return;
             }
 
@@ -328,23 +325,26 @@ static BOOL PackageRepoScriptRequiresNativeBridge(NSString *rawScript)
                 return;
             }
             if (PackageRepoScriptRequiresNativeBridge(rawScript)) {
-                log_user("[INSTALLER] Cannot install %s through QuickLoader: this repo script needs a native injection backend.\n",
+                log_user("[INSTALLER] Cannot install %s through the JavaScript runtime: this repo script needs a native injection backend.\n",
                          self.name.UTF8String);
                 return;
             }
 
-            NSDictionary *values = [d dictionaryForKey:repotweaks_values_defaults_key(self.repoURL, self.repoTweakID)] ?: @{};
-            if (quickloader_save_repo_tweak(self.repoURL, self.repoTweakID, self.name, rawScript, values)) {
-                [d setBool:YES forKey:kSettingsQuickLoaderEnabled];
-                [d setBool:NO forKey:kSettingsRepoTweaksEnabled];
-                [d setBool:NO forKey:repotweaks_enabled_defaults_key(self.repoURL, self.repoTweakID)];
-                [d setObject:(self.version ?: @"") forKey:versionKey];
+            NSString *legacyRepoURL = [d stringForKey:@"QuickLoaderSourceRepoURL"];
+            NSString *legacyTweakID = [d stringForKey:@"QuickLoaderSourceTweakID"];
+            if ([d boolForKey:kSettingsQuickLoaderEnabled] &&
+                quickloader_is_repo_tweak_installed(legacyRepoURL, legacyTweakID)) {
+                [d setBool:YES forKey:repotweaks_enabled_defaults_key(legacyRepoURL, legacyTweakID)];
+                quickloader_clear_repo_tweak_if_matches(legacyRepoURL, legacyTweakID);
+                [d setBool:NO forKey:kSettingsQuickLoaderEnabled];
                 settings_mark_tweak_needs_apply(kSettingsQuickLoaderEnabled);
-                [d synchronize];
-                log_user("[INSTALLER] Pending QuickLoader install prepared: %s\n", self.name.UTF8String);
-            } else {
-                log_user("[INSTALLER] Failed to prepare QuickLoader script for %s.\n", self.name.UTF8String);
             }
+            [d setBool:YES forKey:repotweaks_enabled_defaults_key(self.repoURL, self.repoTweakID)];
+            [d setBool:YES forKey:kSettingsRepoTweaksEnabled];
+            [d setObject:(self.version ?: @"") forKey:versionKey];
+            settings_mark_tweak_needs_apply(kSettingsRepoTweaksEnabled);
+            [d synchronize];
+            log_user("[INSTALLER] Pending repo JavaScript package install prepared: %s\n", self.name.UTF8String);
             return;
         }
     }

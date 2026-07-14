@@ -233,6 +233,8 @@ static char g_quickloader_queue_key;
 static pthread_mutex_t g_quickloader_queue_lock = PTHREAD_MUTEX_INITIALIZER;
 static dispatch_queue_t g_quickloader_queue = nil;
 static uint64_t g_quickloader_generation = 1;
+static const int64_t kQuickLoaderRunTimeoutNsec = 30 * NSEC_PER_SEC;
+static const int64_t kQuickLoaderCleanupTimeoutNsec = 30 * NSEC_PER_SEC;
 
 static dispatch_queue_t quickloader_create_js_queue_locked(void) {
     NSString *label = [NSString stringWithFormat:@"com.zeroxjf.cyanide.quickloader.js.%llu",
@@ -604,7 +606,7 @@ bool quickloader_run_js_string(NSString *jsCode) {
         } else {
             log_user("[JS Engine] Execution complete.\n");
         }
-    }, 15 * NSEC_PER_SEC);
+    }, kQuickLoaderRunTimeoutNsec);
 
     if (!completed) {
         ok = false;
@@ -617,9 +619,63 @@ bool quickloader_run_js_string(NSString *jsCode) {
 // ==========================================
 // Teardown engine
 // ==========================================
+static bool quickloader_run_cleanup_in_current_context(void) {
+    JSContext *context = g_quickloader_context;
+    if (!context) return true;
+
+    JSValue *cleanup = context[@"cleanup"];
+    if (!cleanup || cleanup.isUndefined || cleanup.isNull) {
+        log_user("[QuickLoader] Script has no cleanup() hook; stopping the JS runtime only.\n");
+        return true;
+    }
+    if (!cleanup.isObject) {
+        log_user("[QuickLoader] Ignoring invalid cleanup export; expected a function.\n");
+        return false;
+    }
+
+    context.exception = nil;
+    [cleanup callWithArguments:@[]];
+    if (context.exception) {
+        log_user("[QuickLoader] Script cleanup() failed: %s\n",
+                 context.exception.toString.UTF8String);
+        context.exception = nil;
+        return false;
+    }
+
+    log_user("[QuickLoader] Script cleanup() completed.\n");
+    return true;
+}
+
+bool quickloader_is_running_in_session(void) {
+    __block bool running = false;
+    bool completed = quickloader_perform_sync_timeout(^{
+        running = g_quickloader_context != nil || g_quickloader_timers.count > 0;
+    }, 2 * NSEC_PER_SEC);
+    return completed && running;
+}
+
 bool quickloader_stop_in_session(void) {
-    //Order timers to stop
-    quickloader_set_shutting_down(YES);
+    uint64_t cleanupGeneration = quickloader_current_generation();
+    __block bool cleanupOK = true;
+
+    // cleanup() needs the RemoteCall bridge, so run it before marking the
+    // current generation inactive and before cancelling the JS timers.
+    bool cleanupCompleted = quickloader_perform_sync_timeout(^{
+        if (!quickloader_generation_is_current(cleanupGeneration)) return;
+        cleanupOK = quickloader_run_cleanup_in_current_context();
+        quickloader_set_shutting_down(YES);
+    }, kQuickLoaderCleanupTimeoutNsec);
+
+    if (!cleanupCompleted) {
+        log_user("[QuickLoader] cleanup() timed out; abandoning the JS queue.\n");
+        quickloader_abandon_js_queue_after_timeout("cleanup hook timeout", YES);
+        return false;
+    }
+    if (!cleanupOK) {
+        log_user("[QuickLoader] Continuing shutdown after cleanup() failure.\n");
+    }
+
+    // Host callbacks are now blocked; finish the original timer/context teardown.
     uint64_t stopGeneration = quickloader_current_generation();
 
     bool stopped = quickloader_perform_sync_timeout(^{

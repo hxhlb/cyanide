@@ -38,22 +38,39 @@ static BOOL pkgdetail_js_identifier_valid(NSString *name)
 static UIColor *pkgdetail_color_from_hex(NSString *hexString)
 {
     if (![hexString isKindOfClass:NSString.class]) return UIColor.systemRedColor;
-    NSString *clean = [hexString stringByReplacingOccurrencesOfString:@"#" withString:@""];
-    unsigned rgb = 0;
-    if (clean.length == 0 || ![[NSScanner scannerWithString:clean] scanHexInt:&rgb]) return UIColor.systemRedColor;
-    return [UIColor colorWithRed:((rgb & 0xFF0000) >> 16) / 255.0
-                           green:((rgb & 0x00FF00) >> 8) / 255.0
-                            blue:(rgb & 0x0000FF) / 255.0
-                           alpha:1.0];
+    NSString *clean = [[hexString stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]
+        stringByReplacingOccurrencesOfString:@"#" withString:@""];
+    if (clean.length == 3 || clean.length == 4) {
+        NSMutableString *expanded = [NSMutableString stringWithCapacity:clean.length * 2];
+        for (NSUInteger i = 0; i < clean.length; i++) {
+            unichar component = [clean characterAtIndex:i];
+            [expanded appendFormat:@"%C%C", component, component];
+        }
+        clean = expanded;
+    }
+    if (clean.length == 6) clean = [clean stringByAppendingString:@"FF"];
+    NSCharacterSet *hexDigits = [NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF"];
+    if (clean.length != 8 ||
+        [clean rangeOfCharacterFromSet:hexDigits.invertedSet].location != NSNotFound) {
+        return UIColor.systemRedColor;
+    }
+
+    unsigned rgba = 0;
+    NSScanner *scanner = [NSScanner scannerWithString:clean];
+    if (![scanner scanHexInt:&rgba] || !scanner.isAtEnd) return UIColor.systemRedColor;
+    return [UIColor colorWithRed:((rgba >> 24) & 0xFF) / 255.0
+                           green:((rgba >> 16) & 0xFF) / 255.0
+                            blue:((rgba >> 8) & 0xFF) / 255.0
+                           alpha:(rgba & 0xFF) / 255.0];
 }
 
 static NSString *pkgdetail_hex_from_color(UIColor *color)
 {
-    if (![color isKindOfClass:UIColor.class]) return @"#FF0000";
+    if (![color isKindOfClass:UIColor.class]) return @"#FF0000FF";
     CGFloat r = 1.0, g = 0.0, b = 0.0, a = 1.0;
-    if (![color getRed:&r green:&g blue:&b alpha:&a]) return @"#FF0000";
-    return [NSString stringWithFormat:@"#%02lX%02lX%02lX",
-            lround(r * 255.0), lround(g * 255.0), lround(b * 255.0)];
+    if (![color getRed:&r green:&g blue:&b alpha:&a]) return @"#FF0000FF";
+    return [NSString stringWithFormat:@"#%02lX%02lX%02lX%02lX",
+            lround(r * 255.0), lround(g * 255.0), lround(b * 255.0), lround(a * 255.0)];
 }
 
 static NSMutableDictionary *pkgdetail_string_values_dictionary(id raw)
@@ -876,9 +893,9 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
             if (self.package.repoNativeEnabledKey.length > 0) {
                 [self.package syncRepoTweakOptionsToNativeSettings];
                 settings_mark_tweak_needs_apply(self.package.repoNativeEnabledKey);
-            } else if (quickloader_is_repo_tweak_installed(self.package.repoURL, self.package.repoTweakID)) {
-                quickloader_refresh_active_repo_tweak();
-                settings_mark_tweak_needs_apply(kSettingsQuickLoaderEnabled);
+            } else {
+                [d setBool:YES forKey:kSettingsRepoTweaksEnabled];
+                settings_mark_tweak_needs_apply(kSettingsRepoTweaksEnabled);
             }
             [[NSNotificationCenter defaultCenter] postNotificationName:PackageQueueDidChangeNotification
                                                                 object:nil];
@@ -1023,8 +1040,8 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
         return pkgdetail_l10n(@"Settings can be changed before or after activation.");
     }
     if ([self sectionAtIndex:section] == PackageDetailSectionRepoOptions) {
-        return self.package.repoTweakUsesQuickLoader
-            ? pkgdetail_l10n(@"Saved here before install; QuickLoader applies these values when the queued package runs.")
+        return self.package.repoNativeEnabledKey.length == 0
+            ? pkgdetail_l10n(@"Saved here before install; Cyanide applies these values through the JavaScript runtime when queued packages run.")
             : pkgdetail_l10n(@"Saved here before install; Cyanide applies these values through the native package backend.");
     }
     return nil;

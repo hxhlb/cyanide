@@ -9,6 +9,7 @@
 #import "VPhoneDebug.h"
 #import "kexploit/kexploit_opa334.h"
 #import "tweaks/sbcustomizer.h"
+#import "tweaks/floatingdock.h"
 #import "tweaks/powercuff.h"
 #import "tweaks/statbar.h"
 #import "tweaks/experimental_tweaks.h"
@@ -361,6 +362,7 @@ NSString * const kSettingsAxonLiteEnabled = @"AxonLiteEnabled";
 NSString * const kSettingsTypeBannerEnabled = @"TypeBannerEnabled";
 NSString * const kSettingsNotificationIslandEnabled = @"NotificationIslandEnabled";
 NSString * const kSettingsAppSwitcherGridEnabled = @"AppSwitcherGridEnabled";
+NSString * const kSettingsFloatingDockEnabled = @"FloatingDockEnabled";
 NSString * const kSettingsFastLockXLiteEnabled = @"FastLockXLiteEnabled";
 static NSString * const kSettingsFastLockXLiteBlockMusic = @"FastLockXLiteBlockMusic";
 static NSString * const kSettingsFastLockXLiteBlockFlashlight = @"FastLockXLiteBlockFlashlight";
@@ -1059,6 +1061,12 @@ static bool settings_stop_repotweaks_registered(BOOL springboardWillDie)
     return repotweaks_stop_in_session();
 }
 
+static bool settings_stop_floatingdock_registered(BOOL springboardWillDie)
+{
+    (void)springboardWillDie;
+    return floatingdock_stop_in_session();
+}
+
 static void settings_each_springboard_cleanup_entry(void (^block)(const SettingsSpringBoardTweakCleanupEntry *entry))
 {
     if (!block) return;
@@ -1073,6 +1081,7 @@ static void settings_each_springboard_cleanup_entry(void (^block)(const Settings
         { kSettingsTypeBannerEnabled, "TypeBanner", settings_request_typebanner_stop, settings_stop_typebanner_registered, typebanner_forget_remote_state, settings_typebanner_running, YES, YES },
         { kSettingsNotificationIslandEnabled, "Notification Island", settings_request_notificationisland_stop, settings_stop_notificationisland_registered, notificationisland_forget_remote_state, settings_notificationisland_running, YES, YES },
         { kSettingsAppSwitcherGridEnabled, "App Switcher Grid", NULL, settings_stop_appswitchergrid_registered, appswitchergrid_forget_remote_state, NULL, YES, YES },
+        { kSettingsFloatingDockEnabled, "iPad Dock", NULL, settings_stop_floatingdock_registered, floatingdock_forget_remote_state, NULL, NO, YES },
         { kSettingsGravityLiteEnabled, "Gravity Lite", settings_request_gravitylite_stop, settings_stop_gravitylite_registered, gravitylite_forget_remote_state, NULL, YES, YES },
         { kSettingsThemerEnabled, "Themer", settings_request_themer_stop, settings_stop_themer_registered, themer_forget_remote_state, settings_themer_running, YES, YES },
         { kSettingsSnowBoardLiteEnabled, "SnowBoard Lite", NULL, settings_stop_themer_registered, themer_forget_remote_state, NULL, YES, YES },
@@ -1082,8 +1091,8 @@ static void settings_each_springboard_cleanup_entry(void (^block)(const Settings
         { kSettingsStageStripEnabled, "Stage Strip", settings_request_stagestrip_stop, settings_stop_stagestrip_registered, stagestrip_forget_remote_state, NULL, YES, YES },
         { kSettingsMWLiteEnabled, "MilkyWay Lite", settings_request_stagestrip_stop, settings_stop_stagestrip_registered, stagestrip_forget_remote_state, NULL, YES, YES },
         { kSettingsFastLockXLiteEnabled, "FastLockX Lite", NULL, settings_stop_fastlockx_lite_registered, fastlockx_lite_forget_remote_state, NULL, NO, YES },
-        { kSettingsQuickLoaderEnabled, "QuickLoader", NULL, settings_stop_quickloader_registered, NULL, NULL, YES, YES },
-        { kSettingsRepoTweaksEnabled, "RepoTweaks", NULL, settings_stop_repotweaks_registered, NULL, NULL, YES, YES },
+        { kSettingsQuickLoaderEnabled, "QuickLoader", NULL, settings_stop_quickloader_registered, NULL, quickloader_is_running_in_session, YES, YES },
+        { kSettingsRepoTweaksEnabled, "RepoTweaks", NULL, settings_stop_repotweaks_registered, NULL, repotweaks_is_running_in_session, YES, YES },
         { nil, "Kill All Apps", NULL, NULL, killallapps_forget_remote_state, NULL, NO, NO },
     };
     size_t count = sizeof(entries) / sizeof(entries[0]);
@@ -1362,7 +1371,11 @@ static BOOL settings_clear_all_applied_locked(void)
             changed = YES;
         }
     }
-    for (NSString *key in @[ kSettingsSBCEnabled ]) {
+    // These keys persist their applied marker across UI reloads. Clear all of
+    // them when the SpringBoard session is gone so packages return to Pending.
+    for (NSString *key in @[ kSettingsSBCEnabled,
+                             kSettingsQuickLoaderEnabled,
+                             kSettingsRepoTweaksEnabled ]) {
         if (settings_persisted_applied(key)) {
             settings_set_persisted_applied(key, NO);
             changed = YES;
@@ -2143,6 +2156,22 @@ static void settings_notify_remote_call_state_changed_preserving_applied(BOOL pr
     dispatch_async(dispatch_get_main_queue(), ^{
         [[NSNotificationCenter defaultCenter] postNotificationName:kSettingsRemoteCallStateDidChangeNotification
                                                             object:nil];
+        if (!ready) {
+            PackageQueue *queue = [PackageQueue sharedQueue];
+            BOOL repoApplied = settings_tweak_is_applied(kSettingsRepoTweaksEnabled);
+            for (Package *package in [PackageCatalog allPackages]) {
+                if (package.kind != PackageInstallKindRepoTweak ||
+                    package.repoNativeEnabledKey.length > 0) {
+                    continue;
+                }
+                log_user("[CLEANUP][QUEUE] Repo JS %s installed=%d applied=%d queued=%d\n",
+                         package.name.UTF8String,
+                         package.isInstalled,
+                         repoApplied,
+                         package.isQueuedForApply);
+            }
+            log_user("[CLEANUP][QUEUE] pending=%ld\n", (long)queue.pendingCount);
+        }
         if (cleared) {
             [[NSNotificationCenter defaultCenter] postNotificationName:PackageQueueDidChangeNotification
                                                                 object:[PackageQueue sharedQueue]];
@@ -2751,10 +2780,11 @@ static bool settings_apply_sbc_from_defaults_locked(NSUserDefaults *d)
 {
     if (![d boolForKey:kSettingsSBCEnabled]) return false;
 
-    return sbcustomizer_apply_in_session((int)[d integerForKey:kSettingsSBCDockIcons],
-                                         (int)[d integerForKey:kSettingsSBCCols],
-                                         (int)[d integerForKey:kSettingsSBCRows],
-                                         [d boolForKey:kSettingsSBCHideLabels]);
+    bool layoutOK = sbcustomizer_apply_in_session((int)[d integerForKey:kSettingsSBCDockIcons],
+                                                   (int)[d integerForKey:kSettingsSBCCols],
+                                                   (int)[d integerForKey:kSettingsSBCRows],
+                                                   [d boolForKey:kSettingsSBCHideLabels]);
+    return layoutOK;
 }
 
 static NSString *settings_nicebar_key(NSString *prefix, NSInteger slot)
@@ -5565,6 +5595,11 @@ static BOOL settings_key_is_appswitchergrid(NSString *key)
     return [key isEqualToString:kSettingsAppSwitcherGridEnabled];
 }
 
+static BOOL settings_key_is_floatingdock(NSString *key)
+{
+    return [key isEqualToString:kSettingsFloatingDockEnabled];
+}
+
 static BOOL settings_key_is_gravitylite(NSString *key)
 {
     return [key isEqualToString:kSettingsGravityLiteEnabled] ||
@@ -6330,6 +6365,36 @@ static void settings_schedule_live_apply_for_key(NSString *key)
         return;
     }
 
+    if (settings_key_is_floatingdock(key)) {
+        if ([d boolForKey:kSettingsFloatingDockEnabled] && g_springboard_rc_ready) {
+            dispatch_async(dispatch_get_global_queue(0, 0), ^{
+                @synchronized (settings_rc_lock()) {
+                    if (settings_cleanup_in_progress() ||
+                        ![d boolForKey:kSettingsFloatingDockEnabled] ||
+                        !g_springboard_rc_ready) return;
+                    bool ok = floatingdock_apply_in_session();
+                    settings_mark_tweak_applied(kSettingsFloatingDockEnabled,
+                                                ok && [d boolForKey:kSettingsFloatingDockEnabled]);
+                    printf("[SETTINGS] live Floating Dock apply result=%d\n", ok);
+                }
+                settings_notify_package_queue_changed_async();
+            });
+        } else if (![d boolForKey:kSettingsFloatingDockEnabled]) {
+            settings_mark_tweak_applied(kSettingsFloatingDockEnabled, NO);
+            settings_notify_package_queue_changed_async();
+            if (g_springboard_rc_ready) {
+                dispatch_async(dispatch_get_global_queue(0, 0), ^{
+                    @synchronized (settings_rc_lock()) {
+                        if (g_springboard_rc_ready) floatingdock_stop_in_session();
+                    }
+                });
+            } else {
+                floatingdock_forget_remote_state();
+            }
+        }
+        return;
+    }
+
     if (settings_key_is_nsbar(key)) {
         if ([d boolForKey:kSettingsNSBarEnabled] && g_springboard_rc_ready) {
             settings_apply_nsbar_once_async("live settings");
@@ -6910,6 +6975,7 @@ void settings_register_defaults(void)
         kSettingsMoodWallpaperLogOnly: @NO,
 
         kSettingsAppSwitcherGridEnabled: @NO,
+        kSettingsFloatingDockEnabled: @NO,
 
         kSettingsQuickLoaderEnabled: @NO,
         kSettingsRepoTweaksEnabled: @NO,
@@ -6921,6 +6987,7 @@ void settings_register_defaults(void)
         kSettingsNanoMinPairingChipID: @(kNanoDefaultMinPairingChipID),
         kSettingsNanoMinQuickSwitch:   @(kNanoDefaultMinQuickSwitch),
     }];
+
     settings_purge_legacy_access_auth();
     repotweaks_seed_default_repos();
     if (!cyanide_experimental_tweaks_available()) {
@@ -7016,6 +7083,7 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             BOOL typeBannerEnabled = settings_typebanner_install_allowed() && [d boolForKey:kSettingsTypeBannerEnabled];
             BOOL notificationIslandEnabled = settings_notificationisland_install_allowed() && [d boolForKey:kSettingsNotificationIslandEnabled];
             BOOL appSwitcherGridEnabled = [d boolForKey:kSettingsAppSwitcherGridEnabled];
+            BOOL floatingDockEnabled = [d boolForKey:kSettingsFloatingDockEnabled];
             BOOL themerEnabled = [d boolForKey:kSettingsThemerEnabled];
             BOOL snowboardLiteEnabled = [d boolForKey:kSettingsSnowBoardLiteEnabled];
             BOOL liveWPEnabled = [d boolForKey:kSettingsLiveWPEnabled];
@@ -7035,6 +7103,7 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             BOOL runTypeBanner = settings_typebanner_install_allowed() && settings_enabled_tweak_should_run(d, kSettingsTypeBannerEnabled, springBoardPendingOnly);
             BOOL runNotificationIsland = settings_notificationisland_install_allowed() && settings_enabled_tweak_should_run(d, kSettingsNotificationIslandEnabled, springBoardPendingOnly);
             BOOL runAppSwitcherGrid = settings_enabled_tweak_should_run(d, kSettingsAppSwitcherGridEnabled, springBoardPendingOnly);
+            BOOL runFloatingDock = settings_enabled_tweak_should_run(d, kSettingsFloatingDockEnabled, springBoardPendingOnly);
             BOOL runThemer = settings_enabled_tweak_should_run(d, kSettingsThemerEnabled, springBoardPendingOnly);
             BOOL runSnowBoardLite = settings_enabled_tweak_should_run(d, kSettingsSnowBoardLiteEnabled, springBoardPendingOnly);
             BOOL runLiveWP = settings_enabled_tweak_should_run(d, kSettingsLiveWPEnabled, springBoardPendingOnly);
@@ -7068,7 +7137,7 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                 runMoodWallpaper = NO;
                 moodWallpaperEnabled = NO;
             }
-            BOOL needsSpringBoardWork = runSBC || runDarkTweaks || runStatBar || runNSBar || runNiceBarLite || runRSSI || runAxonLite || runGravityLite || runLayoutExtras || runTypeBanner || runNotificationIsland || runAppSwitcherGrid || runThemer || runSnowBoardLite || runLiveWP || runMetalLockLight || runMoodWallpaper || runStageStrip || runMWLite || runFastLockXLite || runQuickLoader || runRepoTweaks || cleanupDisabledSpringBoardTweaks;
+            BOOL needsSpringBoardWork = runSBC || runDarkTweaks || runStatBar || runNSBar || runNiceBarLite || runRSSI || runAxonLite || runGravityLite || runLayoutExtras || runTypeBanner || runNotificationIsland || runAppSwitcherGrid || runFloatingDock || runThemer || runSnowBoardLite || runLiveWP || runMetalLockLight || runMoodWallpaper || runStageStrip || runMWLite || runFastLockXLite || runQuickLoader || runRepoTweaks || cleanupDisabledSpringBoardTweaks;
             BOOL runSandboxEscape = [d boolForKey:kSettingsRunSandboxEscape] && (!pendingOnly || needsSpringBoardWork);
             // TypeBanner prewarms its hidden SpringBoard window during Apply
             // and reuses the open SpringBoard session for text-only updates.
@@ -7103,6 +7172,7 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             if (runTypeBanner) total++;
             if (runNotificationIsland) total++;
             if (runAppSwitcherGrid) total++;
+            if (runFloatingDock) total++;
             if (runStageStrip) total++;
             if (runMWLite) total++;
             if (runFastLockXLite) total++;
@@ -7123,6 +7193,7 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             if (runAxonLite) [enabledTweaks addObject:@"axon"];
             if (runNotificationIsland) [enabledTweaks addObject:@"notification-island"];
             if (runAppSwitcherGrid) [enabledTweaks addObject:@"app-switcher-grid"];
+            if (runFloatingDock) [enabledTweaks addObject:@"floating-dock"];
             if (runGravityLite) [enabledTweaks addObject:[NSString stringWithFormat:@"gravity(%ld%%)", (long)[d integerForKey:kSettingsGravityLiteMagnitudePct]]];
             if (runPowercuff) [enabledTweaks addObject:[NSString stringWithFormat:@"power(%@)", [d stringForKey:kSettingsPowercuffLevel] ?: @"nominal"]];
             if (runDarkTweaks) [enabledTweaks addObject:@"dark"];
@@ -7491,6 +7562,19 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         appswitchergrid_stop_in_session();
                     }
 
+                    if (runFloatingDock) {
+                        settings_progress(&step, total, "Creating iPad Dock");
+                        bool ok = floatingdock_apply_in_session();
+                        settings_mark_tweak_applied(kSettingsFloatingDockEnabled,
+                                                    ok && [d boolForKey:kSettingsFloatingDockEnabled]);
+                        printf("[SETTINGS] Floating Dock result=%d\n", ok);
+                        log_user("%s iPad Dock %s.\n",
+                                 ok ? "[OK]" : "[WARN]",
+                                 ok ? "created" : "did not apply");
+                    } else if (!floatingDockEnabled) {
+                        floatingdock_stop_in_session();
+                    }
+
                     if (runFastLockXLite) {
                         settings_progress(&step, total, "Enabling FastLockX Lite Always On");
                         FastLockXLiteConfig config = settings_fastlockx_lite_config_from_defaults(d, YES, YES);
@@ -7729,6 +7813,7 @@ typedef NS_ENUM(NSInteger, SettingsSection) {
     SectionQuickLoader,
     SectionRepoTweaks,
     SectionMoodWallpaper,
+    SectionFloatingDock,
     SectionCount,
 };
 
@@ -7915,6 +8000,8 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         enabled = [ud boolForKey:kSettingsQuickLoaderEnabled];
     }
     BOOL hasRepoTweak = !self.qlStandalone && [ud stringForKey:@"QuickLoaderSourceRepoURL"].length > 0;
+    BOOL hasSavedRepoTweak = [ud stringForKey:@"QuickLoaderSourceRepoURL"].length > 0 &&
+                              [ud stringForKey:@"QuickLoaderSavedJS"].length > 0;
     BOOL applied = enabled && settings_tweak_is_applied(kSettingsQuickLoaderEnabled);
 
     if (filename) {
@@ -7925,6 +8012,13 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
                            @"enabled": @(enabled) }];
     } else {
         [rows addObject:@{ @"kind": @"ql-empty" }];
+    }
+
+    if (self.qlStandalone && !filename && hasSavedRepoTweak) {
+        NSString *savedName = [ud stringForKey:@"QuickLoaderSourceScriptName"] ?: @"Repo script";
+        [rows addObject:@{ @"kind": @"info",
+                           @"title": @"Saved repo script",
+                           @"subtitle": [NSString stringWithFormat:settings_l10n_text(@"%@ is not shown in the standalone editor. Clear it here to prevent future automatic runs."), savedName] }];
     }
 
     if (self.qlParams.count > 0) {
@@ -7963,7 +8057,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     [rows addObject:@{ @"kind": @"button", @"action": @"quickloader-run-js", @"title": @"Select .js File" }];
     [rows addObject:@{ @"kind": @"button", @"action": @"quickloader-open-sources", @"title": @"Browse Sources" }];
 
-    if (filename) {
+    if (filename || hasSavedRepoTweak) {
         [rows addObject:@{ @"kind": @"button", @"action": @"quickloader-clear",
                            @"title": @"Clear Loaded Tweak", @"destructive": @YES }];
     }
@@ -9040,6 +9134,16 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     ];
 }
 
+- (NSArray<NSDictionary *> *)floatingDockRows
+{
+    BOOL applied = settings_tweak_is_applied(kSettingsFloatingDockEnabled);
+    return @[
+        @{ @"kind": @"info",
+           @"title": applied ? @"Dock: iPad" : @"Dock: Stock",
+           @"subtitle": @"Install from the Installer tab and tap Run. Clean Up attempts to restore the stock Dock; a respring always restores it." },
+    ];
+}
+
 - (NSArray<NSDictionary *> *)fastLockXLiteRows
 {
     return @[
@@ -9115,6 +9219,9 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     } else if (section == SectionAppSwitcherGrid) {
         [out addObject:@{@"title": @"Switcher style",
                          @"value": settings_tweak_is_applied(kSettingsAppSwitcherGridEnabled) ? @"Grid" : @"Stock"}];
+    } else if (section == SectionFloatingDock) {
+        [out addObject:@{@"title": @"Scene controller",
+                         @"value": settings_tweak_is_applied(kSettingsFloatingDockEnabled) ? @"Verified" : @"Stock"}];
     } else if (section == SectionFastLockXLite) {
         BOOL alwaysOnIntent = [d boolForKey:kSettingsFastLockXLiteEnabled];
         BOOL alwaysOnApplied = settings_tweak_is_applied(kSettingsFastLockXLiteEnabled);
@@ -9188,6 +9295,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         case SectionTypeBanner: return self.typebannerRows;
         case SectionNotificationIsland: return self.notificationIslandRows;
         case SectionAppSwitcherGrid: return self.appSwitcherGridRows;
+        case SectionFloatingDock: return self.floatingDockRows;
         case SectionFastLockXLite: return settings_fastlockx_lite_install_allowed() ? self.fastLockXLiteRows : @[];
         case SectionGravityLite: return self.gravityLiteRows;
         case SectionLocationSim: return self.locationSimRows;
@@ -9229,6 +9337,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 #endif
         @{ @"title": @"Gravity Lite",       @"icon": @"arrow.down.circle.fill",              @"color": [UIColor systemGreenColor],  @"section": @(SectionGravityLite) },
         @{ @"title": @"App Switcher Grid",  @"icon": @"square.grid.2x2.fill",                @"color": [UIColor systemOrangeColor], @"section": @(SectionAppSwitcherGrid) },
+        @{ @"title": @"iPad Dock", @"icon": @"rectangle.on.rectangle", @"color": [UIColor systemOrangeColor], @"section": @(SectionFloatingDock) },
         @{ @"title": @"Location Simulator", @"icon": @"location.fill",                       @"color": [UIColor systemGreenColor],  @"section": @(SectionLocationSim) },
         @{ @"title": @"SnowBoard Lite",     @"icon": @"square.stack.3d.up.fill",             @"color": [UIColor systemCyanColor],   @"section": @(SectionSnowBoardLite) },
         @{ @"title": @"LiveWP",             @"icon": @"play.rectangle.fill",                 @"color": [UIColor systemPurpleColor], @"section": @(SectionLiveWP) },
@@ -9442,6 +9551,9 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     }
     if (s == SectionAppSwitcherGrid) {
         return settings_l10n_text(@"Runtime patch. It changes SpringBoard's app switcher style in memory, writes no system files, and a respring restores stock. Unsupported builds may glitch the app switcher or crash SpringBoard.");
+    }
+    if (s == SectionFloatingDock) {
+        return settings_l10n_text(@"Creates and reuses SpringBoard's internal iPad Dock controller in the active scene, including the App Library button. Clean Up restores the stock Dock for the current session; a respring also restores it.");
     }
     if (s == SectionGravityLite) {
         return settings_l10n_text(@"RemoteCall-only core port of Julio Verne's Gravity. Run applies UIDynamicAnimator gravity, collision, bounce, friction, optional dock physics, and accelerometer steering to SpringBoard icon snapshots. It can restore the icon layout or fire a manual explosion pulse while the SpringBoard session is active.\n\nNot included in this core port: Activator/Home-button hooks, drag gestures, automatic shake effects, and preference-daemon notifications.");
@@ -13993,6 +14105,14 @@ void cyanide_present_contact(UIViewController *host)
             [d removeObjectForKey:@"QuickLoaderSavedJS"];
             [d setBool:NO forKey:kSettingsQuickLoaderEnabled];
             [d synchronize];
+            settings_mark_tweak_needs_apply(kSettingsQuickLoaderEnabled);
+            if (g_springboard_rc_ready) {
+                dispatch_async(dispatch_get_global_queue(0, 0), ^{
+                    @synchronized (settings_rc_lock()) {
+                        if (g_springboard_rc_ready) quickloader_stop_in_session();
+                    }
+                });
+            }
             self.qlScriptName = nil;
             self.qlRawScript = nil;
             self.qlParams = nil;

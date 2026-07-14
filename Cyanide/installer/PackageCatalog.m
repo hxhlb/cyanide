@@ -129,6 +129,7 @@ static const NSInteger kSecFastLockXLite    = 26;
 static const NSInteger kSecQuickLoader      = 27;
 static const NSInteger kSecRepoTweaks       = 28;
 static const NSInteger kSecMoodWallpaper    = 29;
+static const NSInteger kSecFloatingDock     = 30;
 
 + (NSArray<Package *> *)allPackages
 {
@@ -463,6 +464,20 @@ static const NSInteger kSecMoodWallpaper    = 29;
         appSwitcherGrid.settingsSection = kSecAppSwitcherGrid;
         appSwitcherGrid.unstableWarning = @"Beta: patches SpringBoard runtime methods in memory. Respring restores stock, but unsupported builds may glitch the app switcher or crash SpringBoard. Re-run after any respring.";
 
+        Package *floatingDock = [[Package alloc] initWithIdentifier:@"com.darksword.floatingdock"
+                                           name:@"iPad Dock"
+                               shortDescription:@"Enables the iPad-style Dock with App Library"
+                                longDescription:@"Creates and reuses SpringBoard's internal iPad Dock controller in the active scene, including the App Library button.\n\nThe patch writes no system files. Clean Up restores the stock Dock for the current session; a respring also restores the stock Dock."
+                                        version:version
+                                         author:@"Cyanide"
+                                       category:@"SpringBoard"
+                                     symbolName:@"arrow.up.and.down"
+                                           kind:PackageInstallKindToggle
+                                     enabledKey:kSettingsFloatingDockEnabled
+                                          isNew:YES];
+        floatingDock.settingsSection = kSecFloatingDock;
+        floatingDock.unstableWarning = @"Uses private SpringBoard scene controllers and changes Dock capability gates in memory. Unsupported builds may glitch the Dock, respring SpringBoard, or crash it.";
+
         Package *quickLoader = [[Package alloc] initWithIdentifier:@"com.darksword.quickloader"
                                            name:@"QuickLoader"
                                shortDescription:@"Executes custom .js code"
@@ -658,6 +673,7 @@ static const NSInteger kSecMoodWallpaper    = 29;
             metalLockLight,
             moodWallpaper,
             appSwitcherGrid,
+            floatingDock,
             quickLoader,
         ];
     });

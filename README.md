@@ -283,5 +283,23 @@ Cyanide includes two JavaScript tweak runners contributed by Iggy05:
 Only run scripts and repositories you trust; JavaScript tweaks can call Cyanide
 RemoteCall helpers and may destabilize SpringBoard if the script is buggy.
 
+### Script lifecycle and cleanup
+
+Scripts that change in-memory SpringBoard state should export a synchronous
+`globalThis.cleanup` function:
+
+```js
+globalThis.cleanup = function () {
+  r_msg2_main(view, "setHidden:", 0);
+  clearInterval(timer);
+};
+```
+
+Cyanide calls it before stopping a running script during **Clean Up**, package
+disable/removal, or session shutdown. A cleanup hook must restore only state
+captured by that script before it changed it, and it must finish quickly. It is
+not a rollback system: persistent file or system changes cannot be restored
+automatically.
+
 
 </details>

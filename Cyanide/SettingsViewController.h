@@ -59,6 +59,7 @@ extern NSString * const kSettingsAxonLiteEnabled;
 extern NSString * const kSettingsTypeBannerEnabled;
 extern NSString * const kSettingsNotificationIslandEnabled;
 extern NSString * const kSettingsAppSwitcherGridEnabled;
+extern NSString * const kSettingsFloatingDockEnabled;
 extern NSString * const kSettingsFastLockXLiteEnabled;
 
 extern NSString * const kSettingsGravityLiteEnabled;

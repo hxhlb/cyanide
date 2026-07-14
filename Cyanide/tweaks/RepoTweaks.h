@@ -10,6 +10,7 @@
 
 // Runs all enabled tweaks during the RUN 4/4 sequence
 bool repotweaks_apply_in_session(void);
+bool repotweaks_any_enabled_tweaks(void);
 
 // Fetches the JSON from the given URL and caches it
 void repotweaks_refresh_repo(NSString *repoURL, void (^completion)(BOOL success, NSString *message));
@@ -30,6 +31,7 @@ BOOL repotweaks_download_script_sync(NSString *repoURL,
 void repotweaks_cancel_tweak(NSString *repoURL, NSString *tweakId);
 
 bool repotweaks_stop_in_session(void);
+bool repotweaks_is_running_in_session(void);
 
 void repotweaks_refresh_all_sources(void (^completion)(void));
 NSUInteger repotweaks_available_update_count(void);

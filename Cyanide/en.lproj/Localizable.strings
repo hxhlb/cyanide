@@ -276,6 +276,8 @@
 "Updating Tweaks" = "Updating Tweaks";
 "Multiple Tweaks" = "Multiple Tweaks";
 "JavaScript engine contributed by @MinePlayer16" = "JavaScript engine contributed by @MinePlayer16";
+"Cleanup" = "Cleanup";
+"Define an optional global cleanup() function for scripts that change in-memory state:\n\nglobalThis.cleanup = function () {\n  r_msg2_main(view, \"setHidden:\", 0);\n  clearInterval(timer);\n};\n\nCyanide calls cleanup() before it stops a running script during Clean Up, package disable/removal, or session shutdown. Restore only state captured by the script before it changed it. Keep cleanup() synchronous and fast. Persistent file or system changes cannot be restored automatically." = "Define an optional global cleanup() function for scripts that change in-memory state:\n\nglobalThis.cleanup = function () {\n  r_msg2_main(view, \"setHidden:\", 0);\n  clearInterval(timer);\n};\n\nCyanide calls cleanup() before it stops a running script during Clean Up, package disable/removal, or session shutdown. Restore only state captured by the script before it changed it. Keep cleanup() synchronous and fast. Persistent file or system changes cannot be restored automatically.";
 "Watch Pairing Override" = "Watch Pairing Override";
 "Home Bar" = "Home Bar";
 "Disabled" = "Disabled";
@@ -490,6 +492,7 @@
 "Save" = "Save";
 "Saved here before install; Cyanide applies these values through the native package backend." = "Saved here before install; Cyanide applies these values through the native package backend.";
 "Saved here before install; QuickLoader applies these values when the queued package runs." = "Saved here before install; QuickLoader applies these values when the queued package runs.";
+"Saved here before install; Cyanide applies these values through the JavaScript runtime when queued packages run." = "Saved here before install; Cyanide applies these values through the JavaScript runtime when queued packages run.";
 "Saves these watchOS pairing settings on this iPhone. Respring or reboot afterwards before trying to pair." = "Saves these watchOS pairing settings on this iPhone. Respring or reboot afterwards before trying to pair.";
 "SBCustomizer" = "SBCustomizer";
 "Search" = "Search";
@@ -781,3 +784,14 @@
 "Tools" = "Tools";
 "JavaScript" = "JavaScript";
 "Twitter (Original Author)" = "Twitter (Original Author)";
+"iPad Dock" = "iPad Dock";
+"Dock: iPad" = "Dock: iPad";
+"Dock: Stock" = "Dock: Stock";
+"Install from the Installer tab and tap Run. Clean Up attempts to restore the stock Dock; a respring always restores it." = "Install from the Installer tab and tap Run. Clean Up attempts to restore the stock Dock; a respring always restores it.";
+"Scene controller" = "Scene controller";
+"Creates and reuses SpringBoard's internal iPad Dock controller in the active scene, including the App Library button. Clean Up restores the stock Dock for the current session; a respring also restores it." = "Creates and reuses SpringBoard's internal iPad Dock controller in the active scene, including the App Library button. Clean Up restores the stock Dock for the current session; a respring also restores it.";
+"Enables the iPad-style Dock with App Library" = "Enables the iPad-style Dock with App Library";
+"Creates and reuses SpringBoard's internal iPad Dock controller in the active scene, including the App Library button.\n\nThe patch writes no system files. Clean Up restores the stock Dock for the current session; a respring also restores the stock Dock." = "Creates and reuses SpringBoard's internal iPad Dock controller in the active scene, including the App Library button.\n\nThe patch writes no system files. Clean Up restores the stock Dock for the current session; a respring also restores the stock Dock.";
+"Uses private SpringBoard scene controllers and changes Dock capability gates in memory. Unsupported builds may glitch the Dock, respring SpringBoard, or crash it." = "Uses private SpringBoard scene controllers and changes Dock capability gates in memory. Unsupported builds may glitch the Dock, respring SpringBoard, or crash it.";
+"Saved repo script" = "Saved repo script";
+"%@ is not shown in the standalone editor. Clear it here to prevent future automatic runs." = "%@ is not shown in the standalone editor. Clear it here to prevent future automatic runs.";

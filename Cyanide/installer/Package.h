@@ -41,8 +41,8 @@ typedef NS_ENUM(NSInteger, PackageInstallKind) {
     PackageInstallKindDirectTool = 5,
 
     // Dynamic package fetched from a RepoTweaks source. Known repo IDs can map
-    // to Cyanide's native tweak backends; other compatible JS snippets are
-    // imported into QuickLoader and applied through the normal run-actions path.
+    // to Cyanide's native tweak backends; other compatible JS snippets run
+    // independently through the RepoTweaks JavaScript runtime.
     PackageInstallKindRepoTweak = 6,
 };
 

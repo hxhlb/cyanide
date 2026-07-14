@@ -130,10 +130,12 @@ static BOOL PackageEnabledKeyIsRepoDriven(NSString *enabledKey)
 
 static BOOL PackageShouldAutoQueueForApply(Package *package)
 {
-    // Repo tweak updates are intentionally user-driven: refresh should only
-    // show update badges. The user must tap Update/Install before anything
-    // enters the pending queue.
-    if (package.kind == PackageInstallKindRepoTweak) return NO;
+    // A source refresh must not queue an update by itself. An installed repo
+    // tweak whose SpringBoard session was cleaned up, however, must return to
+    // Pending so its enabled state can be applied again.
+    if (package.kind == PackageInstallKindRepoTweak) {
+        return package.isQueuedForApply;
+    }
     if (package.kind == PackageInstallKindToggle &&
         PackageEnabledKeyIsRepoDriven(package.enabledKey)) {
         return NO;
@@ -291,15 +293,6 @@ static BOOL PackageShouldAutoQueueForApply(Package *package)
     return NO;
 }
 
-- (BOOL)hasQueuedRepoTweakInstallExcludingPackage:(Package *)package
-{
-    for (Package *p in self.queuedInstalls) {
-        if (package && [p.identifier isEqualToString:package.identifier]) continue;
-        if (p.kind == PackageInstallKindRepoTweak && p.repoTweakUsesQuickLoader) return YES;
-    }
-    return NO;
-}
-
 - (BOOL)canQueueIntent:(PackageQueueIntent)intent
             forPackage:(Package *)package
                 reason:(NSString * _Nullable * _Nullable)reason
@@ -367,16 +360,6 @@ static BOOL PackageShouldAutoQueueForApply(Package *package)
     if (!isHideHomeBar && [self hasQueuedHideHomeBarIntentExcludingPackage:package]) {
         if (reason) {
             *reason = @"Hide Home Bar is already waiting in the queue and must run by itself. Apply or remove Hide Home Bar first, then queue other tweaks after the respring.";
-        }
-        return NO;
-    }
-
-    if (intent == PackageQueueIntentInstall &&
-        package.kind == PackageInstallKindRepoTweak &&
-        package.repoTweakUsesQuickLoader &&
-        [self hasQueuedRepoTweakInstallExcludingPackage:package]) {
-        if (reason) {
-            *reason = @"QuickLoader installs one repo tweak at a time. Apply or remove the currently queued repo tweak first.";
         }
         return NO;
     }
