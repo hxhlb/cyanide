@@ -30,14 +30,17 @@ activity, omit it.
 
 ## Pending
 
-- [ ] 新增 UIKit Debug Overlay。
-  Added UIKit Debug Overlay.
-- [ ] 新增 Upside Down。
-  Added Upside Down.
-- [ ] 优化 MilkyWay Lite 功能。
-  Improved MilkyWay Lite.
 
 ## Released
+
+### v1.4.1 - 2026-07-14
+
+- [x] 新增 UIKit Debug Overlay。
+  Added UIKit Debug Overlay.
+- [x] 新增 Upside Down。
+  Added Upside Down.
+- [x] 优化 MilkyWay Lite 功能。
+  Improved MilkyWay Lite.
 
 ### v1.4.0 - 2026-07-14
 
