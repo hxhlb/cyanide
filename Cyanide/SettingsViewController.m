@@ -29,6 +29,8 @@
 #import "tweaks/mood_wallpaper.h"
 #import "tweaks/gravitylite.h"
 #import "tweaks/appswitchergrid.h"
+#import "tweaks/debugoverlay.h"
+#import "tweaks/upsidedown.h"
 #import "tweaks/hide_home_bar.h"
 #import "tweaks/QuickLoader.h"
 #import "tweaks/RepoTweaks.h"
@@ -236,6 +238,9 @@ NSString * const kSettingsAutoRunKexploit    = @"AutoRunKexploit";
 NSString * const kSettingsRunSandboxEscape   = @"RunSandboxEscape";
 NSString * const kSettingsRunPatchSandboxExt = @"RunPatchSandboxExt";
 NSString * const kSettingsKeepAlive          = @"KeepAlive";
+// Preserve the original defaults keys so existing test-build selections survive.
+static NSString * const kSettingsDebugOverlayRestoreOnCleanup = @"DebugOverlayCleanupOnManualClean";
+static NSString * const kSettingsUpsideDownRestoreOnCleanup = @"UpsideDownCleanupOnManualClean";
 
 NSString * const kSettingsSBCEnabled    = @"SBCEnabled";
 NSString * const kSettingsSBCDockIcons  = @"SBCDockIcons";
@@ -362,6 +367,8 @@ NSString * const kSettingsAxonLiteEnabled = @"AxonLiteEnabled";
 NSString * const kSettingsTypeBannerEnabled = @"TypeBannerEnabled";
 NSString * const kSettingsNotificationIslandEnabled = @"NotificationIslandEnabled";
 NSString * const kSettingsAppSwitcherGridEnabled = @"AppSwitcherGridEnabled";
+NSString * const kSettingsDebugOverlayEnabled = @"DebugOverlayEnabled";
+NSString * const kSettingsUpsideDownEnabled = @"UpsideDownEnabled";
 NSString * const kSettingsFloatingDockEnabled = @"FloatingDockEnabled";
 NSString * const kSettingsFastLockXLiteEnabled = @"FastLockXLiteEnabled";
 static NSString * const kSettingsFastLockXLiteBlockMusic = @"FastLockXLiteBlockMusic";
@@ -387,6 +394,7 @@ NSString * const kSettingsMWLiteEnabled = @"MWLiteEnabled";
 static NSString * const kSettingsMWLiteTargetBundleID = @"MWLiteTargetBundleID";
 static NSString * const kSettingsMWLiteMaxWindows = @"MWLiteMaxWindows";
 static NSString * const kSettingsMWLiteSelectedApps = @"MWLiteSelectedApps";
+static NSString * const kSettingsMWLiteControlBarPosition = @"MWLiteControlBarPosition";
 
 NSString * const kSettingsLocationSimEnabled = @"LocationSimEnabled";
 NSString * const kSettingsLocationSimLatitude = @"LocationSimLatitude";
@@ -963,6 +971,24 @@ static bool settings_stop_appswitchergrid_registered(BOOL springboardWillDie)
     return appswitchergrid_stop_in_session();
 }
 
+static bool settings_stop_debugoverlay_registered(BOOL springboardWillDie)
+{
+    if (springboardWillDie) {
+        debugoverlay_forget_remote_state();
+        return true;
+    }
+    return debugoverlay_stop_in_session();
+}
+
+static bool settings_stop_upsidedown_registered(BOOL springboardWillDie)
+{
+    if (springboardWillDie) {
+        upsidedown_forget_remote_state();
+        return true;
+    }
+    return upsidedown_stop_in_session();
+}
+
 static bool settings_stop_gravitylite_registered(BOOL springboardWillDie)
 {
     (void)springboardWillDie;
@@ -1080,6 +1106,8 @@ static void settings_each_springboard_cleanup_entry(void (^block)(const Settings
         { kSettingsAxonLiteEnabled, "Axon Lite", settings_request_axonlite_stop, settings_stop_axonlite_registered, axonlite_forget_remote_state, settings_axonlite_running, YES, YES },
         { kSettingsTypeBannerEnabled, "TypeBanner", settings_request_typebanner_stop, settings_stop_typebanner_registered, typebanner_forget_remote_state, settings_typebanner_running, YES, YES },
         { kSettingsNotificationIslandEnabled, "Notification Island", settings_request_notificationisland_stop, settings_stop_notificationisland_registered, notificationisland_forget_remote_state, settings_notificationisland_running, YES, YES },
+        { kSettingsDebugOverlayEnabled, "UIKit Debug Overlay", NULL, settings_stop_debugoverlay_registered, debugoverlay_forget_remote_state, NULL, YES, YES },
+        { kSettingsUpsideDownEnabled, "Upside Down", NULL, settings_stop_upsidedown_registered, upsidedown_forget_remote_state, NULL, YES, YES },
         { kSettingsAppSwitcherGridEnabled, "App Switcher Grid", NULL, settings_stop_appswitchergrid_registered, appswitchergrid_forget_remote_state, NULL, YES, YES },
         { kSettingsFloatingDockEnabled, "iPad Dock", NULL, settings_stop_floatingdock_registered, floatingdock_forget_remote_state, NULL, NO, YES },
         { kSettingsGravityLiteEnabled, "Gravity Lite", settings_request_gravitylite_stop, settings_stop_gravitylite_registered, gravitylite_forget_remote_state, NULL, YES, YES },
@@ -1137,6 +1165,19 @@ static BOOL settings_cleanup_entry_has_runtime_state(NSUserDefaults *d,
     if (entry->key && settings_tweak_is_applied(entry->key)) return YES;
     (void)d;
     return NO;
+}
+
+static BOOL settings_cleanup_entry_restore_by_preference(NSUserDefaults *d,
+                                                         const SettingsSpringBoardTweakCleanupEntry *entry)
+{
+    if (!entry) return YES;
+    if ([entry->key isEqualToString:kSettingsDebugOverlayEnabled]) {
+        return [d boolForKey:kSettingsDebugOverlayRestoreOnCleanup];
+    }
+    if ([entry->key isEqualToString:kSettingsUpsideDownEnabled]) {
+        return [d boolForKey:kSettingsUpsideDownRestoreOnCleanup];
+    }
+    return YES;
 }
 
 static BOOL settings_cleanup_entry_should_stop(NSUserDefaults *d,
@@ -1827,7 +1868,8 @@ static void settings_forget_springboard_tweak_state_locked(void)
 }
 
 static void settings_stop_springboard_tweaks_locked(const char *reason,
-                                                    BOOL springboardWillDie)
+                                                    BOOL springboardWillDie,
+                                                    BOOL respectCleanupPreference)
 {
     if (!g_springboard_rc_ready) {
         settings_forget_springboard_tweak_state_locked();
@@ -1840,6 +1882,15 @@ static void settings_stop_springboard_tweaks_locked(const char *reason,
 
     void (^stopEntry)(const SettingsSpringBoardTweakCleanupEntry *) = ^(const SettingsSpringBoardTweakCleanupEntry *entry) {
         if (!entry->stop) return;
+        if (respectCleanupPreference &&
+            settings_cleanup_entry_has_runtime_state(d, entry) &&
+            !settings_cleanup_entry_restore_by_preference(d, entry)) {
+            skippedCount++;
+            printf("[SETTINGS] %s preserving %s by preference\n",
+                   reason ?: "cleanup",
+                   entry->name ?: "tweak");
+            return;
+        }
         if (!settings_cleanup_entry_should_stop(d, entry, springboardWillDie)) {
             skippedCount++;
             return;
@@ -2207,7 +2258,9 @@ static BOOL settings_has_active_termination_live_tweak(void)
     __block BOOL active = NO;
     settings_each_springboard_cleanup_entry(^(const SettingsSpringBoardTweakCleanupEntry *entry) {
         if (active || !entry->cleanupOnTermination || !entry->key) return;
-        active = [d boolForKey:entry->key] && settings_tweak_is_applied(entry->key);
+        if (![d boolForKey:entry->key] || !settings_tweak_is_applied(entry->key)) return;
+        if (!settings_cleanup_entry_restore_by_preference(d, entry)) return;
+        active = YES;
     });
     return active;
 }
@@ -2586,7 +2639,7 @@ static void settings_prepare_for_respring_sync(void)
         if (g_springboard_rc_ready) {
             // SB is about to be killed by the respring, so cleanup uses the
             // fast variant for tweaks where full remote restoration is wasted.
-            settings_stop_springboard_tweaks_locked("pre-respring cleanup", YES);
+            settings_stop_springboard_tweaks_locked("pre-respring cleanup", YES, NO);
             settings_destroy_springboard_remote_call_locked("pre-respring cleanup");
         }
     }
@@ -2605,7 +2658,8 @@ static void settings_prepare_for_respring_sync(void)
     usleep(300000);
 }
 
-static void settings_terminal_kexploit_cleanup_sync_internal(const char *reason)
+static void settings_terminal_kexploit_cleanup_sync_internal(const char *reason,
+                                                             BOOL respectCleanupPreference)
 {
     log_user("[CLEANUP] Tearing down live tweaks and releasing KRW state...\n");
     printf("[SETTINGS] terminal KRW cleanup requested%s%s done=%d rcReady=%d\n",
@@ -2617,7 +2671,8 @@ static void settings_terminal_kexploit_cleanup_sync_internal(const char *reason)
 
     @synchronized (settings_rc_lock()) {
         if (g_springboard_rc_ready) {
-            settings_stop_springboard_tweaks_locked("terminal cleanup", NO);
+            settings_stop_springboard_tweaks_locked("terminal cleanup", NO,
+                                                    respectCleanupPreference);
             settings_destroy_springboard_remote_call_locked(reason ?: "terminal KRW cleanup");
         } else {
             settings_forget_springboard_tweak_state_locked();
@@ -2648,7 +2703,7 @@ static void settings_terminal_kexploit_cleanup_sync_internal(const char *reason)
 
 static void settings_terminal_kexploit_cleanup_sync(const char *reason)
 {
-    settings_terminal_kexploit_cleanup_sync_internal(reason);
+    settings_terminal_kexploit_cleanup_sync_internal(reason, NO);
 }
 
 static BOOL settings_acquire_actions_lock_wait(const char *owner, uint64_t timeoutUS)
@@ -2702,7 +2757,7 @@ static void settings_queue_terminal_kexploit_cleanup(const char *reason)
     dispatch_async(dispatch_get_global_queue(0, 0), ^{
         BOOL locked = settings_acquire_actions_lock_wait("terminal cleanup", 0);
         @try {
-            settings_terminal_kexploit_cleanup_sync_internal(reason ?: "manual action");
+            settings_terminal_kexploit_cleanup_sync_internal(reason ?: "manual action", YES);
         } @finally {
             if (locked) __sync_lock_release(&g_settings_actions_running);
             __sync_lock_release(&g_settings_cleanup_running);
@@ -2738,7 +2793,7 @@ void settings_best_effort_termination_cleanup(const char *reason)
     }
 
     @try {
-        settings_terminal_kexploit_cleanup_sync_internal(why);
+        settings_terminal_kexploit_cleanup_sync_internal(why, YES);
     } @finally {
         __sync_lock_release(&g_settings_actions_running);
     }
@@ -2751,7 +2806,7 @@ void settings_destroy_springboard_remote_call_sync(void)
     settings_wait_live_loops_stopped_for_switch("remote call sync cleanup");
     @synchronized (settings_rc_lock()) {
         if (g_springboard_rc_ready) {
-            settings_stop_springboard_tweaks_locked("remote call sync cleanup", NO);
+            settings_stop_springboard_tweaks_locked("remote call sync cleanup", NO, NO);
         }
         settings_destroy_springboard_remote_call_locked("manual/sync cleanup");
     }
@@ -2767,7 +2822,7 @@ void settings_destroy_springboard_remote_call(void)
         @synchronized (settings_rc_lock()) {
             BOOL hadSession = g_springboard_rc_ready != 0;
             if (g_springboard_rc_ready) {
-                settings_stop_springboard_tweaks_locked("remote call cleanup", NO);
+                settings_stop_springboard_tweaks_locked("remote call cleanup", NO, NO);
             }
             settings_destroy_springboard_remote_call_locked("manual cleanup");
             log_user(hadSession ? "[OK] SpringBoard channel closed — live tweaks stopped.\n" :
@@ -6939,11 +6994,17 @@ void settings_register_defaults(void)
         kSettingsGravityLiteResistancePct: @50,
         kSettingsGravityLiteAngularResistancePct: @0,
 
+        kSettingsDebugOverlayEnabled: @NO,
+        kSettingsUpsideDownEnabled: @NO,
+        kSettingsDebugOverlayRestoreOnCleanup: @YES,
+        kSettingsUpsideDownRestoreOnCleanup: @YES,
+
         kSettingsStageStripEnabled: @NO,
         kSettingsMWLiteEnabled: @NO,
         kSettingsMWLiteTargetBundleID: @"",
         kSettingsMWLiteSelectedApps: @[],
         kSettingsMWLiteMaxWindows: @2,
+        kSettingsMWLiteControlBarPosition: @0,
 
         kSettingsLocationSimEnabled: @NO,
         kSettingsLocationSimLatitude: @(kLocationSimDefaultLatitude),
@@ -7082,6 +7143,8 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             BOOL axonLiteEnabled = [d boolForKey:kSettingsAxonLiteEnabled];
             BOOL typeBannerEnabled = settings_typebanner_install_allowed() && [d boolForKey:kSettingsTypeBannerEnabled];
             BOOL notificationIslandEnabled = settings_notificationisland_install_allowed() && [d boolForKey:kSettingsNotificationIslandEnabled];
+            BOOL debugOverlayEnabled = [d boolForKey:kSettingsDebugOverlayEnabled];
+            BOOL upsideDownEnabled = [d boolForKey:kSettingsUpsideDownEnabled];
             BOOL appSwitcherGridEnabled = [d boolForKey:kSettingsAppSwitcherGridEnabled];
             BOOL floatingDockEnabled = [d boolForKey:kSettingsFloatingDockEnabled];
             BOOL themerEnabled = [d boolForKey:kSettingsThemerEnabled];
@@ -7102,6 +7165,8 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             BOOL runAxonLite = settings_enabled_tweak_should_run(d, kSettingsAxonLiteEnabled, springBoardPendingOnly);
             BOOL runTypeBanner = settings_typebanner_install_allowed() && settings_enabled_tweak_should_run(d, kSettingsTypeBannerEnabled, springBoardPendingOnly);
             BOOL runNotificationIsland = settings_notificationisland_install_allowed() && settings_enabled_tweak_should_run(d, kSettingsNotificationIslandEnabled, springBoardPendingOnly);
+            BOOL runDebugOverlay = settings_enabled_tweak_should_run(d, kSettingsDebugOverlayEnabled, springBoardPendingOnly);
+            BOOL runUpsideDown = settings_enabled_tweak_should_run(d, kSettingsUpsideDownEnabled, springBoardPendingOnly);
             BOOL runAppSwitcherGrid = settings_enabled_tweak_should_run(d, kSettingsAppSwitcherGridEnabled, springBoardPendingOnly);
             BOOL runFloatingDock = settings_enabled_tweak_should_run(d, kSettingsFloatingDockEnabled, springBoardPendingOnly);
             BOOL runThemer = settings_enabled_tweak_should_run(d, kSettingsThemerEnabled, springBoardPendingOnly);
@@ -7137,7 +7202,7 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                 runMoodWallpaper = NO;
                 moodWallpaperEnabled = NO;
             }
-            BOOL needsSpringBoardWork = runSBC || runDarkTweaks || runStatBar || runNSBar || runNiceBarLite || runRSSI || runAxonLite || runGravityLite || runLayoutExtras || runTypeBanner || runNotificationIsland || runAppSwitcherGrid || runFloatingDock || runThemer || runSnowBoardLite || runLiveWP || runMetalLockLight || runMoodWallpaper || runStageStrip || runMWLite || runFastLockXLite || runQuickLoader || runRepoTweaks || cleanupDisabledSpringBoardTweaks;
+            BOOL needsSpringBoardWork = runSBC || runDarkTweaks || runStatBar || runNSBar || runNiceBarLite || runRSSI || runAxonLite || runGravityLite || runLayoutExtras || runTypeBanner || runNotificationIsland || runDebugOverlay || runUpsideDown || runAppSwitcherGrid || runFloatingDock || runThemer || runSnowBoardLite || runLiveWP || runMetalLockLight || runMoodWallpaper || runStageStrip || runMWLite || runFastLockXLite || runQuickLoader || runRepoTweaks || cleanupDisabledSpringBoardTweaks;
             BOOL runSandboxEscape = [d boolForKey:kSettingsRunSandboxEscape] && (!pendingOnly || needsSpringBoardWork);
             // TypeBanner prewarms its hidden SpringBoard window during Apply
             // and reuses the open SpringBoard session for text-only updates.
@@ -7171,6 +7236,8 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             if (runGravityLite) total++;
             if (runTypeBanner) total++;
             if (runNotificationIsland) total++;
+            if (runDebugOverlay) total++;
+            if (runUpsideDown) total++;
             if (runAppSwitcherGrid) total++;
             if (runFloatingDock) total++;
             if (runStageStrip) total++;
@@ -7192,6 +7259,8 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             if (runRSSI) [enabledTweaks addObject:@"rssi"];
             if (runAxonLite) [enabledTweaks addObject:@"axon"];
             if (runNotificationIsland) [enabledTweaks addObject:@"notification-island"];
+            if (runDebugOverlay) [enabledTweaks addObject:@"debug-overlay"];
+            if (runUpsideDown) [enabledTweaks addObject:@"upside-down"];
             if (runAppSwitcherGrid) [enabledTweaks addObject:@"app-switcher-grid"];
             if (runFloatingDock) [enabledTweaks addObject:@"floating-dock"];
             if (runGravityLite) [enabledTweaks addObject:[NSString stringWithFormat:@"gravity(%ld%%)", (long)[d integerForKey:kSettingsGravityLiteMagnitudePct]]];
@@ -7549,6 +7618,32 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                                  ok ? "watching incoming banners" : "did not start cleanly");
                     }
 
+                    if (runDebugOverlay) {
+                        settings_progress(&step, total, "Enabling UIKit Debug Overlay");
+                        bool ok = debugoverlay_apply_in_session();
+                        settings_mark_tweak_applied(kSettingsDebugOverlayEnabled,
+                                                    ok && [d boolForKey:kSettingsDebugOverlayEnabled]);
+                        printf("[SETTINGS] UIKit Debug Overlay result=%d\n", ok);
+                        log_user("%s UIKit Debug Overlay %s.\n",
+                                 ok ? "[OK]" : "[WARN]",
+                                 ok ? "enabled" : "did not apply cleanly");
+                    } else if (!debugOverlayEnabled) {
+                        debugoverlay_stop_in_session();
+                    }
+
+                    if (runUpsideDown) {
+                        settings_progress(&step, total, "Enabling Upside Down");
+                        bool ok = upsidedown_apply_in_session();
+                        settings_mark_tweak_applied(kSettingsUpsideDownEnabled,
+                                                    ok && [d boolForKey:kSettingsUpsideDownEnabled]);
+                        printf("[SETTINGS] Upside Down result=%d\n", ok);
+                        log_user("%s Upside Down %s.\n",
+                                 ok ? "[OK]" : "[WARN]",
+                                 ok ? "enabled" : "did not apply cleanly");
+                    } else if (!upsideDownEnabled) {
+                        upsidedown_stop_in_session();
+                    }
+
                     if (runAppSwitcherGrid) {
                         settings_progress(&step, total, "Enabling App Switcher Grid");
                         bool ok = appswitchergrid_apply_in_session();
@@ -7630,6 +7725,8 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         settings_mwlite_export_selected_apps(d);
                         NSString *selectedAppsPath = settings_mwlite_selected_apps_path();
                         stagestrip_set_mwlite_preselected_apps_path(selectedAppsPath.UTF8String);
+                        stagestrip_set_mwlite_control_bar_bottom(
+                            [d integerForKey:kSettingsMWLiteControlBarPosition] == 1);
                         NSInteger maxWindows = [d integerForKey:kSettingsMWLiteMaxWindows];
                         if (maxWindows < 1) maxWindows = 2;
                         if (maxWindows > 8) maxWindows = 8;
@@ -7638,7 +7735,7 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         settings_mark_tweak_applied(kSettingsMWLiteEnabled,
                                                     ok && [d boolForKey:kSettingsMWLiteEnabled]);
                         if (ok) {
-                            log_user("[OK] MilkyWay Lite host active (max windows: %ld). Use the bottom-right SpringBoard dot to open the picker.\n",
+                            log_user("[OK] MilkyWay Lite host active (max windows: %ld). Tap the draggable SpringBoard launcher to open the picker.\n",
                                      (long)maxWindows);
                         } else {
                             log_user("[WARN] MilkyWay Lite host did not install cleanly.\n");
@@ -7814,6 +7911,8 @@ typedef NS_ENUM(NSInteger, SettingsSection) {
     SectionRepoTweaks,
     SectionMoodWallpaper,
     SectionFloatingDock,
+    SectionDebugOverlay,
+    SectionUpsideDown,
     SectionCount,
 };
 
@@ -8870,6 +8969,13 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
            @"min": @1,
            @"max": @8,
            @"default": @2 },
+        @{ @"kind": @"info",
+           @"title": NSLocalizedString(@"Control Bar Position", nil),
+           @"subtitle": NSLocalizedString(@"Place the window controls above or below the app content.", nil) },
+        @{ @"kind": @"segmented",
+           @"key": kSettingsMWLiteControlBarPosition,
+           @"titles": @[@"Top", @"Bottom"],
+           @"values": @[@0, @1] },
         @{ @"kind": @"button",
            @"title": NSLocalizedString(@"Refresh App List", nil),
            @"subtitle": self.mwLiteAppsLoading ? NSLocalizedString(@"Loading installed apps…", nil) : @"",
@@ -9144,6 +9250,24 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     ];
 }
 
+- (NSArray<NSDictionary *> *)debugOverlayRows
+{
+    return @[
+        @{ @"key": kSettingsDebugOverlayRestoreOnCleanup,
+           @"title": @"Restore automatically",
+           @"subtitle": @"When enabled, Clean Up in the Settings tab or exiting Cyanide removes UIKit Debug Overlay. Turn it off to keep the overlay active." },
+    ];
+}
+
+- (NSArray<NSDictionary *> *)upsideDownRows
+{
+    return @[
+        @{ @"key": kSettingsUpsideDownRestoreOnCleanup,
+           @"title": @"Restore automatically",
+           @"subtitle": @"When enabled, Clean Up in the Settings tab or exiting Cyanide restores stock orientation. Turn it off to keep upside-down rotation active." },
+    ];
+}
+
 - (NSArray<NSDictionary *> *)fastLockXLiteRows
 {
     return @[
@@ -9296,6 +9420,8 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         case SectionNotificationIsland: return self.notificationIslandRows;
         case SectionAppSwitcherGrid: return self.appSwitcherGridRows;
         case SectionFloatingDock: return self.floatingDockRows;
+        case SectionDebugOverlay: return self.debugOverlayRows;
+        case SectionUpsideDown: return self.upsideDownRows;
         case SectionFastLockXLite: return settings_fastlockx_lite_install_allowed() ? self.fastLockXLiteRows : @[];
         case SectionGravityLite: return self.gravityLiteRows;
         case SectionLocationSim: return self.locationSimRows;
@@ -9338,6 +9464,8 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         @{ @"title": @"Gravity Lite",       @"icon": @"arrow.down.circle.fill",              @"color": [UIColor systemGreenColor],  @"section": @(SectionGravityLite) },
         @{ @"title": @"App Switcher Grid",  @"icon": @"square.grid.2x2.fill",                @"color": [UIColor systemOrangeColor], @"section": @(SectionAppSwitcherGrid) },
         @{ @"title": @"iPad Dock", @"icon": @"rectangle.on.rectangle", @"color": [UIColor systemOrangeColor], @"section": @(SectionFloatingDock) },
+        @{ @"title": @"UIKit Debug Overlay", @"icon": @"ladybug.fill", @"color": [UIColor systemRedColor], @"section": @(SectionDebugOverlay) },
+        @{ @"title": @"Upside Down", @"icon": @"arrow.up.and.down.circle.fill", @"color": [UIColor systemBlueColor], @"section": @(SectionUpsideDown) },
         @{ @"title": @"Location Simulator", @"icon": @"location.fill",                       @"color": [UIColor systemGreenColor],  @"section": @(SectionLocationSim) },
         @{ @"title": @"SnowBoard Lite",     @"icon": @"square.stack.3d.up.fill",             @"color": [UIColor systemCyanColor],   @"section": @(SectionSnowBoardLite) },
         @{ @"title": @"LiveWP",             @"icon": @"play.rectangle.fill",                 @"color": [UIColor systemPurpleColor], @"section": @(SectionLiveWP) },
@@ -9554,6 +9682,12 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     }
     if (s == SectionFloatingDock) {
         return settings_l10n_text(@"Creates and reuses SpringBoard's internal iPad Dock controller in the active scene, including the App Library button. Clean Up restores the stock Dock for the current session; a respring also restores it.");
+    }
+    if (s == SectionDebugOverlay) {
+        return settings_l10n_text(@"Double-tap the status bar to open UIKit Debug Overlay. This option controls restoration during Clean Up and when Cyanide exits.");
+    }
+    if (s == SectionUpsideDown) {
+        return settings_l10n_text(@"Rotation Lock must be off. This option controls restoration during Clean Up and when Cyanide exits.");
     }
     if (s == SectionGravityLite) {
         return settings_l10n_text(@"RemoteCall-only core port of Julio Verne's Gravity. Run applies UIDynamicAnimator gravity, collision, bounce, friction, optional dock physics, and accelerometer steering to SpringBoard icon snapshots. It can restore the icon layout or fire a manual explosion pulse while the SpringBoard session is active.\n\nNot included in this core port: Activator/Home-button hooks, drag gestures, automatic shake effects, and preference-daemon notifications.");
@@ -12300,6 +12434,10 @@ void cyanide_present_contact(UIViewController *host)
     settings_note_package_configuration_changed(key);
     if ([key isEqualToString:kSettingsKeepAlive]) {
         ds_keepalive_apply_enabled(sender.isOn);
+        return;
+    }
+    if ([key isEqualToString:kSettingsDebugOverlayRestoreOnCleanup] ||
+        [key isEqualToString:kSettingsUpsideDownRestoreOnCleanup]) {
         return;
     }
     if (settings_key_affects_package_state(key)) {

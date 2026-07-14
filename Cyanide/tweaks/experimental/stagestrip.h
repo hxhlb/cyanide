@@ -27,6 +27,7 @@ bool stagestrip_apply(int maxSlots);
 bool stagestrip_apply_in_session(int maxSlots);
 bool stagestrip_apply_mwlite_in_session(int maxWindows);
 void stagestrip_set_mwlite_preselected_apps_path(const char *path);
+void stagestrip_set_mwlite_control_bar_bottom(bool bottom);
 void stagestrip_set_deferred_library_build_enabled(bool enabled);
 bool stagestrip_stop_in_session(void);
 void stagestrip_start_control_loop(void);

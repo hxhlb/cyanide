@@ -25,6 +25,7 @@
 		284DCD653001E982008C8EBA /* ChOma.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = ChOma.xcodeproj; sourceTree = "<group>"; };
 		284DD15B30022E33008C8EBA /* ChOma.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = ChOma.xcodeproj; sourceTree = "<group>"; };
 		284DD35A3002314C008C8EBA /* ChOma.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = ChOma.xcodeproj; sourceTree = "<group>"; };
+		284DDE7F3005EBBC008C8EBA /* ChOma.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = ChOma.xcodeproj; sourceTree = "<group>"; };
 		AA73F7982F7BC6CB00134C31 /* ChOma.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = ChOma.xcodeproj; sourceTree = "<group>"; };
 		AA794BC92F828668001F0544 /* ChOma.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = ChOma.xcodeproj; sourceTree = "<group>"; };
 		AAA297772F72D439000B5902 /* Cyanide.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Cyanide.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -180,6 +181,13 @@
 			sourceTree = "<group>";
 		};
 		284DD39C3002314C008C8EBA /* Products */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		284DDEC13005EBBC008C8EBA /* Products */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -521,6 +529,10 @@
 					ProjectRef = 2810023F2FF212B6009B50CD /* ChOma.xcodeproj */;
 				},
 				{
+					ProductGroup = 284DDEC13005EBBC008C8EBA /* Products */;
+					ProjectRef = 284DDE7F3005EBBC008C8EBA /* ChOma.xcodeproj */;
+				},
+				{
 					ProductGroup = 282DA5422FF50C2200FF312A /* Products */;
 					ProjectRef = 282DA5062FF50C2200FF312A /* ChOma.xcodeproj */;
 				},
@@ -561,12 +573,12 @@
 					ProjectRef = FB5948FE2FC0DFEA006FB8AE /* ChOma.xcodeproj */;
 				},
 				{
-					ProductGroup = FBA376492FB7FE5600886898 /* Products */;
-					ProjectRef = FBA376182FB7FE5600886898 /* ChOma.xcodeproj */;
-				},
-				{
 					ProductGroup = AA73F7C72F7BC6CB00134C31 /* Products */;
 					ProjectRef = AA73F7982F7BC6CB00134C31 /* ChOma.xcodeproj */;
+				},
+				{
+					ProductGroup = FBA376492FB7FE5600886898 /* Products */;
+					ProjectRef = FBA376182FB7FE5600886898 /* ChOma.xcodeproj */;
 				},
 				{
 					ProductGroup = FB41176B2FB9597C00461945 /* Products */;

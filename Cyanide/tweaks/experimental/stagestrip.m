@@ -151,6 +151,9 @@ static StripFloatSlot gStripFloatSlots[kStripMaxFloatSlots] = {{0}};
 #define gStripReferenceView  (gStripFloatSlots[0].referenceView)
 static uint64_t gStripControlDrawer  = 0;
 static uint64_t gStripPickerOverlayWin = 0;     // Full-screen overlay UIWindow for the picker.
+static uint64_t gStripLauncherWindow = 0;       // MilkyWay Lite draggable picker launcher.
+static uint64_t gStripLauncherView   = 0;
+static uint64_t gStripLauncherPan    = 0;
 static uint64_t gStripTransitionShieldWin = 0;  // Brief dimmer below floats to mask app transitions.
 static uint64_t gStripPickerPanel    = 0;       // Picker panel view. -tag carries the command code.
 static uint64_t gStripPickerTopLabel = 0;       // Hidden label storing chosen top bundle id.
@@ -166,6 +169,7 @@ static uint64_t gStripPickerSearchField = 0;
 static volatile int gStripPickerNextSlot = 0;   // 0 = next tap fills top, 1 = next tap fills bottom.
 static volatile int gStripRuntimeMaxSlots = 4;
 static volatile int gStripRuntimeMilkyWayLite = 0;
+static bool gStripMWLiteControlBarBottom = false;
 static char     gStripRuntimePreselectedAppsPath[512] = {0};
 static volatile double gStripNextWindowLevel = kStripWindowLevel;
 static uint64_t gStripRows[kStripMaxFloatSlots]        = {0};
@@ -206,6 +210,7 @@ enum {
     kStripPickerCmdSelectBot= 8,    // User tapped the bottom chip card → make bottom the next slot.
     kStripPickerCmdRespring = 9,    // Gear icon → respring SpringBoard.
     kStripPickerCmdShow     = 10,   // Stage/hot-corner swipe -> reveal picker.
+    kStripPickerCmdSearchChanged = 11,
 };
 
 typedef struct {
@@ -3235,6 +3240,53 @@ static bool stagestrip_get_screen_size(double *outW, double *outH)
     return true;
 }
 
+static bool stagestrip_load_launcher_position(double screenW,
+                                               double screenH,
+                                               double width,
+                                               double height,
+                                               StripRect *outFrame)
+{
+    if (!outFrame) return false;
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    if (![defaults boolForKey:@"MWLiteLauncherPositionSaved"]) return false;
+
+    double fraction = [defaults doubleForKey:@"MWLiteLauncherYFraction"];
+    if (!isfinite(fraction)) return false;
+    if (fraction < 0.0) fraction = 0.0;
+    if (fraction > 1.0) fraction = 1.0;
+
+    double minY = 50.0;
+    double maxY = screenH - height - 34.0;
+    if (maxY < minY) maxY = minY;
+    bool left = [defaults boolForKey:@"MWLiteLauncherOnLeft"];
+    *outFrame = (StripRect){
+        left ? 6.0 : screenW - width - 6.0,
+        minY + (maxY - minY) * fraction,
+        width,
+        height,
+    };
+    return true;
+}
+
+static void stagestrip_save_launcher_position(StripRect frame,
+                                              double screenW,
+                                              double screenH)
+{
+    double minY = 50.0;
+    double maxY = screenH - frame.height - 34.0;
+    if (maxY < minY) maxY = minY;
+    double fraction = maxY > minY ? (frame.y - minY) / (maxY - minY) : 0.0;
+    if (fraction < 0.0) fraction = 0.0;
+    if (fraction > 1.0) fraction = 1.0;
+
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    [defaults setBool:(frame.x + frame.width * 0.5 < screenW * 0.5)
+                forKey:@"MWLiteLauncherOnLeft"];
+    [defaults setDouble:fraction forKey:@"MWLiteLauncherYFraction"];
+    [defaults setBool:YES forKey:@"MWLiteLauncherPositionSaved"];
+    [defaults synchronize];
+}
+
 static double stagestrip_content_border_inset(void)
 {
     return (gStripRuntimeMilkyWayLite) ? 0.0 : kStripBorderInset;
@@ -3243,6 +3295,20 @@ static double stagestrip_content_border_inset(void)
 static double stagestrip_content_title_height(void)
 {
     return (gStripRuntimeMilkyWayLite) ? 34.0 : 0.0;
+}
+
+static double stagestrip_content_origin_y(void)
+{
+    double bi = stagestrip_content_border_inset();
+    if (gStripRuntimeMilkyWayLite && !gStripMWLiteControlBarBottom)
+        return bi + stagestrip_content_title_height();
+    return bi;
+}
+
+static double stagestrip_mwlite_control_bar_y(double windowHeight)
+{
+    double titleH = stagestrip_content_title_height();
+    return gStripMWLiteControlBarBottom ? windowHeight - titleH : 0.0;
 }
 
 static double stagestrip_mwlite_content_aspect(void)
@@ -3331,15 +3397,16 @@ static void stagestrip_resize_host_view_frame(uint64_t view, double w, double h)
     if (!r_is_objc_ptr(view)) return;
     double bi = stagestrip_content_border_inset();
     double titleH = stagestrip_content_title_height();
+    double contentY = stagestrip_content_origin_y();
     double iw = w - 2.0 * bi;
     double ih = h - 2.0 * bi - titleH;
     if (iw < 80.0) iw = 80.0;
     if (ih < 80.0) ih = 80.0;
     if (gStripRuntimeMilkyWayLite) {
-        stagestrip_apply_mwlite_scaled_host_geometry(view, bi, bi + titleH, iw, ih);
+        stagestrip_apply_mwlite_scaled_host_geometry(view, bi, contentY, iw, ih);
     } else {
         stagestrip_set_transform_thread(view, CGAffineTransformIdentity);
-        stagestrip_set_frame_thread(view, (StripRect){ bi, bi + titleH, iw, ih });
+        stagestrip_set_frame_thread(view, (StripRect){ bi, contentY, iw, ih });
         stagestrip_set_bounds_thread(view, (StripRect){ 0.0, 0.0, iw, ih });
     }
 }
@@ -3354,12 +3421,13 @@ static uint64_t stagestrip_resize_host_view_commit_for_slot(int slot,
 
     double bi = stagestrip_content_border_inset();
     double titleH = stagestrip_content_title_height();
+    double contentY = stagestrip_content_origin_y();
     double iw = w - 2.0 * bi;
     double ih = h - 2.0 * bi - titleH;
     if (iw < 80.0) iw = 80.0;
     if (ih < 80.0) ih = 80.0;
     if (gStripRuntimeMilkyWayLite) {
-        stagestrip_apply_mwlite_scaled_host_geometry(view, bi, bi + titleH, iw, ih);
+        stagestrip_apply_mwlite_scaled_host_geometry(view, bi, contentY, iw, ih);
     } else {
         stagestrip_refresh_host_view_geometry(view, iw, ih);
     }
@@ -3390,10 +3458,10 @@ static uint64_t stagestrip_resize_host_view_commit_for_slot(int slot,
     if (!r_is_objc_ptr(fresh) || fresh == view) return view;
 
     if (gStripRuntimeMilkyWayLite) {
-        stagestrip_apply_mwlite_scaled_host_geometry(fresh, bi, bi + titleH, iw, ih);
+        stagestrip_apply_mwlite_scaled_host_geometry(fresh, bi, contentY, iw, ih);
     } else {
         stagestrip_set_transform_thread(fresh, CGAffineTransformIdentity);
-        stagestrip_set_frame_thread(fresh, (StripRect){ bi, bi + titleH, iw, ih });
+        stagestrip_set_frame_thread(fresh, (StripRect){ bi, contentY, iw, ih });
         stagestrip_set_bounds_thread(fresh, (StripRect){ 0.0, 0.0, iw, ih });
     }
     r_msg2_main(fresh, "setAutoresizingMask:", 2 | 16, 0, 0, 0);
@@ -3403,7 +3471,7 @@ static uint64_t stagestrip_resize_host_view_commit_for_slot(int slot,
     if (r_is_objc_ptr(freshLayer))
         stagestrip_send_double(freshLayer, "setCornerRadius:", kStripCornerRadius - bi);
     if (gStripRuntimeMilkyWayLite) {
-        stagestrip_apply_mwlite_scaled_host_geometry(fresh, bi, bi + titleH, iw, ih);
+        stagestrip_apply_mwlite_scaled_host_geometry(fresh, bi, contentY, iw, ih);
     } else {
         stagestrip_refresh_host_view_geometry(fresh, iw, ih);
     }
@@ -3706,6 +3774,9 @@ static void stagestrip_show_picker_overlay_animated(void)
     uint64_t panel = gStripPickerPanel;
     bool wasHidden = stagestrip_view_is_hidden(overlay);
 
+    if (gStripRuntimeMilkyWayLite && r_is_objc_ptr(gStripLauncherWindow))
+        r_msg2_main(gStripLauncherWindow, "setHidden:", 1, 0, 0, 0);
+
     if (r_responds(overlay, "setUserInteractionEnabled:"))
         r_msg2_main(overlay, "setUserInteractionEnabled:", 1, 0, 0, 0);
     if (wasHidden) {
@@ -3734,6 +3805,10 @@ static void stagestrip_hide_picker_overlay_animated(void)
     if (!r_is_objc_ptr(overlay)) return;
     uint64_t panel = gStripPickerPanel;
 
+    if (r_is_objc_ptr(gStripPickerSearchField))
+        r_msg2_main_async(gStripPickerSearchField,
+                          "resignFirstResponder", 0, 0, 0, 0);
+
     if (r_responds(overlay, "setUserInteractionEnabled:"))
         r_msg2_main(overlay, "setUserInteractionEnabled:", 0, 0, 0, 0);
     stagestrip_animation_begin(0.18);
@@ -3746,6 +3821,11 @@ static void stagestrip_hide_picker_overlay_animated(void)
     stagestrip_schedule_invocation(overlay,
         stagestrip_make_bool_invocation(overlay, "setHidden:", true),
         0.21);
+    if (gStripRuntimeMilkyWayLite &&
+        !stagestrip_screen_inactive() &&
+        r_is_objc_ptr(gStripLauncherWindow)) {
+        r_msg2_main(gStripLauncherWindow, "setHidden:", 0, 0, 0, 0);
+    }
     printf("[STAGE] picker: hiding animated overlay=0x%llx panel=0x%llx\n",
            overlay, panel);
 }
@@ -4291,7 +4371,7 @@ static void stagestrip_install_stage_picker_swipe_slot(int slot)
            slot, S->window, swipeGR, panel);
 }
 
-static void stagestrip_install_mwlite_titlebar(uint64_t win, double w)
+static void stagestrip_install_mwlite_titlebar(uint64_t win, double w, double h)
 {
     if (!r_is_objc_ptr(win) || !gStripRuntimeMilkyWayLite) return;
 
@@ -4301,7 +4381,8 @@ static void stagestrip_install_mwlite_titlebar(uint64_t win, double w)
                        win, key, 0, 0, 0, 0, 0, 0)
         : 0;
     if (r_is_objc_ptr(existing)) {
-        stagestrip_set_frame_fast(existing, (StripRect){ 0.0, 0.0, w, 34.0 });
+        stagestrip_set_frame_fast(existing,
+                                  (StripRect){ 0.0, stagestrip_mwlite_control_bar_y(h), w, 34.0 });
         r_msg2_main(win, "bringSubviewToFront:", existing, 0, 0, 0);
         return;
     }
@@ -4310,7 +4391,8 @@ static void stagestrip_install_mwlite_titlebar(uint64_t win, double w)
     uint64_t alloc = r_is_objc_ptr(UIView) ? r_msg2_main(UIView, "alloc", 0, 0, 0, 0) : 0;
     uint64_t bar = r_is_objc_ptr(alloc) ? r_msg2_main(alloc, "init", 0, 0, 0, 0) : 0;
     if (!r_is_objc_ptr(bar)) return;
-    stagestrip_set_frame_fast(bar, (StripRect){ 0.0, 0.0, w, 34.0 });
+    stagestrip_set_frame_fast(bar,
+                              (StripRect){ 0.0, stagestrip_mwlite_control_bar_y(h), w, 34.0 });
     r_msg2_main(bar, "setUserInteractionEnabled:", 0, 0, 0, 0);
     r_msg2_main(bar, "setAutoresizingMask:", 1 | 2 | 4, 0, 0, 0);
     stagestrip_set_background_white(bar, 0.08, 0.68);
@@ -4357,13 +4439,19 @@ static void stagestrip_layout_mwlite_chrome_slot(StripFloatSlot *S, double w, do
                        S->window, key, 0, 0, 0, 0, 0, 0)
         : 0;
     if (r_is_objc_ptr(bar)) {
-        stagestrip_set_frame_fast(bar, (StripRect){ 0.0, 0.0, w, stagestrip_content_title_height() });
+        stagestrip_set_frame_fast(bar,
+                                  (StripRect){ 0.0,
+                                               stagestrip_mwlite_control_bar_y(h),
+                                               w,
+                                               stagestrip_content_title_height() });
         r_msg2_main(S->window, "bringSubviewToFront:", bar, 0, 0, 0);
     }
 
+    double barY = stagestrip_mwlite_control_bar_y(h);
+
     if (r_is_objc_ptr(S->closeButton)) {
         double d = 14.0;
-        stagestrip_set_frame_fast(S->closeButton, (StripRect){ 12.0, 10.0, d, d });
+        stagestrip_set_frame_fast(S->closeButton, (StripRect){ 12.0, barY + 10.0, d, d });
         stagestrip_set_transform_thread(S->closeButton, CGAffineTransformIdentity);
         uint64_t layer = r_msg2_main(S->closeButton, "layer", 0, 0, 0, 0);
         if (r_is_objc_ptr(layer)) {
@@ -4376,7 +4464,8 @@ static void stagestrip_layout_mwlite_chrome_slot(StripFloatSlot *S, double w, do
     if (r_is_objc_ptr(S->moveHandle)) {
         double moveW = w - 72.0;
         if (moveW < 84.0) moveW = 84.0;
-        stagestrip_set_frame_fast(S->moveHandle, (StripRect){ (w - moveW) / 2.0, 0.0, moveW, 34.0 });
+        stagestrip_set_frame_fast(S->moveHandle,
+                                  (StripRect){ (w - moveW) / 2.0, barY, moveW, 34.0 });
         stagestrip_set_background_white(S->moveHandle, 0.0, 0.0);
         r_msg2_main(S->window, "bringSubviewToFront:", S->moveHandle, 0, 0, 0);
     }
@@ -4717,6 +4806,7 @@ static void stagestrip_raise_slot_window(int slot)
 static void stagestrip_picker_apply_search_filter(void)
 {
     if (!gStripRuntimeMilkyWayLite || !r_is_objc_ptr(gStripPickerSearchField)) return;
+
     uint64_t textObj = r_msg2_main(gStripPickerSearchField, "text", 0, 0, 0, 0);
     char query[96] = {0};
     if (r_is_objc_ptr(textObj))
@@ -5318,6 +5408,12 @@ void stagestrip_set_mwlite_preselected_apps_path(const char *path)
            gStripRuntimePreselectedAppsPath[0] ? gStripRuntimePreselectedAppsPath : "<none>");
 }
 
+void stagestrip_set_mwlite_control_bar_bottom(bool bottom)
+{
+    gStripMWLiteControlBarBottom = bottom;
+    printf("[STAGE] mwlite: control bar=%s\n", bottom ? "bottom" : "top");
+}
+
 static void stagestrip_schedule_library_tile_build(uint64_t scrollView,
                                                     char (*libBids)[128],
                                                     char (*libNames)[96],
@@ -5575,13 +5671,70 @@ static uint64_t stagestrip_install_picker_overlay(uint64_t app,
             stagestrip_set_frame_fast(tf, (StripRect){ 14.0, 52.0, panelW - 28.0, 36.0 });
             stagestrip_set_background_white(tf, 1.0, 0.10);
             r_msg2_main(tf, "setUserInteractionEnabled:", 1, 0, 0, 0);
+            if (r_responds(tf, "setKeyboardAppearance:"))
+                r_msg2_main(tf, "setKeyboardAppearance:", 1 /* dark */, 0, 0, 0);
+            if (r_responds(tf, "setReturnKeyType:"))
+                r_msg2_main(tf, "setReturnKeyType:", 6 /* search */, 0, 0, 0);
             if (r_responds(tf, "setBorderStyle:"))
                 r_msg2_main(tf, "setBorderStyle:", 1, 0, 0, 0);
             if (r_responds(tf, "setClearButtonMode:"))
                 r_msg2_main(tf, "setClearButtonMode:", 1, 0, 0, 0);
+
+            uint64_t UIColor = r_class("UIColor");
+            uint64_t white = r_is_objc_ptr(UIColor) && r_responds(UIColor, "whiteColor")
+                ? r_msg2_main(UIColor, "whiteColor", 0, 0, 0, 0)
+                : 0;
+            if (r_is_objc_ptr(white)) {
+                r_msg2_main(tf, "setTextColor:", white, 0, 0, 0);
+                r_msg2_main(tf, "setTintColor:", white, 0, 0, 0);
+            }
+
+            uint64_t UIFont = r_class("UIFont");
+            double fontSize = 15.0;
+            uint64_t font = r_is_objc_ptr(UIFont)
+                ? r_msg2_main_raw(UIFont, "systemFontOfSize:",
+                                  &fontSize, sizeof(fontSize),
+                                  NULL, 0, NULL, 0, NULL, 0)
+                : 0;
+            if (r_is_objc_ptr(font))
+                r_msg2_main(tf, "setFont:", font, 0, 0, 0);
+
             uint64_t placeholder = r_nsstr_retained(searchPlaceholder);
             if (r_is_objc_ptr(placeholder)) {
-                r_msg2_main(tf, "setPlaceholder:", placeholder, 0, 0, 0);
+                double placeholderWhite = 1.0;
+                double placeholderAlpha = 0.55;
+                uint64_t placeholderColor = r_is_objc_ptr(UIColor)
+                    ? r_msg2_main_raw(UIColor, "colorWithWhite:alpha:",
+                                      &placeholderWhite, sizeof(placeholderWhite),
+                                      &placeholderAlpha, sizeof(placeholderAlpha),
+                                      NULL, 0, NULL, 0)
+                    : 0;
+                uint64_t colorKey = r_nsstr_retained("NSColor");
+                uint64_t NSDictionary = r_class("NSDictionary");
+                uint64_t attrs = (r_is_objc_ptr(NSDictionary) &&
+                                  r_is_objc_ptr(placeholderColor) &&
+                                  r_is_objc_ptr(colorKey))
+                    ? r_msg2_main(NSDictionary, "dictionaryWithObject:forKey:",
+                                  placeholderColor, colorKey, 0, 0)
+                    : 0;
+                uint64_t NSAttributedString = r_class("NSAttributedString");
+                uint64_t attrAlloc = r_is_objc_ptr(NSAttributedString)
+                    ? r_msg2_main(NSAttributedString, "alloc", 0, 0, 0, 0)
+                    : 0;
+                uint64_t attributedPlaceholder =
+                    (r_is_objc_ptr(attrAlloc) && r_is_objc_ptr(attrs))
+                        ? r_msg2_main(attrAlloc, "initWithString:attributes:",
+                                      placeholder, attrs, 0, 0)
+                        : 0;
+                if (r_is_objc_ptr(attributedPlaceholder)) {
+                    r_msg2_main(tf, "setAttributedPlaceholder:",
+                                attributedPlaceholder, 0, 0, 0);
+                    r_msg2_main(attributedPlaceholder, "release", 0, 0, 0, 0);
+                } else {
+                    r_msg2_main(tf, "setPlaceholder:", placeholder, 0, 0, 0);
+                }
+                if (r_is_objc_ptr(colorKey))
+                    r_msg2_main(colorKey, "release", 0, 0, 0, 0);
                 r_msg2_main(placeholder, "release", 0, 0, 0, 0);
             }
             uint64_t layer = r_msg2_main(tf, "layer", 0, 0, 0, 0);
@@ -5591,6 +5744,25 @@ static uint64_t stagestrip_install_picker_overlay(uint64_t app,
                 r_msg2_main(layer, "setMasksToBounds:", 1, 0, 0, 0);
             }
             r_msg2_main(panel, "addSubview:", tf, 0, 0, 0);
+            uint64_t searchInv = stagestrip_make_int_invocation(panel,
+                                                                 "setTag:",
+                                                                 kStripPickerCmdSearchChanged);
+            uint64_t invokeSel = r_sel("invoke");
+            if (r_is_objc_ptr(searchInv) && invokeSel) {
+                r_msg2_main(tf, "addTarget:action:forControlEvents:",
+                            searchInv, invokeSel,
+                            1ULL << 17 /* UIControlEventEditingChanged */, 0);
+                stagestrip_retain_action_target(tf, searchInv);
+            }
+            uint64_t resignInv = stagestrip_make_invocation(tf,
+                                                             "resignFirstResponder",
+                                                             NULL, 0);
+            if (r_is_objc_ptr(resignInv) && invokeSel) {
+                r_msg2_main(tf, "addTarget:action:forControlEvents:",
+                            resignInv, invokeSel,
+                            1ULL << 19 /* UIControlEventEditingDidEndOnExit */, 0);
+                stagestrip_retain_action_target(tf, resignInv);
+            }
             gStripPickerSearchField = tf;
             controlsBottomY = 98.0;
         }
@@ -5854,6 +6026,8 @@ static uint64_t stagestrip_install_picker_overlay(uint64_t app,
         r_msg2_main(scrollView, "setShowsHorizontalScrollIndicator:", 0, 0, 0, 0);
         r_msg2_main(scrollView, "setClipsToBounds:", 1, 0, 0, 0);
         r_msg2_main(scrollView, "setAlwaysBounceVertical:", 1, 0, 0, 0);
+        if (r_responds(scrollView, "setKeyboardDismissMode:"))
+            r_msg2_main(scrollView, "setKeyboardDismissMode:", 1 /* on drag */, 0, 0, 0);
 
         // Reserve scroll-view content size up-front so the user can scroll
         // even while tiles are still being inserted.
@@ -5948,8 +6122,9 @@ static uint64_t stagestrip_install_picker_overlay(uint64_t app,
     return overlayWin;
 }
 
-// Small bottom-right summon handle. Swipe-up or tap reveals the picker
-// overlay window. Replaces the older fat 92x118 hot-corner panel.
+// Dynamic Stage keeps the small bottom-right summon handle. MilkyWay Lite uses
+// a larger AssistiveTouch-style launcher whose pan is polled by Cyanide's
+// control loop; RemoteCall cannot install a new in-process handlePan: IMP.
 static void stagestrip_install_hot_corner_window(uint64_t app,
                                                  uint64_t scene,
                                                  uint64_t pickerOverlayWin,
@@ -5958,16 +6133,29 @@ static void stagestrip_install_hot_corner_window(uint64_t app,
 {
     if (!r_is_objc_ptr(app) || !r_is_objc_ptr(scene) || !r_is_objc_ptr(pickerOverlayWin)) return;
 
+    bool mwLauncher = gStripRuntimeMilkyWayLite != 0;
     uint64_t assocKey = r_sel("cyanideStageStripHotCornerWindow");
     if (!assocKey) return;
 
+    StripRect previousFrame = {0};
+    bool havePreviousFrame = false;
     uint64_t old = r_dlsym_call(R_TIMEOUT, "objc_getAssociatedObject",
                                 app, assocKey, 0, 0, 0, 0, 0, 0);
     if (r_is_objc_ptr(old)) {
+        if (mwLauncher)
+            havePreviousFrame = stagestrip_get_frame_thread(old, &previousFrame);
         r_msg2_main(old, "setHidden:", 1, 0, 0, 0);
         r_dlsym_call(R_TIMEOUT, "objc_setAssociatedObject",
                      app, assocKey, 0, 1 /* RETAIN_NONATOMIC */, 0, 0, 0, 0);
     }
+    if (havePreviousFrame &&
+        (previousFrame.width < 40.0 || previousFrame.width > 90.0 ||
+         previousFrame.height < 40.0 || previousFrame.height > 90.0)) {
+        havePreviousFrame = false;
+    }
+    gStripLauncherWindow = 0;
+    gStripLauncherView = 0;
+    gStripLauncherPan = 0;
 
     uint64_t UIWindow = r_class("UIWindow");
     uint64_t alloc = r_is_objc_ptr(UIWindow)
@@ -5979,9 +6167,30 @@ static void stagestrip_install_hot_corner_window(uint64_t app,
         return;
     }
 
-    double hotW = 56.0;
-    double hotH = 56.0;
-    stagestrip_set_frame_fast(hotWin, (StripRect){ sw - hotW - 6.0, sh - hotH - 8.0, hotW, hotH });
+    double hotW = mwLauncher ? 58.0 : 56.0;
+    double hotH = hotW;
+    double hotX = sw - hotW - 6.0;
+    double hotY = mwLauncher ? sh * 0.62 : sh - hotH - 8.0;
+    if (mwLauncher && !havePreviousFrame) {
+        havePreviousFrame = stagestrip_load_launcher_position(sw,
+                                                              sh,
+                                                              hotW,
+                                                              hotH,
+                                                              &previousFrame);
+        if (havePreviousFrame) {
+            printf("[STAGE] launcher: restored saved position=(%.0f,%.0f)\n",
+                   previousFrame.x, previousFrame.y);
+        }
+    }
+    if (havePreviousFrame) {
+        hotX = previousFrame.x;
+        hotY = previousFrame.y;
+    }
+    if (hotX < 6.0) hotX = 6.0;
+    if (hotX > sw - hotW - 6.0) hotX = sw - hotW - 6.0;
+    if (hotY < 50.0) hotY = 50.0;
+    if (hotY > sh - hotH - 34.0) hotY = sh - hotH - 34.0;
+    stagestrip_set_frame_fast(hotWin, (StripRect){ hotX, hotY, hotW, hotH });
     stagestrip_send_double(hotWin, "setWindowLevel:", kStripWindowLevel + 1.0);
     stagestrip_set_background_white(hotWin, 0.0, 0.0);
     if (r_responds(hotWin, "setOpaque:"))
@@ -6000,46 +6209,132 @@ static void stagestrip_install_hot_corner_window(uint64_t app,
         stagestrip_set_background_white(hot, 0.0, 0.0);
         r_msg2_main(hotWin, "addSubview:", hot, 0, 0, 0);
 
-        // Visible pill — small, low-alpha dot at the centre. Less intrusive
-        // than the previous 30x4 pill at the bottom of a fat panel.
-        // Hot-corner indicator — needs to be discoverable now that install
-        // doesn't show a float window. Small but visible: 20pt dot on a
-        // softly-tinted backing, with a tiny "chevron" hint above.
-        double dotSide = 20.0;
-        uint64_t dotAlloc = r_msg2_main(UIView, "alloc", 0, 0, 0, 0);
-        uint64_t dot = r_is_objc_ptr(dotAlloc)
-            ? r_msg2_main(dotAlloc, "init", 0, 0, 0, 0) : 0;
-        if (r_is_objc_ptr(dot)) {
-            stagestrip_set_frame_fast(dot, (StripRect){ (hotW - dotSide) / 2.0,
-                                                        (hotH - dotSide) / 2.0,
-                                                        dotSide, dotSide });
-            r_msg2_main(dot, "setUserInteractionEnabled:", 0, 0, 0, 0);
-            stagestrip_set_background_white(dot, 1.0, 0.42);
-            uint64_t layer = r_msg2_main(dot, "layer", 0, 0, 0, 0);
+        if (mwLauncher) {
+            uint64_t layer = r_msg2_main(hot, "layer", 0, 0, 0, 0);
             if (r_is_objc_ptr(layer)) {
-                stagestrip_send_double(layer, "setCornerRadius:", dotSide / 2.0);
-                r_msg2_main(layer, "setMasksToBounds:", 1, 0, 0, 0);
+                stagestrip_send_double(layer, "setCornerRadius:", hotW / 2.0);
+                stagestrip_set_layer_border_white(hot, 1.0, 0.32, 0.7);
+                uint64_t UIColor = r_class("UIColor");
+                uint64_t black = r_is_objc_ptr(UIColor)
+                    ? r_msg2_main(UIColor, "blackColor", 0, 0, 0, 0) : 0;
+                uint64_t blackCG = r_is_objc_ptr(black)
+                    ? r_msg2_main(black, "CGColor", 0, 0, 0, 0) : 0;
+                if (blackCG) r_msg2_main(layer, "setShadowColor:", blackCG, 0, 0, 0);
+                stagestrip_send_double(layer, "setShadowOpacity:", 0.28);
+                stagestrip_send_double(layer, "setShadowRadius:", 10.0);
+                CGSize shadowOffset = { 0.0, 4.0 };
+                r_msg2_main_raw(layer, "setShadowOffset:",
+                                &shadowOffset, sizeof(shadowOffset),
+                                NULL, 0, NULL, 0, NULL, 0);
             }
-            r_msg2_main(hot, "addSubview:", dot, 0, 0, 0);
+
+            uint64_t UIBlurEffect = r_class("UIBlurEffect");
+            uint64_t effect = r_is_objc_ptr(UIBlurEffect)
+                ? r_msg2_main(UIBlurEffect, "effectWithStyle:", 2 /* dark */, 0, 0, 0) : 0;
+            uint64_t UIVisualEffectView = r_class("UIVisualEffectView");
+            uint64_t blurAlloc = r_is_objc_ptr(UIVisualEffectView)
+                ? r_msg2_main(UIVisualEffectView, "alloc", 0, 0, 0, 0) : 0;
+            uint64_t blur = r_is_objc_ptr(blurAlloc) && r_is_objc_ptr(effect)
+                ? r_msg2_main(blurAlloc, "initWithEffect:", effect, 0, 0, 0) : 0;
+            if (r_is_objc_ptr(blur)) {
+                stagestrip_set_frame_fast(blur, (StripRect){ 0.0, 0.0, hotW, hotH });
+                r_msg2_main(blur, "setUserInteractionEnabled:", 0, 0, 0, 0);
+                stagestrip_send_double(blur, "setAlpha:", 0.90);
+                uint64_t blurLayer = r_msg2_main(blur, "layer", 0, 0, 0, 0);
+                if (r_is_objc_ptr(blurLayer)) {
+                    stagestrip_send_double(blurLayer, "setCornerRadius:", hotW / 2.0);
+                    r_msg2_main(blurLayer, "setMasksToBounds:", 1, 0, 0, 0);
+                }
+                r_msg2_main(hot, "addSubview:", blur, 0, 0, 0);
+            } else {
+                stagestrip_set_background_white(hot, 0.08, 0.88);
+            }
+
+            uint64_t UIImage = r_class("UIImage");
+            uint64_t symbolName = r_nsstr_retained("square.grid.2x2.fill");
+            uint64_t image = r_is_objc_ptr(UIImage) && r_is_objc_ptr(symbolName) &&
+                             r_responds(UIImage, "systemImageNamed:")
+                ? r_msg2_main(UIImage, "systemImageNamed:", symbolName, 0, 0, 0) : 0;
+            if (r_is_objc_ptr(symbolName))
+                r_msg2_main(symbolName, "release", 0, 0, 0, 0);
+            uint64_t UIImageView = r_class("UIImageView");
+            uint64_t imageAlloc = r_is_objc_ptr(UIImageView)
+                ? r_msg2_main(UIImageView, "alloc", 0, 0, 0, 0) : 0;
+            uint64_t imageView = r_is_objc_ptr(imageAlloc) && r_is_objc_ptr(image)
+                ? r_msg2_main(imageAlloc, "initWithImage:", image, 0, 0, 0) : 0;
+            if (r_is_objc_ptr(imageView)) {
+                stagestrip_set_frame_fast(imageView, (StripRect){ 16.0, 16.0, hotW - 32.0, hotH - 32.0 });
+                r_msg2_main(imageView, "setUserInteractionEnabled:", 0, 0, 0, 0);
+                if (r_responds(imageView, "setContentMode:"))
+                    r_msg2_main(imageView, "setContentMode:", 1 /* aspect fit */, 0, 0, 0);
+                uint64_t UIColor = r_class("UIColor");
+                uint64_t white = r_is_objc_ptr(UIColor)
+                    ? r_msg2_main(UIColor, "whiteColor", 0, 0, 0, 0) : 0;
+                if (r_is_objc_ptr(white) && r_responds(imageView, "setTintColor:"))
+                    r_msg2_main(imageView, "setTintColor:", white, 0, 0, 0);
+                r_msg2_main(hot, "addSubview:", imageView, 0, 0, 0);
+            } else {
+                uint64_t fallback = stagestrip_make_text_label("MW", 0.0, 0.0, hotW, hotH);
+                if (r_is_objc_ptr(fallback)) {
+                    r_msg2_main(fallback, "setUserInteractionEnabled:", 0, 0, 0, 0);
+                    r_msg2_main(hot, "addSubview:", fallback, 0, 0, 0);
+                }
+            }
+        } else {
+            double dotSide = 20.0;
+            uint64_t dotAlloc = r_msg2_main(UIView, "alloc", 0, 0, 0, 0);
+            uint64_t dot = r_is_objc_ptr(dotAlloc)
+                ? r_msg2_main(dotAlloc, "init", 0, 0, 0, 0) : 0;
+            if (r_is_objc_ptr(dot)) {
+                stagestrip_set_frame_fast(dot, (StripRect){ (hotW - dotSide) / 2.0,
+                                                            (hotH - dotSide) / 2.0,
+                                                            dotSide, dotSide });
+                r_msg2_main(dot, "setUserInteractionEnabled:", 0, 0, 0, 0);
+                stagestrip_set_background_white(dot, 1.0, 0.42);
+                uint64_t layer = r_msg2_main(dot, "layer", 0, 0, 0, 0);
+                if (r_is_objc_ptr(layer)) {
+                    stagestrip_send_double(layer, "setCornerRadius:", dotSide / 2.0);
+                    r_msg2_main(layer, "setMasksToBounds:", 1, 0, 0, 0);
+                }
+                r_msg2_main(hot, "addSubview:", dot, 0, 0, 0);
+            }
         }
 
-        // Ask the control loop to show the picker, so tap/swipe uses the same
-        // animated path as the stage-window swipe.
         uint64_t showInv = r_is_objc_ptr(gStripPickerPanel)
             ? stagestrip_make_int_invocation(gStripPickerPanel, "setTag:", kStripPickerCmdShow)
             : stagestrip_make_bool_invocation(pickerOverlayWin, "setHidden:", false);
         uint64_t invokeSel = r_sel("invoke");
 
-        uint64_t UISwipe = r_class("UISwipeGestureRecognizer");
-        uint64_t swipeAlloc = r_is_objc_ptr(UISwipe)
-            ? r_msg2_main(UISwipe, "alloc", 0, 0, 0, 0) : 0;
-        uint64_t swipeGR = r_is_objc_ptr(swipeAlloc) && r_is_objc_ptr(showInv) && invokeSel
-            ? r_msg2_main(swipeAlloc, "initWithTarget:action:", showInv, invokeSel, 0, 0) : 0;
-        if (r_is_objc_ptr(swipeGR)) {
-            r_msg2_main(swipeGR, "setDirection:", 4 /* swipe up */, 0, 0, 0);
-            if (r_responds(swipeGR, "setCancelsTouchesInView:"))
-                r_msg2_main(swipeGR, "setCancelsTouchesInView:", 1, 0, 0, 0);
-            r_msg2_main(hot, "addGestureRecognizer:", swipeGR, 0, 0, 0);
+        uint64_t panGR = 0;
+        if (mwLauncher) {
+            uint64_t noopInv = stagestrip_make_invocation(hot, "setNeedsLayout", NULL, 0);
+            uint64_t UIPan = r_class("UIPanGestureRecognizer");
+            uint64_t panAlloc = r_is_objc_ptr(UIPan)
+                ? r_msg2_main(UIPan, "alloc", 0, 0, 0, 0) : 0;
+            panGR = r_is_objc_ptr(panAlloc) && r_is_objc_ptr(noopInv) && invokeSel
+                ? r_msg2_main(panAlloc, "initWithTarget:action:", noopInv, invokeSel, 0, 0) : 0;
+            if (r_is_objc_ptr(panGR)) {
+                if (r_responds(panGR, "setMaximumNumberOfTouches:"))
+                    r_msg2_main(panGR, "setMaximumNumberOfTouches:", 1, 0, 0, 0);
+                if (r_responds(panGR, "setCancelsTouchesInView:"))
+                    r_msg2_main(panGR, "setCancelsTouchesInView:", 1, 0, 0, 0);
+                r_msg2_main(hot, "addGestureRecognizer:", panGR, 0, 0, 0);
+                stagestrip_retain_action_target(hot, noopInv);
+            }
+        }
+
+        if (!mwLauncher) {
+            uint64_t UISwipe = r_class("UISwipeGestureRecognizer");
+            uint64_t swipeAlloc = r_is_objc_ptr(UISwipe)
+                ? r_msg2_main(UISwipe, "alloc", 0, 0, 0, 0) : 0;
+            uint64_t swipeGR = r_is_objc_ptr(swipeAlloc) && r_is_objc_ptr(showInv) && invokeSel
+                ? r_msg2_main(swipeAlloc, "initWithTarget:action:", showInv, invokeSel, 0, 0) : 0;
+            if (r_is_objc_ptr(swipeGR)) {
+                r_msg2_main(swipeGR, "setDirection:", 4 /* swipe up */, 0, 0, 0);
+                if (r_responds(swipeGR, "setCancelsTouchesInView:"))
+                    r_msg2_main(swipeGR, "setCancelsTouchesInView:", 1, 0, 0, 0);
+                r_msg2_main(hot, "addGestureRecognizer:", swipeGR, 0, 0, 0);
+            }
         }
 
         uint64_t UITap = r_class("UITapGestureRecognizer");
@@ -6051,18 +6346,28 @@ static void stagestrip_install_hot_corner_window(uint64_t app,
             r_msg2_main(tapGR, "setNumberOfTapsRequired:", 1, 0, 0, 0);
             if (r_responds(tapGR, "setCancelsTouchesInView:"))
                 r_msg2_main(tapGR, "setCancelsTouchesInView:", 1, 0, 0, 0);
+            if (r_is_objc_ptr(panGR) && r_responds(tapGR, "requireGestureRecognizerToFail:"))
+                r_msg2_main(tapGR, "requireGestureRecognizerToFail:", panGR, 0, 0, 0);
             r_msg2_main(hot, "addGestureRecognizer:", tapGR, 0, 0, 0);
         }
 
         if (r_is_objc_ptr(showInv))
             stagestrip_retain_action_target(hot, showInv);
+
+        if (mwLauncher) {
+            gStripLauncherWindow = hotWin;
+            gStripLauncherView = hot;
+            gStripLauncherPan = panGR;
+        }
     }
 
     r_dlsym_call(R_TIMEOUT, "objc_setAssociatedObject",
                  app, assocKey, hotWin, 1 /* RETAIN_NONATOMIC */, 0, 0, 0, 0);
     r_msg2_main(hotWin, "setHidden:", 0, 0, 0, 0);
-    printf("[STAGE] hotcorner: window=0x%llx pickerOverlay=0x%llx (slim)\n",
-           hotWin, pickerOverlayWin);
+    printf("[STAGE] launcher: mode=%s window=0x%llx view=0x%llx pan=0x%llx pickerOverlay=0x%llx frame=(%.0f,%.0f %.0fx%.0f)\n",
+           mwLauncher ? "mwlite" : "dynamic-stage",
+           hotWin, gStripLauncherView, gStripLauncherPan, pickerOverlayWin,
+           hotX, hotY, hotW, hotH);
 }
 
 static bool stagestrip_mwlite_preselected_apps_changed(void)
@@ -6252,15 +6557,16 @@ static bool stagestrip_present_floating_host_for_slot(int slot,
     // zone acts as an easy-to-grab resize/move target.
     double bi = stagestrip_content_border_inset();
     double titleH = stagestrip_content_title_height();
+    double contentY = stagestrip_content_origin_y();
     double contentW = frame.width - 2.0 * bi;
     double contentH = frame.height - 2.0 * bi - titleH;
     if (contentW < 80.0) contentW = 80.0;
     if (contentH < 80.0) contentH = 80.0;
     if (gStripRuntimeMilkyWayLite) {
-        stagestrip_apply_mwlite_scaled_host_geometry(hostView, bi, bi + titleH, contentW, contentH);
+        stagestrip_apply_mwlite_scaled_host_geometry(hostView, bi, contentY, contentW, contentH);
     } else {
         stagestrip_set_transform_thread(hostView, CGAffineTransformIdentity);
-        stagestrip_send_rect(hostView, "setFrame:", bi, bi + titleH, contentW, contentH);
+        stagestrip_send_rect(hostView, "setFrame:", bi, contentY, contentW, contentH);
         stagestrip_refresh_host_view_geometry(hostView, contentW, contentH);
     }
     r_msg2_main(hostView, "setAutoresizingMask:", 2 | 16, 0, 0, 0);
@@ -6275,7 +6581,7 @@ static bool stagestrip_present_floating_host_for_slot(int slot,
     S->window = win;
     S->hostView = hostView;
     S->referenceView = r_is_objc_ptr(keyWin) ? keyWin : win;
-    stagestrip_install_mwlite_titlebar(win, frame.width);
+    stagestrip_install_mwlite_titlebar(win, frame.width, frame.height);
 
     // Picker overlay + hot corner are shared across both slots; install once.
     if (!r_is_objc_ptr(gStripPickerOverlayWin)) {
@@ -6390,6 +6696,9 @@ static bool stagestrip_dismiss_floating_host(void)
         r_dlsym_call(R_TIMEOUT, "objc_setAssociatedObject",
                      app, hotKey, 0, 1 /* RETAIN_NONATOMIC */, 0, 0, 0, 0);
     }
+    gStripLauncherWindow = 0;
+    gStripLauncherView = 0;
+    gStripLauncherPan = 0;
     uint64_t pickerKey = r_sel("cyanideStageStripPickerWindow");
     uint64_t pickerWin = pickerKey
         ? r_dlsym_call(R_TIMEOUT, "objc_getAssociatedObject",
@@ -7078,6 +7387,10 @@ static int stagestrip_poll_picker_command(void)
             stagestrip_show_picker_overlay_animated();
             return cmd;
 
+        case kStripPickerCmdSearchChanged:
+            stagestrip_picker_apply_search_filter();
+            return cmd;
+
         case kStripPickerCmdSelectTop:
         case kStripPickerCmdSelectBot: {
             int newSlot = (cmd == kStripPickerCmdSelectTop) ? 0 : 1;
@@ -7242,6 +7555,8 @@ void stagestrip_start_control_loop(void)
         StripRect lastResize[kStripMaxFloatSlots] = {{0}};
         uint64_t resizeCover[kStripMaxFloatSlots] = {0};
         int resizeRelayoutTick[kStripMaxFloatSlots] = {0};
+        bool launcherMoveActive = false;
+        StripRect launcherMoveStart = {0};
         for (int i = 0; i < kStripMaxFloatSlots; i++) activeCorner[i] = -1;
 
         bool loggedReady = false;
@@ -7254,6 +7569,10 @@ void stagestrip_start_control_loop(void)
         printf("[STAGE] control: loop started selState=0x%llx\n", selState);
         while (!gStripControlLoopStop) {
             bool havePicker = r_is_objc_ptr(gStripPickerPanel);
+            bool haveLauncher = gStripRuntimeMilkyWayLite &&
+                                r_is_objc_ptr(gStripLauncherWindow) &&
+                                r_is_objc_ptr(gStripLauncherView) &&
+                                r_is_objc_ptr(gStripLauncherPan);
             bool anyFloatAlive = false;
             for (int s = 0; s < kStripMaxFloatSlots; s++) {
                 StripFloatSlot *S = &gStripFloatSlots[s];
@@ -7264,7 +7583,7 @@ void stagestrip_start_control_loop(void)
                 }
             }
 
-            if (!anyFloatAlive && !havePicker) {
+            if (!anyFloatAlive && !havePicker && !haveLauncher) {
                 usleep(50000);
                 continue;
             }
@@ -7278,6 +7597,8 @@ void stagestrip_start_control_loop(void)
                 }
                 if (r_is_objc_ptr(gStripPickerOverlayWin))
                     r_msg2_main(gStripPickerOverlayWin, "setHidden:", 1, 0, 0, 0);
+                if (r_is_objc_ptr(gStripLauncherWindow))
+                    r_msg2_main(gStripLauncherWindow, "setHidden:", 1, 0, 0, 0);
                 wasScreenInactiveHidden = true;
                 printf("[STAGE] control: hid stage windows for lock/sleep\n");
             }
@@ -7286,6 +7607,12 @@ void stagestrip_start_control_loop(void)
                     StripFloatSlot *S = &gStripFloatSlots[s];
                     if (r_is_objc_ptr(S->window) && r_is_objc_ptr(S->hostView))
                         r_msg2_main(S->window, "setHidden:", 0, 0, 0, 0);
+                }
+                bool pickerHidden = !r_is_objc_ptr(gStripPickerOverlayWin) ||
+                                    stagestrip_view_is_hidden(gStripPickerOverlayWin);
+                if (gStripRuntimeMilkyWayLite && pickerHidden &&
+                    r_is_objc_ptr(gStripLauncherWindow)) {
+                    r_msg2_main(gStripLauncherWindow, "setHidden:", 0, 0, 0, 0);
                 }
                 wasScreenInactiveHidden = false;
                 printf("[STAGE] control: restored stage windows after unlock/wake\n");
@@ -7308,6 +7635,57 @@ void stagestrip_start_control_loop(void)
 
             bool anyActive = false;
             bool anyGestureBusy = false;
+
+            if (haveLauncher) {
+                uint64_t launcherState = r_msg(gStripLauncherPan, selState, 0, 0, 0, 0);
+                if ((launcherState == 1 || (!launcherMoveActive && launcherState == 2)) &&
+                    stagestrip_get_frame_thread(gStripLauncherWindow, &launcherMoveStart)) {
+                    launcherMoveActive = true;
+                    printf("[STAGE] launcher: move begin frame=(%.0f,%.0f %.0fx%.0f)\n",
+                           launcherMoveStart.x, launcherMoveStart.y,
+                           launcherMoveStart.width, launcherMoveStart.height);
+                }
+                if (launcherMoveActive && stagestrip_pan_state_is_active(launcherState)) {
+                    StripPoint t = {0};
+                    if (stagestrip_get_translation_thread(gStripLauncherPan,
+                                                          gStripLauncherWindow,
+                                                          &t)) {
+                        StripRect next = launcherMoveStart;
+                        next.x += t.x;
+                        next.y += t.y;
+                        if (next.x < 6.0) next.x = 6.0;
+                        if (next.x > sw - next.width - 6.0)
+                            next.x = sw - next.width - 6.0;
+                        if (next.y < 50.0) next.y = 50.0;
+                        if (next.y > sh - next.height - 34.0)
+                            next.y = sh - next.height - 34.0;
+                        stagestrip_set_frame_thread(gStripLauncherWindow, next);
+                        anyActive = true;
+                    }
+                }
+                if (launcherMoveActive && !stagestrip_pan_state_is_active(launcherState)) {
+                    StripRect current = launcherMoveStart;
+                    stagestrip_get_frame_thread(gStripLauncherWindow, &current);
+                    double leftX = 6.0;
+                    double rightX = sw - current.width - 6.0;
+                    double centerX = current.x + current.width / 2.0;
+                    current.x = centerX < sw / 2.0 ? leftX : rightX;
+                    if (current.y < 50.0) current.y = 50.0;
+                    if (current.y > sh - current.height - 34.0)
+                        current.y = sh - current.height - 34.0;
+                    stagestrip_animation_begin(0.28);
+                    stagestrip_set_frame_thread(gStripLauncherWindow, current);
+                    stagestrip_animation_commit();
+                    stagestrip_save_launcher_position(current, sw, sh);
+                    launcherMoveActive = false;
+                    printf("[STAGE] launcher: move end state=%llu snapped=(%.0f,%.0f)\n",
+                           launcherState, current.x, current.y);
+                }
+                if (launcherMoveActive || stagestrip_pan_state_is_active(launcherState))
+                    anyGestureBusy = true;
+            } else {
+                launcherMoveActive = false;
+            }
 
             // Iterate over each slot, polling its gesture state independently.
             for (int s = 0; s < kStripMaxFloatSlots; s++) {
@@ -7424,11 +7802,12 @@ void stagestrip_start_control_loop(void)
                         if (r_is_objc_ptr(cover)) {
                             double bi = stagestrip_content_border_inset();
                             double titleH = stagestrip_content_title_height();
+                            double contentY = stagestrip_content_origin_y();
                             double iw = resizeStart[s].width - 2.0 * bi;
                             double ih = resizeStart[s].height - 2.0 * bi - titleH;
                             if (iw < 80.0) iw = 80.0;
                             if (ih < 80.0) ih = 80.0;
-                            stagestrip_set_frame_thread(cover, (StripRect){ bi, bi + titleH, iw, ih });
+                            stagestrip_set_frame_thread(cover, (StripRect){ bi, contentY, iw, ih });
                             r_msg2_main(cover, "setUserInteractionEnabled:", 0, 0, 0, 0);
                             r_msg2_main(cover, "setClipsToBounds:", 1, 0, 0, 0);
                             uint64_t coverLayer = r_msg2_main(cover, "layer", 0, 0, 0, 0);
@@ -7489,12 +7868,13 @@ void stagestrip_start_control_loop(void)
                             if (r_is_objc_ptr(resizeCover[s])) {
                                 double bi = stagestrip_content_border_inset();
                                 double titleH = stagestrip_content_title_height();
+                                double contentY = stagestrip_content_origin_y();
                                 double iw = next.width - 2.0 * bi;
                                 double ih = next.height - 2.0 * bi - titleH;
                                 if (iw < 80.0) iw = 80.0;
                                 if (ih < 80.0) ih = 80.0;
                                 stagestrip_set_frame_thread(resizeCover[s],
-                                                           (StripRect){ bi, bi + titleH, iw, ih });
+                                                           (StripRect){ bi, contentY, iw, ih });
                             }
                             resizeRelayoutTick[s]++;
                             lastResize[s] = next;
@@ -7527,12 +7907,13 @@ void stagestrip_start_control_loop(void)
                     if (r_is_objc_ptr(resizeCover[s])) {
                         double bi = stagestrip_content_border_inset();
                         double titleH = stagestrip_content_title_height();
+                        double contentY = stagestrip_content_origin_y();
                         double iw = commitFrame.width - 2.0 * bi;
                         double ih = commitFrame.height - 2.0 * bi - titleH;
                         if (iw < 80.0) iw = 80.0;
                         if (ih < 80.0) ih = 80.0;
                         stagestrip_set_frame_thread(resizeCover[s],
-                                                   (StripRect){ bi, bi + titleH, iw, ih });
+                                                   (StripRect){ bi, contentY, iw, ih });
                         r_msg2_main(win, "bringSubviewToFront:", resizeCover[s], 0, 0, 0);
                         stagestrip_schedule_invocation(win,
                             stagestrip_make_double_invocation(resizeCover[s], "setAlpha:", 0.0),
@@ -7574,9 +7955,9 @@ void stagestrip_start_control_loop(void)
                 !gStripPickerApplyBusy &&
                 nowMS >= pickerBlockedUntilMS &&
                 (++pickerPollTick % 2) == 0) {
-                if (stagestrip_poll_picker_command())
+                int pickerCommand = stagestrip_poll_picker_command();
+                if (pickerCommand && pickerCommand != kStripPickerCmdSearchChanged)
                     gStripPickerCooldownUntilMS = stagestrip_now_ms() + 1000;
-                stagestrip_picker_apply_search_filter();
             }
 
             // Process one deferred library tile per tick when idle. Skipped
@@ -7648,6 +8029,9 @@ void stagestrip_forget_remote_state(void)
     memset(gStripFloatSlots, 0, sizeof(gStripFloatSlots));
     gStripControlDrawer = 0;
     gStripPickerOverlayWin = 0;
+    gStripLauncherWindow = 0;
+    gStripLauncherView = 0;
+    gStripLauncherPan = 0;
     gStripPickerPanel = 0;
     gStripPickerTopLabel = 0;
     gStripPickerBottomLabel = 0;
@@ -7663,6 +8047,7 @@ void stagestrip_forget_remote_state(void)
     gStripPickerTopBid[0] = '\0';
     gStripPickerBottomBid[0] = '\0';
     gStripRuntimeMilkyWayLite = 0;
+    gStripMWLiteControlBarBottom = false;
     gStripRuntimePreselectedAppsPath[0] = '\0';
     gStripNextWindowLevel = kStripWindowLevel;
     gStripPreselectedAppsMtime = 0;

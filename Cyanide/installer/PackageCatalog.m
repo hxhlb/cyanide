@@ -130,6 +130,8 @@ static const NSInteger kSecQuickLoader      = 27;
 static const NSInteger kSecRepoTweaks       = 28;
 static const NSInteger kSecMoodWallpaper    = 29;
 static const NSInteger kSecFloatingDock     = 30;
+static const NSInteger kSecDebugOverlay     = 31;
+static const NSInteger kSecUpsideDown       = 32;
 
 + (NSArray<Package *> *)allPackages
 {
@@ -450,6 +452,34 @@ static const NSInteger kSecFloatingDock     = 30;
             @"Page swipes, folder opens, or SpringBoard relayouts may stop the effect. Run Gravity again.",
         ];
 
+        Package *debugOverlay = [[Package alloc] initWithIdentifier:@"com.darksword.debugoverlay"
+                                           name:NSLocalizedString(@"UIKit Debug Overlay", nil)
+                               shortDescription:NSLocalizedString(@"Inspect SpringBoard's UIKit view hierarchy", nil)
+                                longDescription:NSLocalizedString(@"Enables Apple's internal UIKit debugging overlay in SpringBoard. After applying, double-tap the status bar to open it. Its settings page controls whether Clean Up or exiting Cyanide restores the original behavior; respring always restores stock.", nil)
+                                        version:version
+                                         author:@"rooootdev / Cyanide"
+                                       category:@"SpringBoard"
+                                     symbolName:@"ladybug.fill"
+                                           kind:PackageInstallKindToggle
+                                     enabledKey:kSettingsDebugOverlayEnabled
+                                          isNew:YES];
+        debugOverlay.unstableWarning = NSLocalizedString(@"Uses private UIKit debugging classes. Unsupported SpringBoard builds may reject the overlay or become unstable.", nil);
+        debugOverlay.settingsSection = kSecDebugOverlay;
+
+        Package *upsideDown = [[Package alloc] initWithIdentifier:@"com.darksword.upsidedown"
+                                           name:NSLocalizedString(@"Upside Down", nil)
+                               shortDescription:NSLocalizedString(@"Allow upside-down portrait orientation", nil)
+                                longDescription:NSLocalizedString(@"Allows SpringBoard's Home Screen and Lock Screen to rotate into upside-down portrait orientation. Rotation Lock must be off. Its settings page controls whether Clean Up or exiting Cyanide restores the original behavior; respring always restores stock.", nil)
+                                        version:version
+                                         author:@"rooootdev / Cyanide"
+                                       category:@"SpringBoard"
+                                     symbolName:@"arrow.up.and.down.circle.fill"
+                                           kind:PackageInstallKindToggle
+                                     enabledKey:kSettingsUpsideDownEnabled
+                                          isNew:YES];
+        upsideDown.unstableWarning = NSLocalizedString(@"Patches private SpringBoard orientation methods in memory. Unsupported builds may rotate incorrectly or respring SpringBoard.", nil);
+        upsideDown.settingsSection = kSecUpsideDown;
+
         Package *appSwitcherGrid = [[Package alloc] initWithIdentifier:@"com.darksword.appswitchergrid"
                                            name:@"App Switcher Grid"
                                shortDescription:@"Grid-style app switcher"
@@ -672,6 +702,8 @@ static const NSInteger kSecFloatingDock     = 30;
             liveWP,
             metalLockLight,
             moodWallpaper,
+            debugOverlay,
+            upsideDown,
             appSwitcherGrid,
             floatingDock,
             quickLoader,
