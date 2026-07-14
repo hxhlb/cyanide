@@ -20,10 +20,10 @@
       "tintColor": "#02D7E0",
       "versions": [
         {
-          "version": "1.3.9",
-          "date": "2026-07-11",
-          "size": 12610920,
-          "downloadURL": "https://github.com/hxhlb/cyanide/releases/download/v1.3.9/Cyanide-1.3.9.ipa",
+          "version": "1.4.0",
+          "date": "2026-07-14",
+          "size": 12638621,
+          "downloadURL": "https://github.com/hxhlb/cyanide/releases/download/v1.4.0/Cyanide-1.4.0.ipa",
           "localizedDescription": "",
           "minOSVersion": "17.0"
         }
