@@ -30,18 +30,20 @@ activity, omit it.
 
 ## Pending
 
-- 新增 iPad Dock，可在 iPhone 上启用 iPad 风格 Dock，并使用 App 资源库入口。
-  Added iPad Dock, bringing the iPad-style Dock and App Library access to iPhone.
-- 改进 JavaScript tweak 管理，支持同时启用多个来源软件包，并修复安装、移除和待处理状态显示。
-  Improved JavaScript tweak management with multiple source packages and more accurate install, removal, and pending states.
-- 改进 JavaScript tweak 的停用与清理流程，让支持恢复的软件包能够正确移除已应用的效果。
-  Improved JavaScript tweak disabling and cleanup so supported packages can correctly remove their applied effects.
-- 改进 Dock 颜色 tweak 的颜色选项，新增透明度支持。
-  Improved the Dock Color tweak's color options with transparency support.
-- 完善 JavaScript tweak 开发文档。
-  Improved JavaScript tweak documentation.
-
 ## Released
+
+### v1.4.0 - 2026-07-14
+
+- [x] 新增 iPad Dock，可在 iPhone 上启用 iPad 风格 Dock，并使用 App 资源库入口。
+  Added iPad Dock, bringing the iPad-style Dock and App Library access to iPhone.
+- [x] 改进 JavaScript tweak 管理，支持同时启用多个来源软件包，并修复安装、移除和待处理状态显示。
+  Improved JavaScript tweak management with multiple source packages and more accurate install, removal, and pending states.
+- [x] 改进 JavaScript tweak 的停用与清理流程，让支持恢复的软件包能够正确移除已应用的效果。
+  Improved JavaScript tweak disabling and cleanup so supported packages can correctly remove their applied effects.
+- [x] 改进 Dock 颜色 tweak 的颜色选项，新增透明度支持。
+  Improved the Dock Color tweak's color options with transparency support.
+- [x] 完善 JavaScript tweak 开发文档。
+  Improved JavaScript tweak documentation.
 
 ### v1.3.9 - 2026-07-11
 
