@@ -5,6 +5,7 @@
 
 #import "SettingsViewController.h"
 #import "ThemerFormatGuideViewController.h"
+#import "MobileGestaltViewController.h"
 #import "RepoTweaksViewControllers.h"
 #import "VPhoneDebug.h"
 #import "kexploit/kexploit_opa334.h"
@@ -42,6 +43,7 @@
 #import "TaskRop/RemoteCall.h"
 #import "kexploit/kutils.h"
 #import "kexploit/persistence.h"
+#import "utils/sandbox.h"
 #import "installer/CYIconBadge.h"
 #import "installer/InstallProgressViewController.h"
 #import "installer/Package.h"
@@ -3335,6 +3337,32 @@ void settings_present_hide_home_bar_respring_prompt(UIViewController *host)
         });
     }]];
     settings_present_controller(ac, host);
+}
+
+void settings_request_respring_from_controller(UIViewController *host)
+{
+    __weak UIViewController *weakHost = host;
+    dispatch_async(dispatch_get_global_queue(0, 0), ^{
+        if (__sync_lock_test_and_set(&g_settings_actions_running, 1)) {
+            printf("[SETTINGS] respring blocked: actions already running\n");
+            log_user("[RESPRING] Another action is still running. Try Respring again in a moment.\n");
+            return;
+        }
+
+        __sync_lock_test_and_set(&g_settings_respring_cleanup_running, 1);
+        settings_notify_cleanup_state_changed();
+        @try {
+            settings_prepare_for_respring_sync();
+        } @finally {
+            __sync_lock_release(&g_settings_actions_running);
+            __sync_lock_release(&g_settings_respring_cleanup_running);
+            settings_notify_cleanup_state_changed();
+        }
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            settings_show_respring_overlay(weakHost);
+        });
+    });
 }
 
 static BOOL settings_dark_tweaks_should_run(NSUserDefaults *d, BOOL pendingOnly)
@@ -7354,16 +7382,20 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                     }
                     log_user("[OK] SpringBoard channel open.\n");
 
-                    if (runSandboxEscape && !g_springboard_sandbox_escaped) {
-                        settings_progress(&step, total, "Lifting SpringBoard filesystem sandbox");
-                        int sbx = escape_sbx_demo2_in_session();
-                        g_springboard_sandbox_escaped = (sbx == 0);
-                        log_user("%s Filesystem sandbox %s.\n",
-                                 sbx == 0 ? "[OK]" : "[WARN]",
-                                 sbx == 0 ? "lifted — access granted" : "lift returned a warning");
-                    } else if (runSandboxEscape) {
-                        settings_progress(&step, total, "Reusing sandbox token from prior run");
-                        log_user("[OK] Sandbox already lifted — reusing token.\n");
+                    if (runSandboxEscape) {
+                        if (check_sandbox_var_rw() == 0) {
+                            g_springboard_sandbox_escaped = 1;
+                            settings_progress(&step, total, "Reusing existing filesystem access");
+                            log_user("[OK] Filesystem access already available — skipping duplicate sandbox escape.\n");
+                        } else {
+                            g_springboard_sandbox_escaped = 0;
+                            settings_progress(&step, total, "Lifting SpringBoard filesystem sandbox");
+                            int sbx = escape_sbx_demo2_in_session();
+                            g_springboard_sandbox_escaped = (sbx == 0);
+                            log_user("%s Filesystem sandbox %s.\n",
+                                     sbx == 0 ? "[OK]" : "[WARN]",
+                                     sbx == 0 ? "lifted — access granted" : "lift returned a warning");
+                        }
                     }
 
                     if (cleanupDisabledSpringBoardTweaks) {
@@ -9484,6 +9516,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 #if CYANIDE_EXPERIMENTAL_TWEAKS_AVAILABLE
         @{ @"title": @"IPA Decryptor",      @"icon": @"lock.open.fill",                      @"color": [UIColor systemPurpleColor], @"section": @(SectionIPADecryptor) },
 #endif
+        @{ @"title": @"MobileGestalt Editor", @"icon": @"cpu", @"color": [UIColor systemBlueColor], @"controller": @"mobilegestalt" },
     ];
 }
 
@@ -9510,6 +9543,10 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     for (NSDictionary *bundle in bundles) {
         if ([bundle[@"indev"] boolValue]) continue;
         if ([bundle[@"experimental"] boolValue] && !experimentalOn) continue;
+        if ([bundle[@"controller"] length] > 0) {
+            [out addObject:bundle];
+            continue;
+        }
         NSInteger sec = [bundle[@"section"] integerValue];
         if ([self rowsForSection:sec].count > 0) {
             [out addObject:bundle];
@@ -12414,6 +12451,86 @@ void cyanide_present_contact(UIViewController *host)
     [self presentViewController:nav animated:YES completion:completion];
 }
 
+BOOL settings_mobilegestalt_access_ready(void)
+{
+    return g_kexploit_done &&
+           kexploit_krw_ready() &&
+           check_sandbox_var_rw() == 0;
+}
+
+void settings_prepare_mobilegestalt_access(UIViewController *host,
+                                           void (^completion)(BOOL success))
+{
+    if (!host) return;
+
+    static volatile int sMobileGestaltPrepareInFlight = 0;
+    if (__sync_lock_test_and_set(&sMobileGestaltPrepareInFlight, 1)) {
+        log_user("[MG] Kernel and filesystem preparation is already running.\n");
+        return;
+    }
+
+    __block BOOL actionOK = NO;
+    InstallProgressViewController *progress = [[InstallProgressViewController alloc] init];
+    progress.onDismiss = ^{
+        if (completion) completion(actionOK);
+    };
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:progress];
+    nav.modalPresentationStyle = UIModalPresentationAutomatic;
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIViewController *presenter = settings_active_presenter(host);
+        if (!presenter) {
+            __sync_lock_release(&sMobileGestaltPrepareInFlight);
+            if (completion) completion(NO);
+            return;
+        }
+
+        [presenter presentViewController:nav animated:YES completion:^{
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                BOOL actionLockAcquired = NO;
+                NSString *message = nil;
+                @try {
+                    actionLockAcquired = settings_try_claim_actions_lock(
+                        "MobileGestalt preparation",
+                        "[MG] Another action is already running.");
+                    if (!actionLockAcquired) {
+                        message = settings_l10n_text(@"MobileGestalt preparation was blocked by another running action.");
+                        return;
+                    }
+
+                    log_user("[MG] Preparing kernel access and filesystem escape...\n");
+                    if (!settings_ensure_kexploit()) {
+                        message = settings_l10n_text(@"Kernel access failed. Check the log and try again.");
+                        return;
+                    }
+
+                    BOOL sandboxReady = ipadecryptor_prepare_for_app_enumeration();
+                    actionOK = sandboxReady && settings_mobilegestalt_access_ready();
+                    log_user("%s MobileGestalt app sandbox access %s without SpringBoard RemoteCall.\n",
+                             actionOK ? "[OK]" : "[WARN]",
+                             actionOK ? "ready" : "unavailable");
+                    message = settings_l10n_text(actionOK
+                        ? @"Kernel access and filesystem escape are ready."
+                        : @"Filesystem access is still unavailable. Check the log and try again.");
+                } @finally {
+                    if (actionLockAcquired) settings_release_actions_lock();
+                    __sync_lock_release(&sMobileGestaltPrepareInFlight);
+                    NSDictionary *info = @{
+                        kSettingsActionsDidCompleteSuccessKey: @(actionOK),
+                        kSettingsActionsDidCompleteMessageKey: message ?: @""
+                    };
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        [[NSNotificationCenter defaultCenter]
+                            postNotificationName:kSettingsActionsDidCompleteNotification
+                                          object:nil
+                                        userInfo:info];
+                    });
+                }
+            });
+        }];
+    });
+}
+
 - (void)toggleChanged:(UISwitch *)sender
 {
     if (!settings_device_supported()) {
@@ -13426,6 +13543,11 @@ void cyanide_present_contact(UIViewController *host)
             case RootSectionSystemBundles: {
                 NSArray<NSDictionary *> *bundles = [self bundleRowsForRootSection:(RootSection)indexPath.section];
                 NSDictionary *bundle = bundles[indexPath.row];
+                if ([bundle[@"controller"] isEqualToString:@"mobilegestalt"]) {
+                    MobileGestaltViewController *controller = [[MobileGestaltViewController alloc] init];
+                    [self.navigationController pushViewController:controller animated:YES];
+                    return;
+                }
                 NSInteger underlying = [bundle[@"section"] integerValue];
                 NSString *pushTitle = bundle[@"title"];
                 SettingsViewController *detail = [[SettingsViewController alloc] initWithUnderlyingSection:underlying

@@ -140,6 +140,10 @@ BOOL settings_hide_home_bar_hidden(void);
 void settings_note_hide_home_bar_respring_pending(void);
 BOOL settings_hide_home_bar_respring_pending(void);
 void settings_present_hide_home_bar_respring_prompt(UIViewController *host);
+void settings_request_respring_from_controller(UIViewController *host);
+BOOL settings_mobilegestalt_access_ready(void);
+void settings_prepare_mobilegestalt_access(UIViewController *host,
+                                           void (^completion)(BOOL success));
 
 void settings_run_actions(void);
 void settings_run_pending_actions(void);
