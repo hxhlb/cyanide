@@ -1,292 +1,126 @@
-## Project status
-
-Cyanide is no longer actively maintained by `zeroxjf`.
-
-Patreon integration has been removed, all installable Cyanide tweaks are free,
-and previously unreleased work-in-progress tweak code has been opened under
-AGPL-3.0. Anyone can fork it, study it, continue it, or reuse it under the
-license terms.
-
-This was originally an AI vibe-coded project, so the codebase should be
-approachable for someone who wants to pick it up, clean it up, or continue
-experimenting.
-
-The old README is preserved below for historical context and build details, but
-parts of it may become stale now that this repository is no longer actively
-maintained.
-
-<details>
-<summary>Archived project README</summary>
+<p align="center">
+  <strong>简体中文</strong> | <a href="README_EN.md">English</a>
+</p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/zeroxjf/cyanide/main/Cyanide/Assets.xcassets/AppIcon.appiconset/icon-ios-1024x1024.png" alt="Cyanide" width="160">
+  <img src="https://raw.githubusercontent.com/hxhlb/cyanide/main/Cyanide/Assets.xcassets/AppIcon.appiconset/icon-ios-1024x1024.png" alt="Cyanide" width="160">
 </p>
 
 <h1 align="center">Cyanide</h1>
 
-**By [@zeroxjf](https://github.com/zeroxjf)** — an iOS tweak runner built on top of the DarkSword kernel r/w primitive.
-
-Cyanide is a fork of [`wh1te4ever/darksword-kexploit-fun`](https://github.com/wh1te4ever/darksword-kexploit-fun)
-for iOS kernel research. It wraps the native DarkSword kernel stages in an
-Objective-C iOS app, restructures the UI as an Installer/Settings split, and
-adds a few reliability fixes for repeated local testing. It does not ship
-the browser-delivered WebKit/dyld parts of the original DarkSword chain.
-
-## Project Status
-
-As of v1.3.6, Patreon integration has been removed. All installable Cyanide
-tweaks are free and no tweak access depends on account linking.
-
-Previously unreleased work-in-progress tweak code has been opened under the
-same AGPL-3.0 license as the rest of the project. Some unfinished entries remain
-visible in the app so contributors can find them, but installation stays
-disabled until someone finishes and verifies them.
-
-`zeroxjf` is stepping away from active Cyanide development. The code is now
-open under AGPL-3.0 so anyone can fork it, study it, reuse it, or continue it
-under the license terms.
-
-## Install
-
-Open this page on your iPhone/iPad and tap one of the buttons below.
-
 <p align="center">
-  <a href="https://celloserenity.github.io/altdirect/?url=https://raw.githubusercontent.com/zeroxjf/cyanide/main/source.json" target="_blank">
-    <img src="https://github.com/CelloSerenity/altdirect/blob/main/assets/png/AltSource_Blue.png?raw=true" alt="Add AltSource" width="200">
-  </a>
-  <a href="https://github.com/zeroxjf/cyanide/releases/latest" target="_blank">
-    <img src="https://github.com/CelloSerenity/altdirect/blob/main/assets/png/Download_Blue.png?raw=true" alt="Download .ipa" width="200">
-  </a>
+  基于 DarkSword 内核读写原语的可侧载 iOS tweak 运行器。
 </p>
 
-## Feedback
+<p align="center">
+  <a href="https://github.com/hxhlb/cyanide/releases/latest"><img src="https://img.shields.io/github/v/release/hxhlb/cyanide?label=release" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="AGPL-3.0 license"></a>
+</p>
 
-- [Report a bug](https://github.com/zeroxjf/cyanide/issues/new?template=bug_report.yml)
-- [Request a feature](https://github.com/zeroxjf/cyanide/issues/new?template=feature_request.yml)
-- [Join the Signal group](https://signal.group/#CjQKIP0pxjc9V52ddCNk--04DosuoQl-vVOsznJfQ4GwlrlxEhCveFhBS8YdNcILpUFt7IqC) for setup help, support,
-  test notes, and rough ideas before they become issues.
+Cyanide 将 DarkSword 内核利用链、Installer 风格界面与基于 RemoteCall 的
+SpringBoard tweak 结合在一起。它不是传统越狱：多数运行时 tweak 由应用直接应用，
+并仅在当前 SpringBoard 会话中保持生效；少数工具会有意写入持久化文件或偏好设置。
 
-## Beta Tweaks
+本仓库是原始 [`zeroxjf/cyanide`](https://github.com/zeroxjf/cyanide)（原名
+`cyanide-ios`）项目的活跃维护分支 [`hxhlb/cyanide`](https://github.com/hxhlb/cyanide)。Patreon
+集成已经移除，所有可安装的内置 tweak 均无需关联账户。
 
-Beta tweaks are free and visible without account linking. They are unstable and
-intended for testers who are comfortable with SpringBoard glitches, crashes, or
-partial behavior.
+## 兼容性
 
-## Tweaks
-
-These tweaks have been tested on iOS 18.x and 26.x. Expect version drift in
-SpringBoard and related daemons to break things on other releases.
-
-### Status Bar
-
-- **StatBar**: battery temperature and free-RAM overlay anchored to the
-  SpringBoard status bar, with optional C/F and network-speed display.
-- **NSBar**: compact live download/upload speed overlay for the status bar,
-  with selectable corner/center positions. Ported from
-  [`d1y/cyanide-ios`](https://github.com/d1y/cyanide-ios).
-- **NiceBar Lite**: configurable status-bar-adjacent labels for custom text,
-  date/time formats, battery, memory, traffic, uptime, IP address, disk,
-  thermal state, and other live readouts. Ported from
-  [`d1y/cyanide-ios`](https://github.com/d1y/cyanide-ios).
-
-### Home Screen Layout
-
-- **SBCustomizer**: dock icon count, home-screen columns/rows, and hidden icon
-  labels.
-- **Home Layout Extras**: extra padding around the home grid and dock, plus
-  per-icon scale for home and dock icons. Stacks on top of SBCustomizer.
-
-### Performance
-
-- **Powercuff**: CPU/GPU underclocking through simulated `thermalmonitord`
-  pressure levels (off, nominal, light, moderate, heavy). Lasts until reboot.
-  Port of [`rpetrich/Powercuff`](https://github.com/rpetrich/Powercuff).
-
-### SpringBoard Tweaks
-
-Ported from [`kolbicz/DarkSword-Tweaks`](https://github.com/kolbicz/DarkSword-Tweaks):
-
-- **Disable App Library**: removes the App Library page past the last home screen.
-- **Disable Icon Fly-In**: skips the spring-in animation when icons appear.
-- **Zero Wake Animation**: snaps the display on instantly when waking.
-- **Zero Backlight Fade**: instant lock/unlock backlight.
-- **Double-Tap to Lock**: lock the device with a wallpaper double-tap.
-
-### System Updates
-
-- **Disable OTA Updates**: toggles the launchd OTA `disabled.plist` to block or
-  unblock update prompts. Persists across reboots.
-
-### Beta
-
-> ⚠︎ Work in progress — these may crash SpringBoard, glitch layout, work only
-> partially, or need re-applying between builds.
-
-- **Gravity Lite**: core port of Julio Verne's classic Gravity tweak. Applies
-  UIDynamicAnimator physics to home-screen and dock icons — gravity, collisions,
-  bounce, friction, accelerometer steering, shake pulses, and an explosion
-  button. Use Restore Icon Layout if icons stay displaced after deactivating.
-- **Axon Lite**: groups Notification Center requests by app with a SpringBoard
-  overlay and dedups duplicates while the RemoteCall session is alive.
-- **Dynamic Stage Lite**: brings Stage Manager-style split-view to iPhone over
-  RemoteCall — no jailbreak required. Hosts a second app's scene alongside
-  SpringBoard using the same scene-hosting design as [`tomt000`'s Dynamic Stage](https://havoc.app/package/dynamicstage).
-- **FastLockX Lite**: keeps Face ID retry/unlock requests armed through
-  SpringBoard timers so pickup-to-unlock can work after Cyanide closes.
-- **Cyanide Themer**: per-bundle icon theme engine. Walks SpringBoard's
-  SBIconView hierarchy and swaps each icon's image with a PNG matched on bundle
-  ID. Ships with iOS 6 Theme; also accepts a custom folder of `<bundleID>.png`
-  files or a binary plist. Pick a theme in Settings before running.
-- **SnowBoard Lite**: imports SnowBoard/IconBundles-style theme folders or
-  archives into Cyanide's local theme library, then applies the selected theme
-  through the existing icon replacement pipeline. Ported from
-  [`d1y/cyanide-ios`](https://github.com/d1y/cyanide-ios).
-- **LiveWP**: copies a selected MP4/MOV/M4V into Cyanide's app container and
-  plays it behind SpringBoard's home and lock screen windows while the live
-  RemoteCall session is active. Ported from
-  [`d1y/cyanide-ios`](https://github.com/d1y/cyanide-ios).
-- **Watch Pairing Override**: edits the watchOS pairing range stored on the
-  iPhone so you can pair a newer Apple Watch or revive an older one. Persists
-  across reboots; respring before pairing.
-- **Location Simulator**: drives Apple's CoreLocation simulation path from a
-  RemoteCall host process and sets a static target coordinate. Simulated
-  locations may violate app terms, platform rules, game rules, ride-share or
-  delivery policies, or local law depending on how they are used. Use only where
-  you have permission; you are responsible for your use and apply or restore it
-  at your own risk. It may also affect location-tied system behavior such as
-  time zone/date/time handling and can have unintended consequences; only use it
-  if you know what you're doing. Credits: `kolbicz` provided the
-  RemoteCall/CLSimulationManager GPS spoofer prototype, and `ezzuldinSt`'s
-  LSpoof provided the app-side spoofing, picker, bookmarks, and route-simulation
-  reference.
-- **Call Recording Sound**: replaces the CallServices
-  `StartDisclosureWithTone` and `StopDisclosure` audio files with Cyanide's
-  bundled silent payloads, with separate Silence and Restore actions. Cyanide
-  backs up the first originals into its app container before replacement, but
-  this is still a persistent system-file edit under
-  `/var/mobile/Library/CallServices/Greetings/default`. Disclosure sounds may be
-  legally required where you live; you are responsible for your use and should
-  restore the originals before removing Cyanide if you want Cyanide's backups
-  written back. Credits: `YangJiiii` (`@duongduong0908`) for the EnsWilde and
-  Disable Call Recording BookRestore reference tools, and `@Little_34306` as
-  credited by the original projects for the Disable Call Recording concept.
-
-### In Development
-
-> These entries are visible but not installable because they do not work yet.
-> Their app/source paths are left in place so someone can pick them up later.
-
-- **Signal Readouts**: unfinished status-bar numeric signal readouts.
-- **TypeBanner**: unfinished iMessage typing banner experiment.
-- **Notification Island**: unfinished Dynamic Island notification mirror.
-- **IPA Decryptor**: unfinished local IPA decryptor workflow.
-
-## Supported Targets
-
-Tested target range:
+当前内核漏洞适用范围：
 
 - iOS/iPadOS 17.0 through 18.7.1
 - iOS/iPadOS 26.0 through 26.0.1
-- A19/M5 devices are not supported
+- 不支持 A19 和 M5 设备
 
-The kernel bugs used here, `CVE-2025-43510` and `CVE-2025-43520`, were fixed in
-iOS/iPadOS 18.7.2 and 26.1. Later builds are outside this kernel exploit window.
+Cyanide 使用的内核漏洞 `CVE-2025-43510` 和 `CVE-2025-43520` 已在
+iOS/iPadOS 18.7.2 与 26.1 中修复。SpringBoard 私有 API 也会随系统版本变化，
+因此处于漏洞适用范围内并不代表每个 tweak 都能在对应系统和设备上正常工作。
 
-## What This Fork Changes
+## 安装
 
-- Cleans shared exploit state before each attempt.
-- Matches the target process with an explicit marker.
-- Validates sockets before using the spray path.
-- Treats missed races as retryable failures instead of hard failures.
-- Tightens the A18/M4 `pe_v2` path with initialized target-file contents,
-  stable local remap addresses, bounded page freeing, socket-spray preflight
-  checks, and controlled zone-trim retries.
+从 [`GitHub Releases`](https://github.com/hxhlb/cyanide/releases/latest)
+下载最新的未签名 IPA，再使用你选择的侧载工具签名并安装。
 
-## Kernel Research Features
+也可以添加 Cyanide 的 AltStore 软件源：
 
-- Escape the app sandbox.
-- Control or crash userspace processes from the app.
-- Change UID, GID, and sticky bits on target files.
-- Disable ASLR by setting `P_DISABLE_ASLR` in `launchd`'s `proc->p_flag`.
+<p align="center">
+  <a href="https://celloserenity.github.io/altdirect/?url=https://raw.githubusercontent.com/hxhlb/cyanide/main/source.json">
+    <img src="https://github.com/CelloSerenity/altdirect/blob/main/assets/png/AltSource_Blue.png?raw=true" alt="Add AltSource" width="200">
+  </a>
+  <a href="https://github.com/hxhlb/cyanide/releases/latest">
+    <img src="https://github.com/CelloSerenity/altdirect/blob/main/assets/png/Download_Blue.png?raw=true" alt="Download IPA" width="200">
+  </a>
+</p>
 
-## Credits
+## 主要功能
 
-- [`opa334`](https://github.com/opa334): original [`darksword-kexploit`](https://github.com/opa334/darksword-kexploit), ChOma, and XPF — the kernel r/w primitive Cyanide is built on.
-- [`wh1te4ever`](https://github.com/wh1te4ever): [`kfun` / `darksword-kexploit-fun`](https://github.com/wh1te4ever/darksword-kexploit-fun) — the RemoteCall implementation that lets a sideloaded app apply tweaks inside SpringBoard. Cyanide is a fork of this project.
-- [`rooootdev`](https://github.com/rooootdev): working kexploit behavior used to stabilize this fork.
-- [`neonmodder123`](https://github.com/neonmodder123): Web Respring method.
-- [`kolbicz`](https://github.com/kolbicz): OTA Disabler, SpringBoard tweaks, and
-  the RemoteCall/CLSimulationManager GPS spoofer prototype used as the starting
-  point for Location Simulator.
-- `ezzuldinSt`: LSpoof app-side `CLLocationManager` spoofing, picker,
-  bookmarks, and route-simulation reference used while shaping Location
-  Simulator.
-- `YangJiiii` (`@duongduong0908`): EnsWilde and Disable Call Recording
-  BookRestore reference tools used while shaping Call Recording Sound.
-- `@Little_34306`: credited by the original call-recording projects for the
-  Disable Call Recording concept.
-- [`rpetrich`](https://github.com/rpetrich): Powercuff.
-- [Julio Verne](https://github.com/julioverne): the original [Gravity](https://github.com/julioverne/Gravity) tweak that Gravity Lite is a core port of.
-- [`d1y`](https://x.com/chenhonzhou): [`cyanide-ios`](https://github.com/d1y/cyanide-ios)
-  AGPL-3.0 sources used for the NSBar, NiceBar Lite, SnowBoard Lite, and
-  LiveWP ports.
-- [`tomt000`](https://github.com/tomt000): [Dynamic Stage](https://havoc.app/package/dynamicstage) — the original Stage Manager-for-iPhone tweak whose split-view + scene-hosting design Dynamic Stage Lite re-implements over RemoteCall.
+### Tweak 运行器
 
-### UI inspiration
+- Installer 风格的软件包浏览、队列、设置、日志与本地文件共享
+- 内核读写初始化、应用沙盒逃逸与 SpringBoard RemoteCall
+- 对支持的 tweak 执行运行时清理和会话恢复
+- 使用 QuickLoader 与 RepoTweaks 运行本地或仓库托管的 JavaScript tweak
 
-- The classic [Installer.app](https://github.com/AppTapp/Installer-3) (Ripdev & Nullriver Software, now maintained by AppTapp and the Legacy Jailbreak community) — the iPhoneOS 1 package-manager look that the Cyanide Installer tab is modeled after.
-- The [Sileo Project](https://github.com/Sileo/Sileo) (the Sileo Team) — the queue → review → confirm install flow and the bottom queue-popup pattern.
+### SpringBoard
 
-## Build
+- 状态信息：StatBar、NSBar 与 NiceBar Lite
+- 布局与外观：SBCustomizer、Home Layout Extras、主题、LiveWP、
+  Metal Lock Light 与 Mood Wallpaper
+- 窗口与导航：MilkyWay Lite、Dynamic Stage Lite、iPad Dock、
+  App Switcher Grid、Upside Down 与 UIKit Debug Overlay
+- 通知、动画、Face ID、屏幕方向、图标物理效果等实验功能
+
+### 工具与持久化修改
+
+- MobileGestalt Editor：编辑选定的设备身份与能力值
+- IPA Decryptor（Beta）：导出已安装应用并解密主可执行文件；内嵌 framework、
+  extension 与 dylib 仍可能保持加密
+- OTA 更新控制、Watch 配对范围调整、Home Bar 修改、位置模拟等系统工具
+
+部分软件包仍属实验功能、仅适配特定设备，或因尚未完成而保持禁用。每项功能应以
+应用内的软件包说明与警告为准。近期用户可见改动请查看
+[`RELEASE_NOTES.md`](RELEASE_NOTES.md)。
+
+## 安全说明
+
+Cyanide 会使用内核漏洞、私有 API 和运行时方法替换。尤其在未测试的系统版本上，
+可能出现 SpringBoard 重启、界面冻结、功能部分生效或设备重启。
+
+应用功能前请阅读对应软件包的警告。运行时 tweak 通常可通过 Cyanide 的 Clean Up
+或 respring 恢复，但修改系统文件、MobileGestalt 值或偏好设置的工具可能在
+respring 或重启后继续生效。请备份重要数据，不要在无法恢复的设备上测试。
+
+## 构建
+
+环境要求：
+
+- macOS、兼容版本的 Xcode 与 iPhoneOS SDK
+- `xcbeautify` 可选；缺失时构建脚本会回退到原始 `xcodebuild` 输出
+- 仅 VPhone 打包流程需要 `ldid`
+
+构建未签名的真机 IPA：
 
 ```sh
 ./scripts/build.sh
 ```
 
-The build script uses the `Cyanide` scheme, disables code signing, and writes
-an unsigned IPA to:
+脚本会生成 `build/Cyanide-<version>.ipa`，并让 `build/Cyanide.ipa` 指向
+最新构建。
 
-```text
-build/Cyanide.ipa
-```
-
-Equivalent manual build:
+构建模拟器版本：
 
 ```sh
-xcodebuild \
-  -project Cyanide.xcodeproj \
-  -scheme Cyanide \
-  -sdk iphoneos \
-  -configuration Debug \
-  CODE_SIGNING_ALLOWED=NO \
-  build
+SDK=iphonesimulator ./scripts/build.sh
 ```
-
-## License
-
-This repository is licensed under **AGPL-3.0**. See `LICENSE`.
-
-The NSBar, NiceBar Lite, SnowBoard Lite, and LiveWP ports adapt AGPL-3.0 code
-from [`d1y/cyanide-ios`](https://github.com/d1y/cyanide-ios) and remain in the
-AGPL-covered tree.
 
 ## JavaScript Tweaks
 
-Cyanide includes two JavaScript tweak runners contributed by Iggy05:
+QuickLoader 可以导入本地 `.js` 文件，RepoTweaks 可以从 HTTPS JSON 仓库加载
+JavaScript 软件包。脚本能够调用功能强大的 RemoteCall helper，因此请只使用你信任的
+脚本和仓库。
 
-- **QuickLoader** imports a local `.js` file from Files and exposes declared
-  `@param` values as settings rows.
-- **RepoTweaks Store** imports HTTPS JSON repositories and downloads selected
-  JavaScript tweaks from those sources. Cyanide seeds the zeroxjf source at
-  `https://zeroxjf.github.io/cyanide-repotweaks.json` by default.
-
-Only run scripts and repositories you trust; JavaScript tweaks can call Cyanide
-RemoteCall helpers and may destabilize SpringBoard if the script is buggy.
-
-### Script lifecycle and cleanup
-
-Scripts that change in-memory SpringBoard state should export a synchronous
-`globalThis.cleanup` function:
+修改 SpringBoard 内存状态的脚本应提供同步的 `globalThis.cleanup` 函数：
 
 ```js
 globalThis.cleanup = function () {
@@ -295,11 +129,41 @@ globalThis.cleanup = function () {
 };
 ```
 
-Cyanide calls it before stopping a running script during **Clean Up**, package
-disable/removal, or session shutdown. A cleanup hook must restore only state
-captured by that script before it changed it, and it must finish quickly. It is
-not a rollback system: persistent file or system changes cannot be restored
-automatically.
+Cyanide 会在受支持的脚本被禁用、移除或随会话清理停止时调用 `cleanup()`。该函数
+只应恢复脚本自身修改的状态，并应尽快完成。它无法自动撤销持久化文件或系统修改。
 
+## 参与贡献
 
-</details>
+欢迎提交错误报告和范围明确的 Pull Request：
+
+- [报告问题](https://github.com/hxhlb/cyanide/issues/new)
+- [提交 Pull Request](https://github.com/hxhlb/cyanide/pulls)
+
+修改 SpringBoard 私有 API 路径时，请注明测试设备与系统版本。不同 iOS 版本之间的
+行为差异很大，因此兼容分支应保持明确和有限。
+
+## 致谢
+
+- [`zeroxjf`](https://github.com/zeroxjf)：原始 Cyanide 项目及其
+  Installer/Settings 集成
+- [`opa334`](https://github.com/opa334):
+  [`darksword-kexploit`](https://github.com/opa334/darksword-kexploit), ChOma,
+  与 XPF
+- [`wh1te4ever`](https://github.com/wh1te4ever):
+  [`darksword-kexploit-fun`](https://github.com/wh1te4ever/darksword-kexploit-fun)
+  及 RemoteCall 基础
+- [`rooootdev`](https://github.com/rooootdev)：内核利用稳定性参考
+- [`kolbicz`](https://github.com/kolbicz)：DarkSword tweak 与位置模拟参考
+- [`d1y`](https://github.com/d1y)：多个 Cyanide 移植功能使用的 AGPL-3.0 实现
+- [`rpetrich`](https://github.com/rpetrich)：Powercuff
+- [`Julio Verne`](https://github.com/julioverne)：Gravity
+- [`tomt000`](https://github.com/tomt000)：Dynamic Stage
+- `Iggy05`：QuickLoader 与 RepoTweaks
+- `neonmodder123`：Web Respring 方法
+
+其他功能的专项致谢保留在源码和应用内软件包说明中。
+
+## 许可证
+
+Cyanide 使用 [GNU Affero General Public License v3.0](LICENSE) 许可证。
+从其他项目改编的 AGPL 代码继续使用相同许可证。
