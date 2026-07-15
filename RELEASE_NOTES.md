@@ -33,6 +33,11 @@ activity, omit it.
 
 ## Released
 
+### v1.4.2 - 2026-07-15
+
+- [x] 新增 MobileGestalt 编辑功能。
+  Added MobileGestalt editing.
+
 ### v1.4.1 - 2026-07-14
 
 - [x] 新增 UIKit Debug Overlay。
