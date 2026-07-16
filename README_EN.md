@@ -63,6 +63,8 @@ You can also add the Cyanide AltStore source:
 ### Tweak runner
 
 - Installer-style package browser, queue, settings, logs, and local file sharing
+- Compatibility groups that identify conflicting tweaks and prevent them from
+  being queued together
 - Kernel read/write setup, app sandbox escape, and SpringBoard RemoteCall support
 - Runtime cleanup and session recovery for supported tweaks
 - QuickLoader and RepoTweaks for local or repository-hosted JavaScript tweaks
@@ -70,8 +72,8 @@ You can also add the Cyanide AltStore source:
 ### SpringBoard
 
 - Status overlays: StatBar, NSBar, and NiceBar Lite
-- Layout and appearance: SBCustomizer, Home Layout Extras, themes, LiveWP,
-  Metal Lock Light, and Mood Wallpaper
+- Layout and appearance: Apple Watch-style Home Screen layout, SBCustomizer,
+  Home Layout Extras, themes, LiveWP, Metal Lock Light, and Mood Wallpaper
 - Windowing and navigation: MilkyWay Lite, Dynamic Stage Lite, iPad Dock,
   App Switcher Grid, Upside Down, and UIKit Debug Overlay
 - Additional experiments for notifications, animations, Face ID, orientation,
@@ -80,6 +82,8 @@ You can also add the Cyanide AltStore source:
 ### Tools and persistent changes
 
 - MobileGestalt Editor for selected device identity and capability values
+- App Downgrade for finding and installing historical App Store versions
+- App Update Blocking for preventing App Store updates on selected apps
 - IPA Decryptor (beta) for exporting an installed app with its main executable
   decrypted; embedded frameworks, extensions, and dylibs may remain encrypted
 - OTA update control, Watch pairing overrides, Home Bar changes, location

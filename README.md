@@ -58,6 +58,7 @@ iOS/iPadOS 18.7.2 与 26.1 中修复。SpringBoard 私有 API 也会随系统版
 ### Tweak 运行器
 
 - Installer 风格的软件包浏览、队列、设置、日志与本地文件共享
+- 软件包兼容性分组，可识别互斥 tweak 并阻止同时加入队列
 - 内核读写初始化、应用沙盒逃逸与 SpringBoard RemoteCall
 - 对支持的 tweak 执行运行时清理和会话恢复
 - 使用 QuickLoader 与 RepoTweaks 运行本地或仓库托管的 JavaScript tweak
@@ -65,8 +66,8 @@ iOS/iPadOS 18.7.2 与 26.1 中修复。SpringBoard 私有 API 也会随系统版
 ### SpringBoard
 
 - 状态信息：StatBar、NSBar 与 NiceBar Lite
-- 布局与外观：SBCustomizer、Home Layout Extras、主题、LiveWP、
-  Metal Lock Light 与 Mood Wallpaper
+- 布局与外观：Apple Watch 风格主屏幕布局、SBCustomizer、
+  Home Layout Extras、主题、LiveWP、Metal Lock Light 与 Mood Wallpaper
 - 窗口与导航：MilkyWay Lite、Dynamic Stage Lite、iPad Dock、
   App Switcher Grid、Upside Down 与 UIKit Debug Overlay
 - 通知、动画、Face ID、屏幕方向、图标物理效果等实验功能
@@ -74,6 +75,8 @@ iOS/iPadOS 18.7.2 与 26.1 中修复。SpringBoard 私有 API 也会随系统版
 ### 工具与持久化修改
 
 - MobileGestalt Editor：编辑选定的设备身份与能力值
+- App 降级：查询并安装 App Store 历史版本
+- App 更新屏蔽：按应用阻止 App Store 自动更新已选应用
 - IPA Decryptor（Beta）：导出已安装应用并解密主可执行文件；内嵌 framework、
   extension 与 dylib 仍可能保持加密
 - OTA 更新控制、Watch 配对范围调整、Home Bar 修改、位置模拟等系统工具
