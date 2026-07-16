@@ -8080,6 +8080,17 @@ static NSString *settings_pretty_date_for_iso(NSString *iso)
 @property (nonatomic, strong) NSArray<NSDictionary<NSString *, NSString *> *> *mwLiteInstalledApps;
 @property (nonatomic, assign) BOOL mwLiteAppsLoading;
 @property (nonatomic, copy) NSString *mwLiteSearchText;
+@property (nonatomic, assign) BOOL rootBundleSnapshotReady;
+@property (nonatomic, copy) NSArray<NSDictionary *> *cachedToolBundleRows;
+@property (nonatomic, copy) NSArray<NSDictionary *> *cachedJavaScriptBundleRows;
+@property (nonatomic, copy) NSArray<NSDictionary *> *cachedTweakBundleRows;
+@property (nonatomic, copy) NSArray<NSDictionary *> *cachedInDevBundleRows;
+@property (nonatomic, copy) NSArray<NSDictionary *> *cachedSystemBundleRows;
+@property (nonatomic, copy) NSDictionary<NSString *, NSArray<NSDictionary *> *> *cachedConflictBundleRows;
+@property (nonatomic, assign) BOOL manualActionsSnapshotReady;
+@property (nonatomic, assign) BOOL manualActionsSupported;
+@property (nonatomic, assign) BOOL manualActionsCleanupEnabled;
+@property (nonatomic, assign) BOOL manualActionsAnyInstalledOrQueued;
 @property (nonatomic, strong) CMMotionManager *moodDebugMotionManager;
 @property (nonatomic, assign) double moodDebugX;
 @property (nonatomic, assign) double moodDebugY;
@@ -8093,6 +8104,8 @@ static NSString *settings_pretty_date_for_iso(NSString *iso)
 - (void)startMWLiteAppListLoadForce:(BOOL)force;
 - (void)mwLiteSearchTextDidChange:(UITextField *)field;
 - (void)mwLiteSearchEditingDidEnd:(UITextField *)field;
+- (void)buildRootBundleSnapshotIfNeeded;
+- (void)refreshManualActionsSnapshot;
 @end
 
 // Singleton delegate so MFMailCompose's host VC doesn't need to conform. Lives
@@ -8367,7 +8380,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 {
     (void)note;
     dispatch_async(dispatch_get_main_queue(), ^{
-        [self.tableView reloadData];
+        [self reloadManualActions];
     });
 }
 
@@ -8602,8 +8615,31 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         return;
     }
 
+    [self refreshManualActionsSnapshot];
     NSIndexSet *sections = [NSIndexSet indexSetWithIndex:RootSectionActions];
     [self.tableView reloadSections:sections withRowAnimation:UITableViewRowAnimationNone];
+}
+
+- (void)refreshManualActionsSnapshot
+{
+    BOOL supported = settings_device_supported();
+    BOOL anyInstalledOrQueued = NO;
+    for (Package *package in [PackageCatalog allPackages]) {
+        if (package.isInstalled || package.isQueuedForApply) {
+            anyInstalledOrQueued = YES;
+            break;
+        }
+    }
+    if (!anyInstalledOrQueued) {
+        anyInstalledOrQueued = [PackageQueue sharedQueue].pendingCount > 0;
+    }
+
+    self.manualActionsSupported = supported;
+    self.manualActionsCleanupEnabled = supported && (g_kexploit_done ||
+                                                      g_springboard_rc_ready ||
+                                                      remote_call_has_local_state());
+    self.manualActionsAnyInstalledOrQueued = anyInstalledOrQueued;
+    self.manualActionsSnapshotReady = YES;
 }
 
 - (UITableViewCell *)buildWarningCell:(UITableViewCell *)cell
@@ -9654,19 +9690,6 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     return out;
 }
 
-- (NSArray<NSDictionary *> *)inDevBundleRows
-{
-    NSMutableArray<NSDictionary *> *out = [NSMutableArray array];
-    for (NSDictionary *bundle in [self allTweakBundleRows]) {
-        if (![bundle[@"indev"] boolValue]) continue;
-        NSInteger sec = [bundle[@"section"] integerValue];
-        if ([self rowsForSection:sec].count > 0) {
-            [out addObject:bundle];
-        }
-    }
-    return out;
-}
-
 - (NSString *)conflictGroupIdentifierForRootSection:(RootSection)section
 {
     switch (section) {
@@ -9703,16 +9726,8 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 
 - (NSArray<NSDictionary *> *)bundleRowsForConflictGroupIdentifier:(NSString *)groupIdentifier
 {
-    NSSet<NSString *> *groupKeys = [NSSet setWithArray:cyanide_tweak_conflict_group_enabled_keys(groupIdentifier)];
-    NSMutableArray<NSDictionary *> *out = [NSMutableArray array];
-    for (NSDictionary *bundle in [self filterBundles:[self allTweakBundleRows]]) {
-        NSString *enabledKey = [self compatibilityKeyForBundleRow:bundle];
-        NSString *primaryGroup = cyanide_tweak_primary_conflict_group_identifier(enabledKey);
-        if ([primaryGroup isEqualToString:groupIdentifier] && [groupKeys containsObject:enabledKey]) {
-            [out addObject:bundle];
-        }
-    }
-    return out;
+    [self buildRootBundleSnapshotIfNeeded];
+    return self.cachedConflictBundleRows[groupIdentifier] ?: @[];
 }
 
 - (NSArray<NSDictionary *> *)conflictBundleRowsForRootSection:(RootSection)section
@@ -9725,36 +9740,80 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 
 - (NSArray<NSDictionary *> *)tweakBundleRows
 {
+    [self buildRootBundleSnapshotIfNeeded];
+    return self.cachedTweakBundleRows ?: @[];
+}
+
+- (NSArray<NSDictionary *> *)inDevBundleRows
+{
+    [self buildRootBundleSnapshotIfNeeded];
+    return self.cachedInDevBundleRows ?: @[];
+}
+
+- (void)buildRootBundleSnapshotIfNeeded
+{
+    if (self.detailMode || self.rootBundleSnapshotReady) return;
+
+    NSArray<NSDictionary *> *allTweakRows = [self allTweakBundleRows];
+    NSArray<NSDictionary *> *filteredTweakRows = [self filterBundles:allTweakRows];
+    NSMutableDictionary<NSString *, NSArray<NSDictionary *> *> *conflictRows = [NSMutableDictionary dictionary];
     NSMutableSet<NSString *> *groupedKeys = [NSMutableSet set];
     for (NSString *groupIdentifier in cyanide_tweak_conflict_group_identifiers()) {
-        if ([self bundleRowsForConflictGroupIdentifier:groupIdentifier].count >= 2) {
+        NSSet<NSString *> *groupKeys = [NSSet setWithArray:cyanide_tweak_conflict_group_enabled_keys(groupIdentifier)];
+        NSMutableArray<NSDictionary *> *rows = [NSMutableArray array];
+        for (NSDictionary *bundle in filteredTweakRows) {
+            NSString *enabledKey = [self compatibilityKeyForBundleRow:bundle];
+            NSString *primaryGroup = cyanide_tweak_primary_conflict_group_identifier(enabledKey);
+            if ([primaryGroup isEqualToString:groupIdentifier] && [groupKeys containsObject:enabledKey]) {
+                [rows addObject:bundle];
+            }
+        }
+        if (rows.count >= 2) {
+            conflictRows[groupIdentifier] = [rows copy];
             [groupedKeys addObjectsFromArray:cyanide_tweak_conflict_group_enabled_keys(groupIdentifier)];
         }
     }
 
-    NSMutableArray<NSDictionary *> *out = [NSMutableArray array];
-    for (NSDictionary *bundle in [self filterBundles:[self allTweakBundleRows]]) {
+    NSMutableArray<NSDictionary *> *tweakRows = [NSMutableArray array];
+    for (NSDictionary *bundle in filteredTweakRows) {
         NSString *enabledKey = [self compatibilityKeyForBundleRow:bundle];
         if (enabledKey.length == 0 || ![groupedKeys containsObject:enabledKey]) {
-            [out addObject:bundle];
+            [tweakRows addObject:bundle];
         }
     }
-    return out;
+
+    NSMutableArray<NSDictionary *> *inDevRows = [NSMutableArray array];
+    for (NSDictionary *bundle in allTweakRows) {
+        if (![bundle[@"indev"] boolValue]) continue;
+        NSInteger section = [bundle[@"section"] integerValue];
+        if ([self rowsForSection:section].count > 0) [inDevRows addObject:bundle];
+    }
+
+    self.cachedConflictBundleRows = [conflictRows copy];
+    self.cachedTweakBundleRows = [tweakRows copy];
+    self.cachedInDevBundleRows = [inDevRows copy];
+    self.cachedToolBundleRows = [self filterBundles:[self allToolBundleRows]];
+    self.cachedJavaScriptBundleRows = [self filterBundles:[self allJavaScriptBundleRows]];
+    self.cachedSystemBundleRows = [self filterBundles:[self allSystemBundleRows]];
+    self.rootBundleSnapshotReady = YES;
 }
 
 - (NSArray<NSDictionary *> *)toolBundleRows
 {
-    return [self filterBundles:[self allToolBundleRows]];
+    [self buildRootBundleSnapshotIfNeeded];
+    return self.cachedToolBundleRows ?: @[];
 }
 
 - (NSArray<NSDictionary *> *)javaScriptBundleRows
 {
-    return [self filterBundles:[self allJavaScriptBundleRows]];
+    [self buildRootBundleSnapshotIfNeeded];
+    return self.cachedJavaScriptBundleRows ?: @[];
 }
 
 - (NSArray<NSDictionary *> *)systemBundleRows
 {
-    return [self filterBundles:[self allSystemBundleRows]];
+    [self buildRootBundleSnapshotIfNeeded];
+    return self.cachedSystemBundleRows ?: @[];
 }
 
 - (NSArray<NSDictionary *> *)bundleRowsForRootSection:(RootSection)section
@@ -11950,17 +12009,10 @@ void cyanide_present_contact(UIViewController *host)
         cell.accessoryType = UITableViewCellAccessoryNone;
         cell.detailTextLabel.text = nil;
 
-        BOOL supported = settings_device_supported();
-        BOOL cleanupEnabled = supported && (g_kexploit_done ||
-                                            g_springboard_rc_ready ||
-                                            remote_call_has_local_state());
-        BOOL anyInstalledOrQueued = NO;
-        for (Package *p in [PackageCatalog allPackages]) {
-            if (p.isInstalled || p.isQueuedForApply) { anyInstalledOrQueued = YES; break; }
-        }
-        if (!anyInstalledOrQueued) {
-            anyInstalledOrQueued = [[PackageQueue sharedQueue] pendingCount] > 0;
-        }
+        if (!self.manualActionsSnapshotReady) [self refreshManualActionsSnapshot];
+        BOOL supported = self.manualActionsSupported;
+        BOOL cleanupEnabled = self.manualActionsCleanupEnabled;
+        BOOL anyInstalledOrQueued = self.manualActionsAnyInstalledOrQueued;
 
         BOOL rowEnabled = supported;
         NSString *symbol = nil;
