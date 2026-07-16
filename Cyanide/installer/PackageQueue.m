@@ -6,6 +6,7 @@
 #import "PackageQueue.h"
 #import "PackageCatalog.h"
 #import "../SettingsViewController.h"
+#import "../TweakCompatibility.h"
 #import "../tweaks/QuickLoader.h"
 #import "../tweaks/RepoTweaks.h"
 
@@ -41,53 +42,11 @@ static NSString *PackageMissingThemeReason(Package *package)
     return nil;
 }
 
-static BOOL PackageIsStageWindowPackage(Package *package)
-{
-    NSString *key = package.enabledKey;
-    return [key isEqualToString:kSettingsStageStripEnabled] ||
-           [key isEqualToString:kSettingsMWLiteEnabled];
-}
-
-static NSString *PackageStageWindowPeerKey(Package *package)
-{
-    if ([package.enabledKey isEqualToString:kSettingsStageStripEnabled]) return kSettingsMWLiteEnabled;
-    if ([package.enabledKey isEqualToString:kSettingsMWLiteEnabled]) return kSettingsStageStripEnabled;
-    return nil;
-}
-
-static NSString *PackageStageWindowPeerName(Package *package)
-{
-    if ([package.enabledKey isEqualToString:kSettingsStageStripEnabled]) return @"MWLite";
-    if ([package.enabledKey isEqualToString:kSettingsMWLiteEnabled]) return @"Dynamic Stage Lite";
-    return @"the other floating-window tweak";
-}
-
-static BOOL PackageIsWallpaperEffectPackage(Package *package)
-{
-    NSString *key = package.enabledKey;
-    return [key isEqualToString:kSettingsLiveWPEnabled] ||
-           [key isEqualToString:kSettingsMetalLockLightEnabled] ||
-           [key isEqualToString:kSettingsMoodWallpaperEnabled];
-}
-
-static NSArray<NSString *> *PackageWallpaperEffectKeys(void)
-{
-    return @[ kSettingsLiveWPEnabled, kSettingsMetalLockLightEnabled, kSettingsMoodWallpaperEnabled ];
-}
-
-static NSString *PackageWallpaperEffectNameForKey(NSString *key)
-{
-    if ([key isEqualToString:kSettingsLiveWPEnabled]) return @"LiveWP";
-    if ([key isEqualToString:kSettingsMetalLockLightEnabled]) return @"Metal Lock Light";
-    if ([key isEqualToString:kSettingsMoodWallpaperEnabled]) return @"Mood Wallpaper";
-    return @"another wallpaper effect";
-}
-
 static BOOL PackageArrayContainsEnabledKey(NSArray<Package *> *packages, NSString *enabledKey)
 {
     if (enabledKey.length == 0) return NO;
     for (Package *p in packages) {
-        if ([p.enabledKey isEqualToString:enabledKey]) return YES;
+        if ([cyanide_tweak_enabled_key_for_package(p) isEqualToString:enabledKey]) return YES;
     }
     return NO;
 }
@@ -182,26 +141,18 @@ static BOOL PackageShouldAutoQueueForApply(Package *package)
         [out addObject:p];
     }
 
-    if (PackageArrayContainsEnabledKey(out, kSettingsStageStripEnabled) &&
-        PackageArrayContainsEnabledKey(out, kSettingsMWLiteEnabled)) {
-        NSMutableArray<Package *> *filtered = [NSMutableArray arrayWithCapacity:out.count];
-        for (Package *p in out) {
-            if ([p.enabledKey isEqualToString:kSettingsMWLiteEnabled]) continue;
-            [filtered addObject:p];
-        }
-        out = filtered;
-    }
-
-    NSMutableSet<NSString *> *seenWallpaperEffects = [NSMutableSet set];
-    NSMutableArray<Package *> *wallpaperFiltered = [NSMutableArray arrayWithCapacity:out.count];
+    NSMutableArray<Package *> *compatibilityFiltered = [NSMutableArray arrayWithCapacity:out.count];
     for (Package *p in out) {
-        if (PackageIsWallpaperEffectPackage(p)) {
-            if (seenWallpaperEffects.count > 0) continue;
-            [seenWallpaperEffects addObject:p.enabledKey ?: @""];
+        BOOL conflictsWithAcceptedPackage = NO;
+        for (NSString *peerKey in cyanide_conflicting_enabled_keys(cyanide_tweak_enabled_key_for_package(p))) {
+            if (PackageArrayContainsEnabledKey(compatibilityFiltered, peerKey)) {
+                conflictsWithAcceptedPackage = YES;
+                break;
+            }
         }
-        [wallpaperFiltered addObject:p];
+        if (!conflictsWithAcceptedPackage) [compatibilityFiltered addObject:p];
     }
-    out = wallpaperFiltered;
+    out = compatibilityFiltered;
 
     BOOL hasRepoTweakUsingQL = NO;
     for (Package *p in out) {
@@ -318,33 +269,22 @@ static BOOL PackageShouldAutoQueueForApply(Package *package)
             if (reason) *reason = themeReason;
             return NO;
         }
-        if (PackageIsStageWindowPackage(package)) {
-            NSString *peerKey = PackageStageWindowPeerKey(package);
+        NSString *compatibilityKey = cyanide_tweak_enabled_key_for_package(package);
+        for (NSString *peerKey in cyanide_conflicting_enabled_keys(compatibilityKey)) {
             BOOL peerEnabled = [[NSUserDefaults standardUserDefaults] boolForKey:peerKey];
             BOOL peerQueuedForInstall = PackageArrayContainsEnabledKey(self.installs, peerKey);
             BOOL peerQueuedForUninstall = PackageArrayContainsEnabledKey(self.uninstalls, peerKey);
             if ((peerEnabled && !peerQueuedForUninstall) || peerQueuedForInstall) {
                 if (reason) {
-                    *reason = [NSString stringWithFormat:@"%@ is already active or queued. Dynamic Stage Lite and MWLite both own SpringBoard floating-window state; deactivate one before installing the other.",
-                               PackageStageWindowPeerName(package)];
+                    NSString *peerName = cyanide_tweak_display_name_for_enabled_key(peerKey)
+                        ?: NSLocalizedString(@"A conflicting tweak", nil);
+                    NSString *conflictReason = cyanide_tweak_conflict_reason(compatibilityKey, peerKey)
+                        ?: NSLocalizedString(@"Deactivate it before installing this tweak.", nil);
+                    *reason = [NSString stringWithFormat:NSLocalizedString(@"%@ is already active or queued. %@", nil),
+                               peerName,
+                               conflictReason];
                 }
                 return NO;
-            }
-        }
-        if (PackageIsWallpaperEffectPackage(package)) {
-            NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
-            for (NSString *peerKey in PackageWallpaperEffectKeys()) {
-                if ([peerKey isEqualToString:package.enabledKey]) continue;
-                BOOL peerEnabled = [d boolForKey:peerKey];
-                BOOL peerQueuedForInstall = PackageArrayContainsEnabledKey(self.installs, peerKey);
-                BOOL peerQueuedForUninstall = PackageArrayContainsEnabledKey(self.uninstalls, peerKey);
-                if ((peerEnabled && !peerQueuedForUninstall) || peerQueuedForInstall) {
-                    if (reason) {
-                        *reason = [NSString stringWithFormat:@"%@ is already active or queued. LiveWP, Metal Lock Light, and Mood Wallpaper all own SpringBoard wallpaper layers; deactivate one before installing another.",
-                                   PackageWallpaperEffectNameForKey(peerKey)];
-                    }
-                    return NO;
-                }
             }
         }
     }

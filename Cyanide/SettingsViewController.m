@@ -4,6 +4,7 @@
 //
 
 #import "SettingsViewController.h"
+#import "AppStoreToolsViewController.h"
 #import "ThemerFormatGuideViewController.h"
 #import "MobileGestaltViewController.h"
 #import "RepoTweaksViewControllers.h"
@@ -29,6 +30,8 @@
 #import "tweaks/metal_lock_light.h"
 #import "tweaks/mood_wallpaper.h"
 #import "tweaks/gravitylite.h"
+#import "tweaks/watchlayout.h"
+#import "tweaks/appstoretools.h"
 #import "tweaks/appswitchergrid.h"
 #import "tweaks/debugoverlay.h"
 #import "tweaks/upsidedown.h"
@@ -50,6 +53,7 @@
 #import "installer/PackageCatalog.h"
 #import "installer/PackageQueue.h"
 #import "installer/PackagesViewController.h"
+#import "TweakCompatibility.h"
 #import "docs/DocsViewController.h"
 #import "UpdateChecker.h"
 #import "SBLArchiveExtractor.h"
@@ -271,6 +275,8 @@ NSString * const kSettingsLayoutHomeExtraBottom = @"LayoutHomeExtraBottom";
 NSString * const kSettingsLayoutDockExtraHorizontal = @"LayoutDockExtraHorizontal";
 NSString * const kSettingsLayoutHomeScalePct    = @"LayoutHomeScalePct";
 NSString * const kSettingsLayoutDockScalePct    = @"LayoutDockScalePct";
+
+NSString * const kSettingsWatchLayoutEnabled       = @"WatchLayoutEnabled";
 
 static double settings_number_row_normalized_value(NSDictionary *row, double value)
 {
@@ -998,6 +1004,15 @@ static bool settings_stop_gravitylite_registered(BOOL springboardWillDie)
     return gravitylite_stop_in_session();
 }
 
+static bool settings_stop_watchlayout_registered(BOOL springboardWillDie)
+{
+    if (springboardWillDie) {
+        watchlayout_forget_remote_state();
+        return true;
+    }
+    return watchlayout_stop_in_session();
+}
+
 static bool settings_stop_themer_registered(BOOL springboardWillDie)
 {
     (void)springboardWillDie;
@@ -1113,6 +1128,7 @@ static void settings_each_springboard_cleanup_entry(void (^block)(const Settings
         { kSettingsAppSwitcherGridEnabled, "App Switcher Grid", NULL, settings_stop_appswitchergrid_registered, appswitchergrid_forget_remote_state, NULL, YES, YES },
         { kSettingsFloatingDockEnabled, "iPad Dock", NULL, settings_stop_floatingdock_registered, floatingdock_forget_remote_state, NULL, NO, YES },
         { kSettingsGravityLiteEnabled, "Gravity Lite", settings_request_gravitylite_stop, settings_stop_gravitylite_registered, gravitylite_forget_remote_state, NULL, YES, YES },
+        { kSettingsWatchLayoutEnabled, "Watch Layout", NULL, settings_stop_watchlayout_registered, watchlayout_forget_remote_state, NULL, YES, YES },
         { kSettingsThemerEnabled, "Themer", settings_request_themer_stop, settings_stop_themer_registered, themer_forget_remote_state, settings_themer_running, YES, YES },
         { kSettingsSnowBoardLiteEnabled, "SnowBoard Lite", NULL, settings_stop_themer_registered, themer_forget_remote_state, NULL, YES, YES },
         { kSettingsLiveWPEnabled, "LiveWP", settings_request_livewp_stop, settings_stop_livewp_registered, livewp_forget_remote_state, settings_livewp_running, YES, YES },
@@ -1163,6 +1179,8 @@ static BOOL settings_cleanup_entry_has_runtime_state(NSUserDefaults *d,
                                                      const SettingsSpringBoardTweakCleanupEntry *entry)
 {
     if (!entry) return NO;
+    if ([entry->key isEqualToString:kSettingsWatchLayoutEnabled] &&
+        watchlayout_has_cached_state()) return YES;
     if (entry->isRunning && entry->isRunning()) return YES;
     if (entry->key && settings_tweak_is_applied(entry->key)) return YES;
     (void)d;
@@ -1941,7 +1959,8 @@ static BOOL settings_disabled_applied_springboard_cleanup_needed(NSUserDefaults 
     __block BOOL needed = NO;
     settings_each_springboard_cleanup_entry(^(const SettingsSpringBoardTweakCleanupEntry *entry) {
         if (needed || !entry->key || !entry->stop) return;
-        needed = ![d boolForKey:entry->key] && settings_tweak_is_applied(entry->key);
+        needed = !cyanide_tweak_enabled_with_compatibility(d, entry->key) &&
+                 settings_cleanup_entry_has_runtime_state(d, entry);
     });
     return needed;
 }
@@ -1950,7 +1969,8 @@ static void settings_stop_disabled_applied_springboard_tweaks_locked(NSUserDefau
 {
     settings_each_springboard_cleanup_entry(^(const SettingsSpringBoardTweakCleanupEntry *entry) {
         if (!entry->key || !entry->stop) return;
-        if ([d boolForKey:entry->key] || !settings_tweak_is_applied(entry->key)) return;
+        if (cyanide_tweak_enabled_with_compatibility(d, entry->key) ||
+            !settings_cleanup_entry_has_runtime_state(d, entry)) return;
         if (entry->requestStop) entry->requestStop();
         @try {
             bool stopped = g_springboard_rc_ready ? entry->stop(NO) : false;
@@ -3177,7 +3197,7 @@ static void settings_nicebar_refresh_weather_if_needed(BOOL force,
 
 static BOOL settings_dark_tweaks_any_enabled(NSUserDefaults *d)
 {
-    return [d boolForKey:kSettingsDSDisableAppLibrary] ||
+    return cyanide_tweak_enabled_with_compatibility(d, kSettingsDSDisableAppLibrary) ||
            [d boolForKey:kSettingsDSDisableIconFlyIn] ||
            [d boolForKey:kSettingsDSZeroWakeAnimation] ||
            [d boolForKey:kSettingsDSZeroBacklightFade] ||
@@ -3186,7 +3206,7 @@ static BOOL settings_dark_tweaks_any_enabled(NSUserDefaults *d)
 
 static BOOL settings_enabled_tweak_should_run(NSUserDefaults *d, NSString *key, BOOL pendingOnly)
 {
-    if (![d boolForKey:key]) return NO;
+    if (!cyanide_tweak_enabled_with_compatibility(d, key)) return NO;
     return !pendingOnly || !settings_tweak_is_applied(key);
 }
 
@@ -3404,7 +3424,7 @@ static bool settings_dark_tweaks_result_all_ok(SettingsDarkTweaksResult result)
 
 static SettingsDarkTweaksResult settings_apply_dark_tweaks_from_defaults_locked(NSUserDefaults *d)
 {
-    BOOL disableAppLibrary = [d boolForKey:kSettingsDSDisableAppLibrary];
+    BOOL disableAppLibrary = cyanide_tweak_enabled_with_compatibility(d, kSettingsDSDisableAppLibrary);
     BOOL disableIconFlyIn = [d boolForKey:kSettingsDSDisableIconFlyIn];
     BOOL zeroWakeAnimation = [d boolForKey:kSettingsDSZeroWakeAnimation];
     BOOL zeroBacklightFade = [d boolForKey:kSettingsDSZeroBacklightFade];
@@ -3497,6 +3517,12 @@ static bool settings_apply_gravitylite_from_defaults_locked(NSUserDefaults *d)
 {
     if (![d boolForKey:kSettingsGravityLiteEnabled]) return false;
     return gravitylite_apply_in_session(settings_gravitylite_config_from_defaults(d));
+}
+
+static bool settings_apply_watchlayout_from_defaults_locked(NSUserDefaults *d)
+{
+    if (![d boolForKey:kSettingsWatchLayoutEnabled]) return false;
+    return watchlayout_apply_in_session();
 }
 
 static double settings_fastlockx_lite_retry_interval(NSUserDefaults *d)
@@ -6784,7 +6810,7 @@ static void settings_schedule_live_apply_for_key(NSString *key)
                 if (settings_cleanup_in_progress() || !g_springboard_rc_ready) return;
                 SettingsDarkTweaksResult result = settings_apply_dark_tweaks_from_defaults_locked(d);
                 bool ok = settings_dark_tweaks_result_all_ok(result);
-                if ([d boolForKey:kSettingsDSDisableAppLibrary])
+                if (cyanide_tweak_enabled_with_compatibility(d, kSettingsDSDisableAppLibrary))
                     settings_mark_tweak_applied(kSettingsDSDisableAppLibrary, result.disableAppLibrary);
                 if ([d boolForKey:kSettingsDSDisableIconFlyIn])
                     settings_mark_tweak_applied(kSettingsDSDisableIconFlyIn, result.disableIconFlyIn);
@@ -6797,7 +6823,7 @@ static void settings_schedule_live_apply_for_key(NSString *key)
                 if ([d boolForKey:kSettingsDSDragCoefficientEnabled])
                     settings_mark_tweak_applied(kSettingsDSDragCoefficientEnabled, result.dragCoefficient);
                 printf("[SETTINGS] live DarkSword tweak results appLib=%d flyIn=%d wake=%d backlight=%d dblTap=%d drag=%d all=%d\n",
-                       [d boolForKey:kSettingsDSDisableAppLibrary] ? result.disableAppLibrary : -1,
+                       cyanide_tweak_enabled_with_compatibility(d, kSettingsDSDisableAppLibrary) ? result.disableAppLibrary : -1,
                        [d boolForKey:kSettingsDSDisableIconFlyIn] ? result.disableIconFlyIn : -1,
                        [d boolForKey:kSettingsDSZeroWakeAnimation] ? result.zeroWakeAnimation : -1,
                        [d boolForKey:kSettingsDSZeroBacklightFade] ? result.zeroBacklightFade : -1,
@@ -6963,6 +6989,8 @@ void settings_register_defaults(void)
         kSettingsLayoutDockExtraHorizontal: @0,
         kSettingsLayoutHomeScalePct:        @100,
         kSettingsLayoutDockScalePct:        @100,
+
+        kSettingsWatchLayoutEnabled:       @NO,
 
         kSettingsStatBarEnabled: @NO,
         kSettingsStatBarCelsius: @NO,
@@ -7164,9 +7192,9 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             BOOL forceSpringBoardRefresh = runPowercuff &&
                                            settings_has_persistent_springboard_remote_call_user();
             BOOL springBoardPendingOnly = pendingOnly && !forceSpringBoardRefresh;
-            BOOL statBarEnabled = [d boolForKey:kSettingsStatBarEnabled];
-            BOOL nsBarEnabled = [d boolForKey:kSettingsNSBarEnabled];
-            BOOL niceBarLiteEnabled = [d boolForKey:kSettingsNiceBarLiteEnabled];
+            BOOL statBarEnabled = cyanide_tweak_enabled_with_compatibility(d, kSettingsStatBarEnabled);
+            BOOL nsBarEnabled = cyanide_tweak_enabled_with_compatibility(d, kSettingsNSBarEnabled);
+            BOOL niceBarLiteEnabled = cyanide_tweak_enabled_with_compatibility(d, kSettingsNiceBarLiteEnabled);
             BOOL rssiEnabled = settings_rssi_install_allowed() && [d boolForKey:kSettingsRSSIDisplayEnabled];
             BOOL axonLiteEnabled = [d boolForKey:kSettingsAxonLiteEnabled];
             BOOL typeBannerEnabled = settings_typebanner_install_allowed() && [d boolForKey:kSettingsTypeBannerEnabled];
@@ -7174,16 +7202,17 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             BOOL debugOverlayEnabled = [d boolForKey:kSettingsDebugOverlayEnabled];
             BOOL upsideDownEnabled = [d boolForKey:kSettingsUpsideDownEnabled];
             BOOL appSwitcherGridEnabled = [d boolForKey:kSettingsAppSwitcherGridEnabled];
-            BOOL floatingDockEnabled = [d boolForKey:kSettingsFloatingDockEnabled];
-            BOOL themerEnabled = [d boolForKey:kSettingsThemerEnabled];
-            BOOL snowboardLiteEnabled = [d boolForKey:kSettingsSnowBoardLiteEnabled];
-            BOOL liveWPEnabled = [d boolForKey:kSettingsLiveWPEnabled];
-            BOOL metalLockLightEnabled = [d boolForKey:kSettingsMetalLockLightEnabled];
-            BOOL moodWallpaperEnabled = [d boolForKey:kSettingsMoodWallpaperEnabled];
-            BOOL layoutExtrasEnabled = [d boolForKey:kSettingsLayoutExtrasEnabled];
-            BOOL stageStripEnabled = settings_stagestrip_install_allowed() && [d boolForKey:kSettingsStageStripEnabled];
-            BOOL mwLiteEnabled = settings_stagestrip_install_allowed() && [d boolForKey:kSettingsMWLiteEnabled];
+            BOOL floatingDockEnabled = cyanide_tweak_enabled_with_compatibility(d, kSettingsFloatingDockEnabled);
+            BOOL themerEnabled = cyanide_tweak_enabled_with_compatibility(d, kSettingsThemerEnabled);
+            BOOL snowboardLiteEnabled = cyanide_tweak_enabled_with_compatibility(d, kSettingsSnowBoardLiteEnabled);
+            BOOL liveWPEnabled = cyanide_tweak_enabled_with_compatibility(d, kSettingsLiveWPEnabled);
+            BOOL metalLockLightEnabled = cyanide_tweak_enabled_with_compatibility(d, kSettingsMetalLockLightEnabled);
+            BOOL moodWallpaperEnabled = cyanide_tweak_enabled_with_compatibility(d, kSettingsMoodWallpaperEnabled);
+            BOOL layoutExtrasEnabled = cyanide_tweak_enabled_with_compatibility(d, kSettingsLayoutExtrasEnabled);
+            BOOL stageStripEnabled = settings_stagestrip_install_allowed() && cyanide_tweak_enabled_with_compatibility(d, kSettingsStageStripEnabled);
+            BOOL mwLiteEnabled = settings_stagestrip_install_allowed() && cyanide_tweak_enabled_with_compatibility(d, kSettingsMWLiteEnabled);
             BOOL gravityLiteEnabled = [d boolForKey:kSettingsGravityLiteEnabled];
+            BOOL watchLayoutEnabled = cyanide_tweak_enabled_with_compatibility(d, kSettingsWatchLayoutEnabled);
             BOOL runSBC = settings_enabled_tweak_should_run(d, kSettingsSBCEnabled, springBoardPendingOnly);
             BOOL runDarkTweaks = settings_dark_tweaks_should_run(d, springBoardPendingOnly);
             BOOL runStatBar = settings_enabled_tweak_should_run(d, kSettingsStatBarEnabled, springBoardPendingOnly);
@@ -7207,6 +7236,7 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             BOOL runMWLite = settings_stagestrip_install_allowed() && settings_enabled_tweak_should_run(d, kSettingsMWLiteEnabled, springBoardPendingOnly);
             BOOL runFastLockXLite = settings_fastlockx_lite_install_allowed() && settings_enabled_tweak_should_run(d, kSettingsFastLockXLiteEnabled, springBoardPendingOnly);
             BOOL runGravityLite = settings_enabled_tweak_should_run(d, kSettingsGravityLiteEnabled, springBoardPendingOnly);
+            BOOL runWatchLayout = settings_enabled_tweak_should_run(d, kSettingsWatchLayoutEnabled, springBoardPendingOnly);
             BOOL runQuickLoader = settings_enabled_tweak_should_run(d, kSettingsQuickLoaderEnabled, springBoardPendingOnly);
             BOOL runRepoTweaks = settings_enabled_tweak_should_run(d, kSettingsRepoTweaksEnabled, springBoardPendingOnly);
             BOOL stagePausesThemerLive = settings_themer_dynamic_updates_blocked_by_stage(d);
@@ -7214,23 +7244,23 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                 settings_note_themer_stage_conflict(YES);
             }
             BOOL cleanupDisabledSpringBoardTweaks = settings_disabled_applied_springboard_cleanup_needed(d);
-            if (stageStripEnabled && mwLiteEnabled) {
-                log_user("[COMPAT] MilkyWay Lite and Dynamic Stage Lite cannot both be active. Skipping MilkyWay Lite until Dynamic Stage Lite is disabled.\n");
-                runMWLite = NO;
-                mwLiteEnabled = NO;
+            for (NSString *blockedKey in cyanide_blocked_enabled_tweak_keys(d)) {
+                NSString *winnerKey = nil;
+                for (NSString *peerKey in cyanide_conflicting_enabled_keys(blockedKey)) {
+                    if (cyanide_tweak_enabled_with_compatibility(d, peerKey)) {
+                        winnerKey = peerKey;
+                        break;
+                    }
+                }
+                NSString *blockedName = cyanide_tweak_display_name_for_enabled_key(blockedKey) ?: blockedKey;
+                NSString *winnerName = cyanide_tweak_display_name_for_enabled_key(winnerKey) ?: winnerKey ?: @"another tweak";
+                NSString *reason = cyanide_tweak_conflict_reason(blockedKey, winnerKey) ?: @"The tweaks are mutually exclusive.";
+                log_user("[COMPAT] Keeping %s and skipping %s. %s\n",
+                         winnerName.UTF8String,
+                         blockedName.UTF8String,
+                         reason.UTF8String);
             }
-            if (liveWPEnabled && (metalLockLightEnabled || moodWallpaperEnabled)) {
-                log_user("[COMPAT] LiveWP, Metal Lock Light, and Mood Wallpaper cannot be active together. Keeping LiveWP and skipping the other wallpaper effects.\n");
-                runMetalLockLight = NO;
-                runMoodWallpaper = NO;
-                metalLockLightEnabled = NO;
-                moodWallpaperEnabled = NO;
-            } else if (metalLockLightEnabled && moodWallpaperEnabled) {
-                log_user("[COMPAT] Metal Lock Light and Mood Wallpaper cannot be active together. Keeping Metal Lock Light and skipping Mood Wallpaper.\n");
-                runMoodWallpaper = NO;
-                moodWallpaperEnabled = NO;
-            }
-            BOOL needsSpringBoardWork = runSBC || runDarkTweaks || runStatBar || runNSBar || runNiceBarLite || runRSSI || runAxonLite || runGravityLite || runLayoutExtras || runTypeBanner || runNotificationIsland || runDebugOverlay || runUpsideDown || runAppSwitcherGrid || runFloatingDock || runThemer || runSnowBoardLite || runLiveWP || runMetalLockLight || runMoodWallpaper || runStageStrip || runMWLite || runFastLockXLite || runQuickLoader || runRepoTweaks || cleanupDisabledSpringBoardTweaks;
+            BOOL needsSpringBoardWork = runSBC || runDarkTweaks || runStatBar || runNSBar || runNiceBarLite || runRSSI || runAxonLite || runGravityLite || runWatchLayout || runLayoutExtras || runTypeBanner || runNotificationIsland || runDebugOverlay || runUpsideDown || runAppSwitcherGrid || runFloatingDock || runThemer || runSnowBoardLite || runLiveWP || runMetalLockLight || runMoodWallpaper || runStageStrip || runMWLite || runFastLockXLite || runQuickLoader || runRepoTweaks || cleanupDisabledSpringBoardTweaks;
             BOOL runSandboxEscape = [d boolForKey:kSettingsRunSandboxEscape] && (!pendingOnly || needsSpringBoardWork);
             // TypeBanner prewarms its hidden SpringBoard window during Apply
             // and reuses the open SpringBoard session for text-only updates.
@@ -7262,6 +7292,7 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             if (runRSSI) total++;
             if (runAxonLite) total++;
             if (runGravityLite) total++;
+            if (runWatchLayout) total++;
             if (runTypeBanner) total++;
             if (runNotificationIsland) total++;
             if (runDebugOverlay) total++;
@@ -7292,6 +7323,7 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             if (runAppSwitcherGrid) [enabledTweaks addObject:@"app-switcher-grid"];
             if (runFloatingDock) [enabledTweaks addObject:@"floating-dock"];
             if (runGravityLite) [enabledTweaks addObject:[NSString stringWithFormat:@"gravity(%ld%%)", (long)[d integerForKey:kSettingsGravityLiteMagnitudePct]]];
+            if (runWatchLayout) [enabledTweaks addObject:@"watch-layout"];
             if (runPowercuff) [enabledTweaks addObject:[NSString stringWithFormat:@"power(%@)", [d stringForKey:kSettingsPowercuffLevel] ?: @"nominal"]];
             if (runDarkTweaks) [enabledTweaks addObject:@"dark"];
             if (runThemer) [enabledTweaks addObject:@"themer"];
@@ -7427,7 +7459,7 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         settings_progress(&step, total, "Applying DarkSword runtime hooks");
                         SettingsDarkTweaksResult result = settings_apply_dark_tweaks_from_defaults_locked(d);
                         bool ok = settings_dark_tweaks_result_all_ok(result);
-                        if ([d boolForKey:kSettingsDSDisableAppLibrary])
+                        if (cyanide_tweak_enabled_with_compatibility(d, kSettingsDSDisableAppLibrary))
                             settings_mark_tweak_applied(kSettingsDSDisableAppLibrary, result.disableAppLibrary);
                         if ([d boolForKey:kSettingsDSDisableIconFlyIn])
                             settings_mark_tweak_applied(kSettingsDSDisableIconFlyIn, result.disableIconFlyIn);
@@ -7440,7 +7472,7 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         if ([d boolForKey:kSettingsDSDragCoefficientEnabled])
                             settings_mark_tweak_applied(kSettingsDSDragCoefficientEnabled, result.dragCoefficient);
                         printf("[SETTINGS] DarkSword tweak results appLib=%d flyIn=%d wake=%d backlight=%d dblTap=%d drag=%d all=%d\n",
-                               [d boolForKey:kSettingsDSDisableAppLibrary] ? result.disableAppLibrary : -1,
+                               cyanide_tweak_enabled_with_compatibility(d, kSettingsDSDisableAppLibrary) ? result.disableAppLibrary : -1,
                                [d boolForKey:kSettingsDSDisableIconFlyIn] ? result.disableIconFlyIn : -1,
                                [d boolForKey:kSettingsDSZeroWakeAnimation] ? result.zeroWakeAnimation : -1,
                                [d boolForKey:kSettingsDSZeroBacklightFade] ? result.zeroBacklightFade : -1,
@@ -7487,6 +7519,22 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         if (ok && !settings_themer_live_repair_enabled(d)) {
                             log_user("[SBL] Live repair is enabled; Cyanide will keep the SpringBoard channel open so repair ticks reuse it.\n");
                             settings_start_themer_live_loop();
+                        }
+                    }
+
+                    if (runWatchLayout) {
+                        settings_progress(&step, total, "Applying Apple Watch icon layout");
+                        bool ok = settings_apply_watchlayout_from_defaults_locked(d);
+                        settings_mark_tweak_applied(kSettingsWatchLayoutEnabled,
+                                                    ok && watchLayoutEnabled);
+                        printf("[SETTINGS] Watch Layout result=%d mode=scrolling-honeycomb\n", ok);
+                        log_user("%s Watch Layout %s.\n",
+                                 ok ? "[OK]" : "[WARN]",
+                                 ok ? "applied without changing icon order"
+                                    : "did not apply cleanly");
+                        if (!ok) {
+                            runHadBlockingFailure = YES;
+                            runCompletionMessage = @"Watch Layout did not apply cleanly.";
                         }
                     }
 
@@ -7945,6 +7993,9 @@ typedef NS_ENUM(NSInteger, SettingsSection) {
     SectionFloatingDock,
     SectionDebugOverlay,
     SectionUpsideDown,
+    SectionWatchLayout,
+    SectionAppDowngrade,
+    SectionAppUpdateBlocking,
     SectionCount,
 };
 
@@ -7953,6 +8004,12 @@ typedef NS_ENUM(NSInteger, RootSection) {
     RootSectionActions,
     RootSectionTools,
     RootSectionJavaScript,
+    RootSectionConflictStatusBar,
+    RootSectionConflictHomeLayout,
+    RootSectionConflictThemeEngine,
+    RootSectionConflictFloatingScenes,
+    RootSectionConflictWallpaper,
+    RootSectionConflictAppLibrary,
     RootSectionTweakBundles,
     RootSectionInDev,
     RootSectionSystemBundles,
@@ -8859,6 +8916,42 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     ];
 }
 
+- (NSArray<NSDictionary *> *)watchLayoutRows
+{
+    return @[
+        @{ @"kind": @"info",
+           @"title": @"Scrolling Honeycomb Layout",
+           @"subtitle": @"Displays installed apps, including apps stored in folders and system apps, in a vertically scrolling Apple Watch-style layout. The Dock and saved Home Screen icon order are left untouched." },
+    ];
+}
+
+- (NSArray<NSDictionary *> *)appDowngradeRows
+{
+    return @[
+        @{ @"kind": @"info",
+           @"title": @"Historical App Store Versions",
+           @"subtitle": @"Select an installed App Store application, choose a historical version, and send the request using that application's App Store metadata." },
+        @{ @"kind": @"button",
+           @"title": @"Open App Downgrade",
+           @"action": @"app-downgrade-open" },
+        @{ @"kind": @"info",
+           @"title": @"Source",
+           @"subtitle": @"Inspired by 99nyj7yt4z-blip/cyanide-ios17. Version history is supplied by a configurable third-party API." },
+    ];
+}
+
+- (NSArray<NSDictionary *> *)appUpdateBlockingRows
+{
+    return @[
+        @{ @"kind": @"info",
+           @"title": @"Per-App Update Blocking",
+           @"subtitle": @"Creates or removes an installd-owned marker for the selected application. Blocking persists until you explicitly remove it." },
+        @{ @"kind": @"button",
+           @"title": @"Open App Update Blocking",
+           @"action": @"app-update-blocking-open" },
+    ];
+}
+
 - (NSArray<NSDictionary *> *)locationSimRows
 {
     NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
@@ -9456,6 +9549,9 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         case SectionUpsideDown: return self.upsideDownRows;
         case SectionFastLockXLite: return settings_fastlockx_lite_install_allowed() ? self.fastLockXLiteRows : @[];
         case SectionGravityLite: return self.gravityLiteRows;
+        case SectionWatchLayout: return self.watchLayoutRows;
+        case SectionAppDowngrade: return self.appDowngradeRows;
+        case SectionAppUpdateBlocking: return self.appUpdateBlockingRows;
         case SectionLocationSim: return self.locationSimRows;
         case SectionIPADecryptor: return self.ipaDecryptorRows;
         case SectionMWLite: return self.mwLiteRows;
@@ -9494,6 +9590,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         @{ @"title": @"FastLockX Lite",     @"icon": @"lock.open.fill",                      @"color": [UIColor systemGreenColor],  @"section": @(SectionFastLockXLite) },
 #endif
         @{ @"title": @"Gravity Lite",       @"icon": @"arrow.down.circle.fill",              @"color": [UIColor systemGreenColor],  @"section": @(SectionGravityLite) },
+        @{ @"title": @"Watch Layout",       @"icon": @"circle.grid.3x3.fill",                @"color": [UIColor systemGreenColor],  @"section": @(SectionWatchLayout) },
         @{ @"title": @"App Switcher Grid",  @"icon": @"square.grid.2x2.fill",                @"color": [UIColor systemOrangeColor], @"section": @(SectionAppSwitcherGrid) },
         @{ @"title": @"iPad Dock", @"icon": @"rectangle.on.rectangle", @"color": [UIColor systemOrangeColor], @"section": @(SectionFloatingDock) },
         @{ @"title": @"UIKit Debug Overlay", @"icon": @"ladybug.fill", @"color": [UIColor systemRedColor], @"section": @(SectionDebugOverlay) },
@@ -9504,7 +9601,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         @{ @"title": @"Metal Lock Light",    @"icon": @"sparkles",                            @"color": [UIColor systemYellowColor], @"section": @(SectionMetalLockLight) },
         @{ @"title": @"Mood Wallpaper",      @"icon": @"photo.on.rectangle.angled",            @"color": [UIColor systemPinkColor],   @"section": @(SectionMoodWallpaper) },
         @{ @"title": @"Powercuff",          @"icon": @"bolt.slash.fill",                     @"color": [UIColor systemOrangeColor], @"section": @(SectionPowercuff) },
-        @{ @"title": @"SpringBoard Tweaks", @"icon": @"apps.iphone",                         @"color": [UIColor systemIndigoColor], @"section": @(SectionDarkSwordTweaks) },
+        @{ @"title": @"SpringBoard Tweaks", @"icon": @"apps.iphone",                         @"color": [UIColor systemIndigoColor], @"section": @(SectionDarkSwordTweaks), @"compatibilityKey": kSettingsDSDisableAppLibrary },
         @{ @"title": @"Drag Coefficient",   @"icon": @"dial.medium.fill",                    @"color": [UIColor systemIndigoColor], @"section": @(SectionDragCoefficient) },
         @{ @"title": @"Home Layout Extras", @"icon": @"square.dashed.inset.filled",          @"color": [UIColor systemPurpleColor], @"section": @(SectionLayoutExtras) },
     ];
@@ -9517,6 +9614,8 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         @{ @"title": @"IPA Decryptor",      @"icon": @"lock.open.fill",                      @"color": [UIColor systemPurpleColor], @"section": @(SectionIPADecryptor) },
 #endif
         @{ @"title": @"MobileGestalt Editor", @"icon": @"cpu", @"color": [UIColor systemBlueColor], @"controller": @"mobilegestalt" },
+        @{ @"title": @"App Downgrade",      @"icon": @"arrow.down.app.fill",                 @"color": [UIColor systemPurpleColor], @"controller": @"app-downgrade" },
+        @{ @"title": @"App Update Blocking", @"icon": @"arrow.triangle.2.circlepath.circle.fill", @"color": [UIColor systemOrangeColor], @"controller": @"app-update-blocking" },
     ];
 }
 
@@ -9568,9 +9667,79 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     return out;
 }
 
+- (NSString *)conflictGroupIdentifierForRootSection:(RootSection)section
+{
+    switch (section) {
+        case RootSectionConflictStatusBar:      return CyanideConflictGroupStatusBar;
+        case RootSectionConflictHomeLayout:     return CyanideConflictGroupHomeLayout;
+        case RootSectionConflictThemeEngine:    return CyanideConflictGroupThemeEngine;
+        case RootSectionConflictFloatingScenes: return CyanideConflictGroupFloatingScenes;
+        case RootSectionConflictWallpaper:      return CyanideConflictGroupWallpaper;
+        case RootSectionConflictAppLibrary:     return CyanideConflictGroupAppLibrary;
+        default:                                return nil;
+    }
+}
+
+- (NSString *)compatibilityKeyForBundleRow:(NSDictionary *)bundle
+{
+    NSString *explicitKey = bundle[@"compatibilityKey"];
+    if (explicitKey.length > 0) return explicitKey;
+
+    NSNumber *sectionValue = bundle[@"section"];
+    if (![sectionValue isKindOfClass:NSNumber.class]) return nil;
+    static NSDictionary<NSNumber *, NSString *> *keysBySection;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSMutableDictionary<NSNumber *, NSString *> *keys = [NSMutableDictionary dictionary];
+        for (Package *package in [PackageCatalog allPackagesIncludingExperimental]) {
+            if (package.settingsSection == NSIntegerMax) continue;
+            NSString *enabledKey = cyanide_tweak_enabled_key_for_package(package);
+            if (enabledKey.length > 0) keys[@(package.settingsSection)] = enabledKey;
+        }
+        keysBySection = [keys copy];
+    });
+    return keysBySection[sectionValue];
+}
+
+- (NSArray<NSDictionary *> *)bundleRowsForConflictGroupIdentifier:(NSString *)groupIdentifier
+{
+    NSSet<NSString *> *groupKeys = [NSSet setWithArray:cyanide_tweak_conflict_group_enabled_keys(groupIdentifier)];
+    NSMutableArray<NSDictionary *> *out = [NSMutableArray array];
+    for (NSDictionary *bundle in [self filterBundles:[self allTweakBundleRows]]) {
+        NSString *enabledKey = [self compatibilityKeyForBundleRow:bundle];
+        NSString *primaryGroup = cyanide_tweak_primary_conflict_group_identifier(enabledKey);
+        if ([primaryGroup isEqualToString:groupIdentifier] && [groupKeys containsObject:enabledKey]) {
+            [out addObject:bundle];
+        }
+    }
+    return out;
+}
+
+- (NSArray<NSDictionary *> *)conflictBundleRowsForRootSection:(RootSection)section
+{
+    NSString *groupIdentifier = [self conflictGroupIdentifierForRootSection:section];
+    if (groupIdentifier.length == 0) return @[];
+    NSArray<NSDictionary *> *rows = [self bundleRowsForConflictGroupIdentifier:groupIdentifier];
+    return rows.count >= 2 ? rows : @[];
+}
+
 - (NSArray<NSDictionary *> *)tweakBundleRows
 {
-    return [self filterBundles:[self allTweakBundleRows]];
+    NSMutableSet<NSString *> *groupedKeys = [NSMutableSet set];
+    for (NSString *groupIdentifier in cyanide_tweak_conflict_group_identifiers()) {
+        if ([self bundleRowsForConflictGroupIdentifier:groupIdentifier].count >= 2) {
+            [groupedKeys addObjectsFromArray:cyanide_tweak_conflict_group_enabled_keys(groupIdentifier)];
+        }
+    }
+
+    NSMutableArray<NSDictionary *> *out = [NSMutableArray array];
+    for (NSDictionary *bundle in [self filterBundles:[self allTweakBundleRows]]) {
+        NSString *enabledKey = [self compatibilityKeyForBundleRow:bundle];
+        if (enabledKey.length == 0 || ![groupedKeys containsObject:enabledKey]) {
+            [out addObject:bundle];
+        }
+    }
+    return out;
 }
 
 - (NSArray<NSDictionary *> *)toolBundleRows
@@ -9590,6 +9759,8 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 
 - (NSArray<NSDictionary *> *)bundleRowsForRootSection:(RootSection)section
 {
+    NSString *groupIdentifier = [self conflictGroupIdentifierForRootSection:section];
+    if (groupIdentifier.length > 0) return [self conflictBundleRowsForRootSection:section];
     if (section == RootSectionTools)         return self.toolBundleRows;
     if (section == RootSectionJavaScript)    return self.javaScriptBundleRows;
     if (section == RootSectionTweakBundles)  return self.tweakBundleRows;
@@ -9610,6 +9781,10 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     if (self.detailMode) {
         return (NSInteger)[self rowsForSection:self.underlyingSection].count;
     }
+    NSString *groupIdentifier = [self conflictGroupIdentifierForRootSection:(RootSection)section];
+    if (groupIdentifier.length > 0) {
+        return (NSInteger)[self conflictBundleRowsForRootSection:(RootSection)section].count;
+    }
     switch ((RootSection)section) {
         case RootSectionChangelog: {
             NSInteger n = (NSInteger)settings_changelog_entries().count;
@@ -9619,6 +9794,12 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         case RootSectionActions:        return 4;
         case RootSectionTools:          return (NSInteger)self.toolBundleRows.count;
         case RootSectionJavaScript:     return (NSInteger)self.javaScriptBundleRows.count;
+        case RootSectionConflictStatusBar:
+        case RootSectionConflictHomeLayout:
+        case RootSectionConflictThemeEngine:
+        case RootSectionConflictFloatingScenes:
+        case RootSectionConflictWallpaper:
+        case RootSectionConflictAppLibrary: return 0;
         case RootSectionTweakBundles:   return (NSInteger)self.tweakBundleRows.count;
         case RootSectionInDev:         return (NSInteger)self.inDevBundleRows.count;
         case RootSectionSystemBundles:  return (NSInteger)self.systemBundleRows.count;
@@ -9632,11 +9813,23 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 - (NSString *)settingsRootSectionTitle:(NSInteger)section
 {
     if (self.detailMode) return nil;
+    NSString *groupIdentifier = [self conflictGroupIdentifierForRootSection:(RootSection)section];
+    if (groupIdentifier.length > 0) {
+        return [self conflictBundleRowsForRootSection:(RootSection)section].count > 0
+            ? cyanide_tweak_conflict_group_title(groupIdentifier)
+            : nil;
+    }
     switch ((RootSection)section) {
         case RootSectionChangelog:      return self.changelogExpanded ? @"What's New" : nil;
         case RootSectionActions:        return @"Quick Actions";
         case RootSectionTools:          return self.toolBundleRows.count        > 0 ? @"Tools" : nil;
         case RootSectionJavaScript:     return self.javaScriptBundleRows.count  > 0 ? @"JavaScript" : nil;
+        case RootSectionConflictStatusBar:
+        case RootSectionConflictHomeLayout:
+        case RootSectionConflictThemeEngine:
+        case RootSectionConflictFloatingScenes:
+        case RootSectionConflictWallpaper:
+        case RootSectionConflictAppLibrary: return nil;
         case RootSectionTweakBundles:   return self.tweakBundleRows.count   > 0 ? @"Tweaks" : nil;
         case RootSectionInDev:         return self.inDevBundleRows.count   > 0 ? @"In Development" : nil;
         case RootSectionSystemBundles:  return self.systemBundleRows.count  > 0 ? @"System" : nil;
@@ -9689,6 +9882,12 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     }
     if (s == SectionNanoRegistry) {
         return settings_l10n_text(@"Changes the watchOS pairing range saved on this iPhone.\n\nMost people should tap Use watchOS Range 99/23/10/6, then Apply Pairing Override. These are pairing protocol generations, not Apple Watch model numbers. 99 raises the watchOS pairing ceiling. 23 keeps the generation-23 setup protocol accepted. 10 and 6 leave the legacy chip and multi-watch floors at their normal values.\n\nApple Watch Ultra 3 cannot pair on iOS versions below 26 at this time.\n\nRespring or reboot after applying before you try to pair.");
+    }
+    if (s == SectionAppDowngrade) {
+        return settings_l10n_text(@"Uses the installed application's App Store item ID, storefront, and account metadata. Historical-version lookup comes from the configurable third-party API shown on the App Downgrade page.");
+    }
+    if (s == SectionAppUpdateBlocking) {
+        return settings_l10n_text(@"The marker lives beside the selected app bundle and is owned by installd. If installd is sleeping, open App Store and start any download before trying again.");
     }
     if (s == SectionPowercuff) {
         return settings_l10n_text(@"Underclocks the CPU/GPU via thermalmonitord by simulating thermal pressure. Nominal is the daily-use default. Light, Moderate, and Heavy intentionally underclock the CPU more and can make the device feel laggy, especially on older hardware.");
@@ -9759,6 +9958,8 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 {
     if (!self.detailMode) {
         if ((RootSection)section == RootSectionWarning) return CGFLOAT_MIN;
+        if ([self conflictGroupIdentifierForRootSection:(RootSection)section].length > 0 &&
+            [self conflictBundleRowsForRootSection:(RootSection)section].count == 0) return CGFLOAT_MIN;
         if ((RootSection)section == RootSectionChangelog     && settings_changelog_entries().count == 0) return CGFLOAT_MIN;
         if ((RootSection)section == RootSectionTools         && self.toolBundleRows.count == 0) return CGFLOAT_MIN;
         if ((RootSection)section == RootSectionJavaScript    && self.javaScriptBundleRows.count == 0) return CGFLOAT_MIN;
@@ -11684,7 +11885,12 @@ void cyanide_present_contact(UIViewController *host)
     NSIndexPath *dequeuePath = indexPath;
 
     if (!self.detailMode) {
-        switch ((RootSection)indexPath.section) {
+        RootSection rootSection = (RootSection)indexPath.section;
+        if ([self conflictGroupIdentifierForRootSection:rootSection].length > 0) {
+            NSArray<NSDictionary *> *bundles = [self conflictBundleRowsForRootSection:rootSection];
+            return [self buildBundleCellWithRow:bundles[indexPath.row] tableView:tableView];
+        }
+        switch (rootSection) {
             case RootSectionWarning:
                 indexPath = [NSIndexPath indexPathForRow:indexPath.row inSection:SectionWarning];
                 break;
@@ -11708,6 +11914,13 @@ void cyanide_present_contact(UIViewController *host)
                 return [self buildBundleCellWithRow:self.toolBundleRows[indexPath.row] tableView:tableView];
             case RootSectionJavaScript:
                 return [self buildBundleCellWithRow:self.javaScriptBundleRows[indexPath.row] tableView:tableView];
+            case RootSectionConflictStatusBar:
+            case RootSectionConflictHomeLayout:
+            case RootSectionConflictThemeEngine:
+            case RootSectionConflictFloatingScenes:
+            case RootSectionConflictWallpaper:
+            case RootSectionConflictAppLibrary:
+                return [[UITableViewCell alloc] init];
             case RootSectionTweakBundles:
                 return [self buildBundleCellWithRow:self.tweakBundleRows[indexPath.row] tableView:tableView];
             case RootSectionInDev:
@@ -12524,6 +12737,251 @@ void settings_prepare_mobilegestalt_access(UIViewController *host,
                             postNotificationName:kSettingsActionsDidCompleteNotification
                                           object:nil
                                         userInfo:info];
+                    });
+                }
+            });
+        }];
+    });
+}
+
+BOOL settings_app_store_tools_access_ready(void)
+{
+    return g_kexploit_done &&
+           kexploit_krw_ready() &&
+           check_sandbox_var_rw() == 0;
+}
+
+void settings_prepare_app_store_tools_access(UIViewController *host,
+                                             void (^completion)(BOOL success))
+{
+    if (!host) {
+        if (completion) completion(NO);
+        return;
+    }
+
+    static volatile int sAppStorePrepareInFlight = 0;
+    if (__sync_lock_test_and_set(&sAppStorePrepareInFlight, 1)) {
+        log_user("[APPSTORE] Kernel and filesystem preparation is already running.\n");
+        return;
+    }
+
+    __block BOOL actionOK = NO;
+    InstallProgressViewController *progress = [[InstallProgressViewController alloc] init];
+    progress.onDismiss = ^{
+        if (completion) completion(actionOK);
+    };
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:progress];
+    nav.modalPresentationStyle = UIModalPresentationAutomatic;
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIViewController *presenter = settings_active_presenter(host);
+        if (!presenter) {
+            __sync_lock_release(&sAppStorePrepareInFlight);
+            if (completion) completion(NO);
+            return;
+        }
+
+        [presenter presentViewController:nav animated:YES completion:^{
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                BOOL actionLockAcquired = NO;
+                NSString *message = nil;
+                @try {
+                    actionLockAcquired = settings_try_claim_actions_lock(
+                        "App Store tools preparation",
+                        "[APPSTORE] Another action is already running.");
+                    if (!actionLockAcquired) {
+                        message = settings_l10n_text(@"App Store tools preparation was blocked by another running action.");
+                        return;
+                    }
+
+                    log_user("[APPSTORE] Preparing kernel access and filesystem escape...\n");
+                    if (!settings_ensure_kexploit()) {
+                        message = settings_l10n_text(@"Kernel access failed. Check the log and try again.");
+                        return;
+                    }
+
+                    BOOL sandboxReady = ipadecryptor_prepare_for_app_enumeration();
+                    actionOK = sandboxReady && settings_app_store_tools_access_ready();
+                    log_user("%s App Store metadata access %s without SpringBoard RemoteCall.\n",
+                             actionOK ? "[OK]" : "[WARN]",
+                             actionOK ? "ready" : "unavailable");
+                    message = settings_l10n_text(actionOK
+                        ? @"Kernel access and filesystem escape are ready."
+                        : @"Filesystem access is still unavailable. Check the log and try again.");
+                } @finally {
+                    if (actionLockAcquired) settings_release_actions_lock();
+                    __sync_lock_release(&sAppStorePrepareInFlight);
+                    settings_post_actions_complete_async(actionOK, message ?: @"");
+                }
+            });
+        }];
+    });
+}
+
+void settings_perform_app_downgrade(UIViewController *host,
+                                    NSString *bundleID,
+                                    uint64_t itemID,
+                                    uint64_t versionID,
+                                    uint64_t accountID,
+                                    void (^completion)(BOOL success, NSString *message))
+{
+    if (!host || itemID == 0 || versionID == 0) {
+        if (completion) completion(NO, settings_l10n_text(@"The selected App Store version is invalid."));
+        return;
+    }
+
+    __block BOOL actionOK = NO;
+    __block NSString *completionMessage = nil;
+    InstallProgressViewController *progress = [[InstallProgressViewController alloc] init];
+    progress.onDismiss = ^{
+        if (completion) completion(actionOK, completionMessage ?: @"");
+    };
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:progress];
+    nav.modalPresentationStyle = UIModalPresentationAutomatic;
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIViewController *presenter = settings_active_presenter(host);
+        if (!presenter) {
+            if (completion) completion(NO, settings_l10n_text(@"Cyanide could not present the operation log."));
+            return;
+        }
+
+        [presenter presentViewController:nav animated:YES completion:^{
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                BOOL actionLockAcquired = NO;
+                @try {
+                    actionLockAcquired = settings_try_claim_actions_lock(
+                        "App downgrade",
+                        "[DOWNGRADE] Another action is already running.");
+                    if (!actionLockAcquired) {
+                        completionMessage = settings_l10n_text(@"App downgrade was blocked by another running action.");
+                        return;
+                    }
+                    if (!settings_ensure_kexploit()) {
+                        completionMessage = settings_l10n_text(@"Kernel access failed. Check the log and try again.");
+                        return;
+                    }
+
+                    log_user("[DOWNGRADE] Opening an isolated SpringBoard request session for %s.\n",
+                             bundleID.UTF8String ?: "unknown");
+                    @synchronized (settings_rc_lock()) {
+                        RemoteCallSession *session = [[RemoteCallSession alloc]
+                            initWithProcess:@"SpringBoard"
+                        useMigFilterBypass:NO
+                   firstExceptionTimeoutMS:5000];
+                        if (!session) {
+                            completionMessage = settings_l10n_text(@"Cyanide could not open the SpringBoard App Store request channel.");
+                        } else {
+                            @try {
+                                actionOK = appdowngrade_request_in_remote_session(
+                                    session, itemID, versionID, accountID);
+                            } @catch (NSException *exception) {
+                                log_user("[DOWNGRADE] Remote request exception: %s.\n",
+                                         exception.reason.UTF8String);
+                            }
+                            [session destroyRemoteCall];
+                        }
+                    }
+
+                    if (!completionMessage) {
+                        completionMessage = settings_l10n_text(actionOK
+                            ? @"The historical-version request was sent to App Store services. Watch the Home Screen for download progress."
+                            : @"The App Store request could not be sent. Check the log and try again.");
+                    }
+                } @finally {
+                    if (actionLockAcquired) settings_release_actions_lock();
+                    settings_post_actions_complete_async(actionOK, completionMessage ?: @"");
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(200 * NSEC_PER_MSEC)),
+                                   dispatch_get_main_queue(), ^{
+                        [nav dismissViewControllerAnimated:YES completion:nil];
+                    });
+                }
+            });
+        }];
+    });
+}
+
+void settings_set_app_update_blocked(UIViewController *host,
+                                     NSString *markerPath,
+                                     BOOL blocked,
+                                     void (^completion)(BOOL success, NSString *message))
+{
+    if (!host || markerPath.length == 0) {
+        if (completion) completion(NO, settings_l10n_text(@"The selected application container is invalid."));
+        return;
+    }
+
+    __block BOOL actionOK = NO;
+    __block NSString *completionMessage = nil;
+    InstallProgressViewController *progress = [[InstallProgressViewController alloc] init];
+    progress.onDismiss = ^{
+        if (completion) completion(actionOK, completionMessage ?: @"");
+    };
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:progress];
+    nav.modalPresentationStyle = UIModalPresentationAutomatic;
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIViewController *presenter = settings_active_presenter(host);
+        if (!presenter) {
+            if (completion) completion(NO, settings_l10n_text(@"Cyanide could not present the operation log."));
+            return;
+        }
+
+        [presenter presentViewController:nav animated:YES completion:^{
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                BOOL actionLockAcquired = NO;
+                int remoteErrno = 0;
+                @try {
+                    actionLockAcquired = settings_try_claim_actions_lock(
+                        "App update blocking",
+                        "[UPDATE-BLOCK] Another action is already running.");
+                    if (!actionLockAcquired) {
+                        completionMessage = settings_l10n_text(@"App update blocking was blocked by another running action.");
+                        return;
+                    }
+                    if (!settings_ensure_kexploit()) {
+                        completionMessage = settings_l10n_text(@"Kernel access failed. Check the log and try again.");
+                        return;
+                    }
+
+                    log_user("[UPDATE-BLOCK] Connecting to installd for its container-owned marker.\n");
+                    @synchronized (settings_rc_lock()) {
+                        RemoteCallSession *session = [[RemoteCallSession alloc]
+                            initWithProcess:@"installd"
+                        useMigFilterBypass:NO
+                   firstExceptionTimeoutMS:5000];
+                        if (!session) {
+                            completionMessage = settings_l10n_text(@"Go to App Store and start updating any reasonably large app. While it is downloading, return to Cyanide and retry the current operation or App Downgrade. This greatly improves the success rate.");
+                        } else {
+                            @try {
+                                actionOK = appupdateblocking_set_in_remote_session(
+                                    session, markerPath, blocked, &remoteErrno);
+                            } @catch (NSException *exception) {
+                                log_user("[UPDATE-BLOCK] Remote marker exception: %s.\n",
+                                         exception.reason.UTF8String);
+                            }
+                            [session destroyRemoteCall];
+                        }
+                    }
+
+                    if (!completionMessage) {
+                        if (actionOK) {
+                            completionMessage = settings_l10n_text(blocked
+                                ? @"App Store updates are blocked for the selected application."
+                                : @"App Store updates are enabled again for the selected application.");
+                        } else {
+                            completionMessage = [NSString stringWithFormat:
+                                settings_l10n_text(@"installd could not %@ the update marker (errno %d). Check the log and try again."),
+                                settings_l10n_text(blocked ? @"create" : @"remove"),
+                                remoteErrno];
+                        }
+                    }
+                } @finally {
+                    if (actionLockAcquired) settings_release_actions_lock();
+                    settings_post_actions_complete_async(actionOK, completionMessage ?: @"");
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(200 * NSEC_PER_MSEC)),
+                                   dispatch_get_main_queue(), ^{
+                        [nav dismissViewControllerAnimated:YES completion:nil];
                     });
                 }
             });
@@ -13538,6 +13996,12 @@ void settings_prepare_mobilegestalt_access(UIViewController *host,
                 break;
             case RootSectionTools:
             case RootSectionJavaScript:
+            case RootSectionConflictStatusBar:
+            case RootSectionConflictHomeLayout:
+            case RootSectionConflictThemeEngine:
+            case RootSectionConflictFloatingScenes:
+            case RootSectionConflictWallpaper:
+            case RootSectionConflictAppLibrary:
             case RootSectionInDev:
             case RootSectionTweakBundles:
             case RootSectionSystemBundles: {
@@ -13545,6 +14009,16 @@ void settings_prepare_mobilegestalt_access(UIViewController *host,
                 NSDictionary *bundle = bundles[indexPath.row];
                 if ([bundle[@"controller"] isEqualToString:@"mobilegestalt"]) {
                     MobileGestaltViewController *controller = [[MobileGestaltViewController alloc] init];
+                    [self.navigationController pushViewController:controller animated:YES];
+                    return;
+                }
+                if ([bundle[@"controller"] isEqualToString:@"app-downgrade"]) {
+                    AppDowngradeViewController *controller = [[AppDowngradeViewController alloc] init];
+                    [self.navigationController pushViewController:controller animated:YES];
+                    return;
+                }
+                if ([bundle[@"controller"] isEqualToString:@"app-update-blocking"]) {
+                    AppUpdateBlockingViewController *controller = [[AppUpdateBlockingViewController alloc] init];
                     [self.navigationController pushViewController:controller animated:YES];
                     return;
                 }
@@ -13676,6 +14150,20 @@ void settings_prepare_mobilegestalt_access(UIViewController *host,
 
     if (indexPath.section == SectionOTA) {
         settings_run_ota_action(indexPath.row == 0);
+        return;
+    }
+
+    if (indexPath.section == SectionAppDowngrade ||
+        indexPath.section == SectionAppUpdateBlocking) {
+        NSDictionary *row = [self rowsForSection:indexPath.section][indexPath.row];
+        NSString *action = row[@"action"];
+        if ([action isEqualToString:@"app-downgrade-open"]) {
+            AppDowngradeViewController *controller = [[AppDowngradeViewController alloc] init];
+            [self.navigationController pushViewController:controller animated:YES];
+        } else if ([action isEqualToString:@"app-update-blocking-open"]) {
+            AppUpdateBlockingViewController *controller = [[AppUpdateBlockingViewController alloc] init];
+            [self.navigationController pushViewController:controller animated:YES];
+        }
         return;
     }
 

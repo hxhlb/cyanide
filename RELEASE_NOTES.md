@@ -33,6 +33,19 @@ activity, omit it.
 
 ## Released
 
+### v1.5.0 - 2026-07-16
+
+- [x] 新增 Apple Watch 风格主屏幕布局，支持滚动浏览、启动应用和长按菜单。
+  Added an Apple Watch-style Home Screen layout with scrolling, app launching, and context menus.
+- [x] 新增 App 降级工具，可查询并安装 App Store 历史版本。
+  Added App Downgrade for finding and installing historical App Store versions.
+- [x] 新增按应用屏蔽 App Store 更新功能。
+  Added per-app App Store update blocking.
+- [x] 改进 tweak 兼容性管理，冲突功能现在会分类显示，并阻止同时启用。
+  Improved tweak compatibility management by grouping conflicting features and preventing simultaneous activation.
+- [x] 改进软件包详情页及简体中文、繁体中文本地化，修复描述换行和未翻译文案。
+  Improved package details and Chinese localization, fixing description line breaks and untranslated text.
+
 ### v1.4.2 - 2026-07-15
 
 - [x] 新增 MobileGestalt 编辑功能。

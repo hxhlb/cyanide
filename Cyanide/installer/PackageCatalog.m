@@ -5,6 +5,7 @@
 
 #import "PackageCatalog.h"
 #import "../SettingsViewController.h"
+#import "../TweakCompatibility.h"
 #import "../tweaks/RepoTweaks.h"
 #import "../tweaks/experimental_tweaks.h"
 
@@ -132,6 +133,9 @@ static const NSInteger kSecMoodWallpaper    = 29;
 static const NSInteger kSecFloatingDock     = 30;
 static const NSInteger kSecDebugOverlay     = 31;
 static const NSInteger kSecUpsideDown       = 32;
+static const NSInteger kSecWatchLayout      = 33;
+static const NSInteger kSecAppDowngrade     = 34;
+static const NSInteger kSecAppUpdateBlocking = 35;
 
 + (NSArray<Package *> *)allPackages
 {
@@ -283,10 +287,16 @@ static const NSInteger kSecUpsideDown       = 32;
         notificationIsland.installDisabledReason = inDevelopmentDisabledReason;
         notificationIsland.unstableWarning = @"⚠️ In development only — install is disabled because this does not work yet. Polls SpringBoard notification state over RemoteCall and may miss banners, duplicate activity updates, or destabilize SpringBoard.";
 
+        NSString *ipaDecryptorDescription = [@[
+            NSLocalizedString(@"Main-binary IPA decryptor for apps already installed on this device. Run Kernel Chain (no tweak install), choose an app, probe FairPlay LC_ENCRYPTION_INFO, then Start Decrypt (Main Binary).", nil),
+            NSLocalizedString(@"Decrypt path: arm KRW → find the live process → UUID-matched dump of the main Mach-O via DarkSword KRW → clear cryptid → pack Payload/*.app into Documents/DecryptedIPAs/*.ipa → share sheet.", nil),
+            NSLocalizedString(@"No App Store login or remote download. Scope: main executable only; encrypted frameworks/extensions stay encrypted until image-matched dependency dump lands.", nil),
+            NSLocalizedString(@"Credits: main dump flow adapted from lara decrypt.m (neonmodder123).", nil),
+        ] componentsJoinedByString:@"\n\n"];
         Package *ipaDecryptor = [[Package alloc] initWithIdentifier:@"com.darksword.ipadecryptor"
                                            name:NSLocalizedString(@"IPA Decryptor", nil)
                                shortDescription:NSLocalizedString(@"Main-binary FairPlay dump → Payload IPA", nil)
-                                longDescription:NSLocalizedString(@"Main-binary IPA decryptor for apps already installed on this device. Run Kernel Chain (no tweak install), choose an app, probe FairPlay LC_ENCRYPTION_INFO, then Start Decrypt (Main Binary).\n\nDecrypt path: arm KRW → find the live process → UUID-matched dump of the main Mach-O via DarkSword KRW → clear cryptid → pack Payload/*.app into Documents/DecryptedIPAs/*.ipa → share sheet.\n\nNo App Store login or remote download. Scope: main executable only; encrypted frameworks/extensions stay encrypted until image-matched dependency dump lands.\n\nCredits: main dump flow adapted from lara decrypt.m (neonmodder123).", nil)
+                                longDescription:ipaDecryptorDescription
                                         version:version
                                          author:@"londek / zeroxjf / neonmodder123"
                                        category:@"Beta"
@@ -297,23 +307,30 @@ static const NSInteger kSecUpsideDown       = 32;
         ipaDecryptor.settingsSection = kSecIPADecryptor;
         ipaDecryptor.unstableWarning = NSLocalizedString(@"⚠️ Beta main-binary only — requires live KRW and a running target. Encrypted frameworks/extensions are NOT dumped.", nil);
 
+        NSString *stageStripHowTo = [@[
+            NSLocalizedString(@"How to use:", nil),
+            NSLocalizedString(@"• Tap the dot in the bottom-right corner of the screen to open the picker.", nil),
+            NSLocalizedString(@"• Tap two apps to launch them side-by-side.", nil),
+            NSLocalizedString(@"• Drag the top bar to move; drag any corner to resize.", nil),
+            NSLocalizedString(@"• X in the top-left of a window closes it.", nil),
+            NSLocalizedString(@"• Gear in the picker tray jumps back to Cyanide settings.", nil),
+        ] componentsJoinedByString:@"\n"];
+        NSString *stageStripRoughEdges = [@[
+            NSLocalizedString(@"Rough edges:", nil),
+            NSLocalizedString(@"• Touch routing into hosted apps isn't wired — windows are for viewing/switching, not scrolling or typing.", nil),
+            NSLocalizedString(@"• Auto-close on full-screen launch is not yet hooked up; close manually with the X.", nil),
+            NSLocalizedString(@"• Gestures may stutter while the App Library is still filling in.", nil),
+        ] componentsJoinedByString:@"\n"];
         Package *stageStrip = [[Package alloc] initWithIdentifier:@"com.darksword.stagestrip"
                                            name:@"Dynamic Stage Lite"
-                               shortDescription:@"Two floating app windows, iPad-style"
-                                longDescription:
-            @"Run two apps as floating, resizable windows on top of SpringBoard.\n\n"
-            @"Based on Dynamic Stage by tomt000 — the original Stage Manager-for-iPhone tweak. Dynamic Stage Lite is an independent, RemoteCall-only re-implementation of the split-view + scene-hosting design; no original tweak code or assets are reused. Go check out tomt000's full version on Havoc.\n\n"
-            @"How to use:\n"
-            @"• Tap the dot in the bottom-right corner of the screen to open the picker.\n"
-            @"• Tap two apps to launch them side-by-side.\n"
-            @"• Drag the top bar to move; drag any corner to resize.\n"
-            @"• X in the top-left of a window closes it.\n"
-            @"• Gear in the picker tray jumps back to Cyanide settings.\n\n"
-            @"First Run is slow. The picker has to enumerate every installed app over RemoteCall and build a tile per app — expect 1-2 minutes on a fresh install. Re-Runs reuse the cache and are fast.\n\n"
-            @"Rough edges:\n"
-            @"• Touch routing into hosted apps isn't wired — windows are for viewing/switching, not scrolling or typing.\n"
-            @"• Auto-close on full-screen launch is not yet hooked up; close manually with the X.\n"
-            @"• Gestures may stutter while the App Library is still filling in."
+                               shortDescription:NSLocalizedString(@"Two floating app windows, iPad-style", nil)
+                                longDescription:[@[
+            NSLocalizedString(@"Run two apps as floating, resizable windows on top of SpringBoard.", nil),
+            NSLocalizedString(@"Based on Dynamic Stage by tomt000 — the original Stage Manager-for-iPhone tweak. Dynamic Stage Lite is an independent, RemoteCall-only re-implementation of the split-view + scene-hosting design; no original tweak code or assets are reused. Go check out tomt000's full version on Havoc.", nil),
+            stageStripHowTo,
+            NSLocalizedString(@"First Run is slow. The picker has to enumerate every installed app over RemoteCall and build a tile per app — expect 1-2 minutes on a fresh install. Re-Runs reuse the cache and are fast.", nil),
+            stageStripRoughEdges,
+        ] componentsJoinedByString:@"\n\n"]
                                         version:version
                                          author:@"zeroxjf"
                                        category:@"Beta"
@@ -321,7 +338,7 @@ static const NSInteger kSecUpsideDown       = 32;
                                            kind:PackageInstallKindToggle
                                      enabledKey:kSettingsStageStripEnabled
                                           isNew:NO];
-        stageStrip.unstableWarning = @"Beta / unstable: First Run takes 1-2 minutes because the picker enumerates every installed app and builds a tile per app. Re-Runs are fast. Touch routing into hosted windows isn't wired yet, so scrolling/typing inside a floating window may not work.";
+        stageStrip.unstableWarning = NSLocalizedString(@"Beta / unstable: First Run takes 1-2 minutes because the picker enumerates every installed app and builds a tile per app. Re-Runs are fast. Touch routing into hosted windows isn't wired yet, so scrolling/typing inside a floating window may not work.", nil);
 
         Package *mwLite = [[Package alloc] initWithIdentifier:@"com.darksword.mwlite"
                                            name:@"MilkyWay Lite"
@@ -333,7 +350,7 @@ static const NSInteger kSecUpsideDown       = 32;
              NSLocalizedString(@"Apps are chosen from the MilkyWay Lite picker after install; no app preselection is required before running the chain.", nil),
              NSLocalizedString(@"Compatibility: MilkyWay Lite and Dynamic Stage Lite both own SpringBoard floating-window/scene-host state. Only one can be installed at a time.", nil)]
                                         version:version
-                                         author:@"banana / zeroxjf"
+                                         author:@"Banana / zeroxjf"
                                        category:@"Beta"
                                      symbolName:@"macwindow"
                                            kind:PackageInstallKindToggle
@@ -390,7 +407,7 @@ static const NSInteger kSecUpsideDown       = 32;
                                shortDescription:NSLocalizedString(@"Sticker-style Metal light on Lock Screen", nil)
                                 longDescription:NSLocalizedString(@"Experimental PoC that inserts a CAMetalLayer into SpringBoard's Lock Screen window and renders a bundled test image with Sticker-inspired Metal effects.\n\nThis validates source-texture rendering and gravity-driven light movement before wiring the effect to the real Lock Screen wallpaper.", nil)
                                         version:version
-                                         author:@"banana"
+                                         author:@"Banana"
                                        category:@"Theming"
                                      symbolName:@"sparkles"
                                            kind:PackageInstallKindToggle
@@ -404,7 +421,7 @@ static const NSInteger kSecUpsideDown       = 32;
                                shortDescription:NSLocalizedString(@"Tilt-based still wallpaper switcher", nil)
                                 longDescription:NSLocalizedString(@"Switches between two selected still images based on left/right device tilt. It inserts SpringBoard wallpaper layers through RemoteCall and keeps a lightweight motion loop alive while active.\n\nCompatibility: LiveWP, Metal Lock Light, and Mood Wallpaper all own the wallpaper layer space. Only one wallpaper effect can be active at a time.", nil)
                                         version:version
-                                         author:@"banana"
+                                         author:@"Banana"
                                        category:@"Theming"
                                      symbolName:@"photo.on.rectangle.angled"
                                            kind:PackageInstallKindToggle
@@ -452,12 +469,51 @@ static const NSInteger kSecUpsideDown       = 32;
             @"Page swipes, folder opens, or SpringBoard relayouts may stop the effect. Run Gravity again.",
         ];
 
+        Package *watchLayout = [[Package alloc] initWithIdentifier:@"com.darksword.watchlayout"
+                                           name:NSLocalizedString(@"Watch Layout", nil)
+                               shortDescription:NSLocalizedString(@"Scrollable Apple Watch-style icon layout", nil)
+                                longDescription:NSLocalizedString(@"Displays installed application icons, including apps stored in folders and system apps, in a vertically scrolling Apple Watch-style honeycomb overlay. The overlay uses its own icon views and leaves folders, widgets, the Dock, and the saved Home Screen icon order untouched. Clean Up removes the overlay and restores the Home Screen.", nil)
+                                        version:version
+                                         author:@"Banana"
+                                       category:@"Home Screen"
+                                     symbolName:@"circle.grid.3x3.fill"
+                                           kind:PackageInstallKindToggle
+                                     enabledKey:kSettingsWatchLayoutEnabled
+                                          isNew:YES];
+        watchLayout.settingsSection = kSecWatchLayout;
+
+        Package *appDowngrade = [[Package alloc] initWithIdentifier:@"com.darksword.appdowngrade"
+                                           name:NSLocalizedString(@"App Downgrade", nil)
+                               shortDescription:NSLocalizedString(@"Install a selected historical App Store version", nil)
+                                longDescription:NSLocalizedString(@"Selects an installed App Store app, retrieves historical version identifiers through a configurable third-party API, and requests the selected version using the app's original App Store metadata. Source reference: https://github.com/99nyj7yt4z-blip/cyanide-ios17", nil)
+                                        version:version
+                                         author:@"Banana"
+                                       category:@"Tools"
+                                     symbolName:@"arrow.down.app.fill"
+                                           kind:PackageInstallKindDirectTool
+                                     enabledKey:nil
+                                          isNew:YES];
+        appDowngrade.settingsSection = kSecAppDowngrade;
+
+        Package *appUpdateBlocking = [[Package alloc] initWithIdentifier:@"com.darksword.appupdateblocking"
+                                           name:NSLocalizedString(@"App Update Blocking", nil)
+                               shortDescription:NSLocalizedString(@"Block App Store updates for selected applications", nil)
+                                longDescription:NSLocalizedString(@"Creates an installd-owned marker beside a selected app bundle to prevent App Store updates, and removes that marker when updates are enabled again. Source reference: https://github.com/99nyj7yt4z-blip/cyanide-ios17", nil)
+                                        version:version
+                                         author:@"Banana"
+                                       category:@"Tools"
+                                     symbolName:@"arrow.triangle.2.circlepath.circle.fill"
+                                           kind:PackageInstallKindDirectTool
+                                     enabledKey:nil
+                                          isNew:YES];
+        appUpdateBlocking.settingsSection = kSecAppUpdateBlocking;
+
         Package *debugOverlay = [[Package alloc] initWithIdentifier:@"com.darksword.debugoverlay"
                                            name:NSLocalizedString(@"UIKit Debug Overlay", nil)
                                shortDescription:NSLocalizedString(@"Inspect SpringBoard's UIKit view hierarchy", nil)
                                 longDescription:NSLocalizedString(@"Enables Apple's internal UIKit debugging overlay in SpringBoard. After applying, double-tap the status bar to open it. Its settings page controls whether Clean Up or exiting Cyanide restores the original behavior; respring always restores stock.", nil)
                                         version:version
-                                         author:@"rooootdev / Cyanide"
+                                         author:@"lara / Banana"
                                        category:@"SpringBoard"
                                      symbolName:@"ladybug.fill"
                                            kind:PackageInstallKindToggle
@@ -471,7 +527,7 @@ static const NSInteger kSecUpsideDown       = 32;
                                shortDescription:NSLocalizedString(@"Allow upside-down portrait orientation", nil)
                                 longDescription:NSLocalizedString(@"Allows SpringBoard's Home Screen and Lock Screen to rotate into upside-down portrait orientation. Rotation Lock must be off. Its settings page controls whether Clean Up or exiting Cyanide restores the original behavior; respring always restores stock.", nil)
                                         version:version
-                                         author:@"rooootdev / Cyanide"
+                                         author:@"lara / Banana"
                                        category:@"SpringBoard"
                                      symbolName:@"arrow.up.and.down.circle.fill"
                                            kind:PackageInstallKindToggle
@@ -499,7 +555,7 @@ static const NSInteger kSecUpsideDown       = 32;
                                shortDescription:@"Enables the iPad-style Dock with App Library"
                                 longDescription:@"Creates and reuses SpringBoard's internal iPad Dock controller in the active scene, including the App Library button.\n\nThe patch writes no system files. Clean Up restores the stock Dock for the current session; a respring also restores the stock Dock."
                                         version:version
-                                         author:@"Cyanide"
+                                         author:@"Banana"
                                        category:@"SpringBoard"
                                      symbolName:@"arrow.up.and.down"
                                            kind:PackageInstallKindToggle
@@ -611,6 +667,7 @@ static const NSInteger kSecUpsideDown       = 32;
             sbc,
             layoutExtras,
             gravityLite,
+            watchLayout,
             powercuff,
 
             disableAppLibrary,
@@ -698,6 +755,8 @@ static const NSInteger kSecUpsideDown       = 32;
             fastLockXLite,
 #endif
             locationSim,
+            appDowngrade,
+            appUpdateBlocking,
             snowboardLite,
             liveWP,
             metalLockLight,
@@ -709,6 +768,22 @@ static const NSInteger kSecUpsideDown       = 32;
             quickLoader,
         ];
     });
+    NSArray<NSString *> *missingRegistryIDs = cyanide_missing_native_tweak_registry_identifiers(list);
+    if (missingRegistryIDs.count > 0) {
+        NSString *reason = @"Internal compatibility metadata is missing for this package.";
+        for (Package *package in list) {
+            if ([missingRegistryIDs containsObject:package.identifier]) {
+                package.installDisabledReason = reason;
+            }
+        }
+        NSLog(@"[COMPAT] Native tweaks missing from TweakCompatibility: %@",
+              [missingRegistryIDs componentsJoinedByString:@", "]);
+#if DEBUG
+        NSCAssert(missingRegistryIDs.count == 0,
+                  @"Every native PackageCatalog entry must be registered in TweakCompatibility: %@",
+                  missingRegistryIDs);
+#endif
+    }
     NSArray<Package *> *repoPackages = [self repoPackages];
     if (repoPackages.count == 0) return list;
     return [list arrayByAddingObjectsFromArray:repoPackages];
@@ -724,6 +799,7 @@ static const NSInteger kSecUpsideDown       = 32;
         @"Home Screen",
         @"Theming",
         @"SpringBoard",
+        @"Tools",
         @"System",
         @"JavaScript Tweaks",
     ];

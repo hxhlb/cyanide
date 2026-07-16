@@ -9,6 +9,7 @@
 #import "PackageDetailViewController.h"
 #import "PackageQueue.h"
 #import "../SettingsViewController.h"
+#import "../TweakCompatibility.h"
 #import "../tweaks/RepoTweaks.h"
 #import "MainTabBarController.h"
 
@@ -31,12 +32,6 @@ static BOOL package_has_repo_update(Package *pkg)
     return repotweaks_compare_versions(pkg.version, installed) == NSOrderedDescending;
 }
 
-typedef NS_ENUM(NSInteger, PackagesSection) {
-    PackagesSectionJavaScript = 0,
-    PackagesSectionOther,
-    PackagesSectionCount,
-};
-
 static BOOL package_is_javascript(Package *package)
 {
     return package.repoTweakUsesQuickLoader ||
@@ -44,8 +39,7 @@ static BOOL package_is_javascript(Package *package)
 }
 
 @interface PackagesViewController () <UISearchResultsUpdating>
-@property (nonatomic, copy) NSArray<Package *> *javaScriptPackages;
-@property (nonatomic, copy) NSArray<Package *> *otherPackages;
+@property (nonatomic, copy) NSArray<NSDictionary<NSString *, id> *> *packageSections;
 @property (nonatomic, copy) NSArray<Package *> *allPackagesSorted;
 @property (nonatomic, copy) NSArray<Package *> *searchResults;
 @property (nonatomic, copy) NSString *searchText;
@@ -117,15 +111,50 @@ static BOOL package_is_javascript(Package *package)
             return [a.name caseInsensitiveCompare:b.name];
         }];
 
-    NSMutableArray<Package *> *javaScriptPackages = [NSMutableArray array];
-    NSMutableArray<Package *> *otherPackages = [NSMutableArray array];
-    for (Package *p in all) {
-        if (package_is_javascript(p)) [javaScriptPackages addObject:p];
-        else [otherPackages addObject:p];
+    NSMutableArray<NSDictionary<NSString *, id> *> *conflictSections = [NSMutableArray array];
+    NSMutableSet<NSString *> *groupedIdentifiers = [NSMutableSet set];
+    for (NSString *groupIdentifier in cyanide_tweak_conflict_group_identifiers()) {
+        NSSet<NSString *> *enabledKeys = [NSSet setWithArray:cyanide_tweak_conflict_group_enabled_keys(groupIdentifier)];
+        NSMutableArray<Package *> *packages = [NSMutableArray array];
+        for (Package *package in all) {
+            NSString *enabledKey = cyanide_tweak_enabled_key_for_package(package);
+            NSString *primaryGroup = cyanide_tweak_primary_conflict_group_identifier(enabledKey);
+            if ([primaryGroup isEqualToString:groupIdentifier] && [enabledKeys containsObject:enabledKey]) {
+                [packages addObject:package];
+            }
+        }
+        if (packages.count >= 2) {
+            [conflictSections addObject:@{
+                @"title": cyanide_tweak_conflict_group_title(groupIdentifier) ?: groupIdentifier,
+                @"packages": packages,
+            }];
+            for (Package *package in packages) {
+                [groupedIdentifiers addObject:package.identifier];
+            }
+        }
     }
 
-    self.javaScriptPackages = javaScriptPackages;
-    self.otherPackages = otherPackages;
+    NSMutableArray<Package *> *javaScriptPackages = [NSMutableArray array];
+    NSMutableArray<Package *> *otherPackages = [NSMutableArray array];
+    for (Package *package in all) {
+        if ([groupedIdentifiers containsObject:package.identifier]) continue;
+        if (package_is_javascript(package)) {
+            [javaScriptPackages addObject:package];
+        } else {
+            [otherPackages addObject:package];
+        }
+    }
+
+    NSMutableArray<NSDictionary<NSString *, id> *> *sections = [NSMutableArray array];
+    if (javaScriptPackages.count > 0) {
+        [sections addObject:@{ @"title": @"JavaScript", @"packages": javaScriptPackages }];
+    }
+    [sections addObjectsFromArray:conflictSections];
+    if (otherPackages.count > 0) {
+        [sections addObject:@{ @"title": @"Packages", @"packages": otherPackages }];
+    }
+
+    self.packageSections = sections;
     self.allPackagesSorted = all;
     [self rebuildSearchResults];
 }
@@ -172,36 +201,32 @@ static BOOL package_is_javascript(Package *package)
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
 {
     if ([self isSearchActive]) return 1;
-    return PackagesSectionCount;
+    return (NSInteger)self.packageSections.count;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
     if ([self isSearchActive]) return (NSInteger)self.searchResults.count;
-    if (section == PackagesSectionJavaScript) return (NSInteger)self.javaScriptPackages.count;
-    return (NSInteger)self.otherPackages.count;
+    return (NSInteger)[self.packageSections[section][@"packages"] count];
 }
 
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section
 {
     if ([self isSearchActive]) return nil;
-    if (section == PackagesSectionJavaScript) return self.javaScriptPackages.count > 0 ? CYSectionHeaderView(packages_l10n(@"JavaScript")) : nil;
-    return self.otherPackages.count > 0 ? CYSectionHeaderView(packages_l10n(@"Packages")) : nil;
+    return CYSectionHeaderView(packages_l10n(self.packageSections[section][@"title"]));
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section
 {
     if ([self isSearchActive]) return 0.0;
-    if (section == PackagesSectionJavaScript && self.javaScriptPackages.count == 0) return 0.0;
-    if (section == PackagesSectionOther && self.otherPackages.count == 0) return 0.0;
     return 46.0;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {
     if ([self isSearchActive]) return [self packageCellForPackage:self.searchResults[indexPath.row] colorIndex:(NSUInteger)indexPath.row tableView:tableView];
-    if (indexPath.section == PackagesSectionJavaScript) return [self packageCellForPackage:self.javaScriptPackages[indexPath.row] colorIndex:(NSUInteger)indexPath.row tableView:tableView];
-    return [self packageCellForPackage:self.otherPackages[indexPath.row] colorIndex:(NSUInteger)indexPath.row tableView:tableView];
+    NSArray<Package *> *packages = self.packageSections[indexPath.section][@"packages"];
+    return [self packageCellForPackage:packages[indexPath.row] colorIndex:(NSUInteger)indexPath.row tableView:tableView];
 }
 
 - (UITableViewCell *)packageCellForPackage:(Package *)pkg colorIndex:(NSUInteger)colorIndex tableView:(UITableView *)tableView
@@ -320,10 +345,9 @@ static BOOL package_is_javascript(Package *package)
     Package *pkg;
     if ([self isSearchActive]) {
         pkg = self.searchResults[indexPath.row];
-    } else if (indexPath.section == PackagesSectionJavaScript) {
-        pkg = self.javaScriptPackages[indexPath.row];
     } else {
-        pkg = self.otherPackages[indexPath.row];
+        NSArray<Package *> *packages = self.packageSections[indexPath.section][@"packages"];
+        pkg = packages[indexPath.row];
     }
     PackageDetailViewController *detail = [[PackageDetailViewController alloc] initWithPackage:pkg];
     [self.navigationController pushViewController:detail animated:YES];

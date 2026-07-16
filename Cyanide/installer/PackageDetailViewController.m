@@ -23,7 +23,10 @@ static NSString *pkgdetail_string_or_empty(id value)
 
 static NSString *pkgdetail_l10n(NSString *text)
 {
-    return text.length > 0 ? NSLocalizedString(text, nil) : text;
+    if (text.length == 0) return text;
+    NSString *localized = NSLocalizedString(text, nil);
+    localized = [localized stringByReplacingOccurrencesOfString:@"\\\\n" withString:@"\n"];
+    return [localized stringByReplacingOccurrencesOfString:@"\\n" withString:@"\n"];
 }
 
 static BOOL pkgdetail_js_identifier_valid(NSString *name)
@@ -327,7 +330,7 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     BOOL hideHomeBarReason = [reason containsString:@"Hide Home Bar"];
     UIAlertController *alert =
         [UIAlertController alertControllerWithTitle:(hideHomeBarReason ? pkgdetail_l10n(@"Run Hide Home Bar Alone") : pkgdetail_l10n(@"Cannot Queue Install"))
-                                            message:pkgdetail_l10n(reason ?: @"This package cannot be queued yet.")
+                                            message:reason ?: pkgdetail_l10n(@"This package cannot be queued yet.")
                                      preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:pkgdetail_l10n(@"OK")
                                               style:UIAlertActionStyleDefault
@@ -1176,7 +1179,7 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
             NSString *value = row.count > 1 ? row[1] : @"";
             cell.textLabel.text = pkgdetail_l10n(label);
             cell.textLabel.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightMedium];
-            cell.detailTextLabel.text = value;
+            cell.detailTextLabel.text = pkgdetail_l10n(value);
             cell.detailTextLabel.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightRegular];
             cell.detailTextLabel.textColor = [label isEqualToString:@"State"]
                 ? [self packageStateColor]

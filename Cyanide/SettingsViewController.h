@@ -37,6 +37,8 @@ extern NSString * const kSettingsLayoutDockExtraHorizontal;
 extern NSString * const kSettingsLayoutHomeScalePct;
 extern NSString * const kSettingsLayoutDockScalePct;
 
+extern NSString * const kSettingsWatchLayoutEnabled;
+
 extern NSString * const kSettingsStatBarEnabled;
 extern NSString * const kSettingsStatBarCelsius;
 extern NSString * const kSettingsStatBarShowNet;
@@ -144,6 +146,19 @@ void settings_request_respring_from_controller(UIViewController *host);
 BOOL settings_mobilegestalt_access_ready(void);
 void settings_prepare_mobilegestalt_access(UIViewController *host,
                                            void (^completion)(BOOL success));
+BOOL settings_app_store_tools_access_ready(void);
+void settings_prepare_app_store_tools_access(UIViewController *host,
+                                             void (^completion)(BOOL success));
+void settings_perform_app_downgrade(UIViewController *host,
+                                    NSString *bundleID,
+                                    uint64_t itemID,
+                                    uint64_t versionID,
+                                    uint64_t accountID,
+                                    void (^completion)(BOOL success, NSString *message));
+void settings_set_app_update_blocked(UIViewController *host,
+                                     NSString *markerPath,
+                                     BOOL blocked,
+                                     void (^completion)(BOOL success, NSString *message));
 
 void settings_run_actions(void);
 void settings_run_pending_actions(void);
