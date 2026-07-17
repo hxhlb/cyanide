@@ -33,6 +33,11 @@ activity, omit it.
 
 ## Released
 
+### v1.5.1 - 2026-07-17
+
+- [x] 优化设置标签页加载性能，减少进入页面及状态刷新时的卡顿。
+  Improved Settings tab loading performance, reducing delays when opening the page and refreshing its status.
+
 ### v1.5.0 - 2026-07-16
 
 - [x] 新增 Apple Watch 风格主屏幕布局，支持滚动浏览、启动应用和长按菜单。
