@@ -63,27 +63,71 @@ iOS/iPadOS 18.7.2 与 26.1 中修复。SpringBoard 私有 API 也会随系统版
 - 对支持的 tweak 执行运行时清理和会话恢复
 - 使用 QuickLoader 与 RepoTweaks 运行本地或仓库托管的 JavaScript tweak
 
-### SpringBoard
+### 内置 Tweaks
 
-- 状态信息：StatBar、NSBar 与 NiceBar Lite
-- 布局与外观：Apple Watch 风格主屏幕布局、SBCustomizer、
-  Home Layout Extras、主题、LiveWP、Metal Lock Light 与 Mood Wallpaper
-- 窗口与导航：MilkyWay Lite、Dynamic Stage Lite、iPad Dock、
-  App Switcher Grid、Upside Down 与 UIKit Debug Overlay
-- 通知、动画、Face ID、屏幕方向、图标物理效果等实验功能
+| 分类 | Tweak | 功能 |
+|---|---|---|
+| 状态栏 | StatBar | 在状态栏附近显示电池温度、可用内存、CPU 和网络信息 |
+| 状态栏 | NSBar | 在状态栏显示实时上传与下载速度 |
+| 状态栏 | NiceBar Lite | 在状态栏槽位显示自定义文字、日期、天气和系统信息 |
+| 主屏幕 | SBCustomizer（SpringBoard 自定义） | 调整 Dock 图标数量、主屏幕行列数并隐藏图标名称 |
+| 主屏幕 | Home Layout Extras | 调整主屏幕与 Dock 的边距和图标缩放 |
+| 主屏幕 | Gravity Lite | 为主屏幕图标加入重力、碰撞、弹性和设备倾斜效果 |
+| 主屏幕 | Watch Layout | 使用可滚动的 Apple Watch 风格蜂窝布局浏览并启动应用 |
+| 主屏幕 | Hide Home Bar | 隐藏底部 Home Bar；应用或恢复后需要 respring |
+| 主题 | SnowBoard Lite | 导入并应用本地 SnowBoard/IconBundles 风格图标主题 |
+| 主题 | LiveWP | 在主屏幕和锁屏播放本地视频壁纸 |
+| 主题 | Metal Lock Light | 在锁屏壁纸上渲染可调颜色与反射强度的金属光照效果 |
+| 主题 | Mood Wallpaper | 根据设备左右倾斜在多张静态壁纸之间切换 |
+| SpringBoard | Axon Lite | 按应用分组通知中心中的通知请求 |
+| SpringBoard | Dynamic Stage Lite | 在 SpringBoard 上显示两个可移动、缩放的应用窗口 |
+| SpringBoard | MilkyWay Lite | 以可移动、缩放的悬浮窗口同时运行多个应用 |
+| SpringBoard | iPad Dock | 在 iPhone 上启用带 App 资源库入口的 iPad 风格 Dock |
+| SpringBoard | App Switcher Grid | 将系统多任务切换器改为网格样式 |
+| SpringBoard | UIKit Debug Overlay | 双击状态栏打开 UIKit 调试层级工具 |
+| SpringBoard | Upside Down | 允许 SpringBoard 和应用使用上下颠倒方向 |
+| SpringBoard | FastLockX Lite | 提供 Face ID 重试和自动解锁控制 |
+| SpringBoard | Disable App Library | 移除最后一页之后的 App 资源库页面 |
+| SpringBoard | Disable Icon Fly-In | 跳过解锁或返回主屏幕时的图标飞入动画 |
+| SpringBoard | Zero Wake Animation | 移除屏幕唤醒时的渐亮动画 |
+| SpringBoard | Zero Backlight Fade | 移除锁定与解锁时的背光淡入淡出 |
+| SpringBoard | Double-Tap to Lock | 双击主屏幕空白区域锁定设备 |
+| SpringBoard | Drag Coefficient | 调整 SpringBoard 的全局 UIKit 动画速度 |
+| 系统 | Powercuff | 通过模拟温控压力限制 CPU/GPU 性能；效果持续到重启 |
+
+### JavaScript Tweaks
+
+| 功能 | 说明 |
+|---|---|
+| QuickLoader | 导入并运行本地 `.js` tweak |
+| RepoTweaks | 从 HTTPS 软件源下载、配置、运行和清理 JavaScript tweak |
 
 ### 工具与持久化修改
 
-- MobileGestalt Editor：编辑选定的设备身份与能力值
-- App 降级：查询并安装 App Store 历史版本
-- App 更新屏蔽：按应用阻止 App Store 自动更新已选应用
-- IPA Decryptor（Beta）：导出已安装应用并解密主可执行文件；内嵌 framework、
-  extension 与 dylib 仍可能保持加密
-- OTA 更新控制、Watch 配对范围调整、Home Bar 修改、位置模拟等系统工具
+| 工具 | 功能 |
+|---|---|
+| MobileGestalt Editor | 编辑选定的设备身份、型号和能力配置 |
+| IPA Decryptor（Beta） | 导出已安装应用并解密主可执行文件；内嵌 framework、extension 与 dylib 可能仍保持加密 |
+| App Downgrade | 通过可配置的历史版本接口查询并安装 App Store 旧版本 |
+| App Update Blocking | 为选定应用创建或移除 App Store 更新屏蔽标记 |
+| Location Simulator | 使用静态坐标模拟 CoreLocation 位置 |
+| Watch Pairing Override | 修改本机保存的 watchOS 配对兼容范围 |
+| Call Recording Sound | 替换或恢复通话录音开始与停止提示音 |
+| OTA Updates | 禁用或恢复系统 OTA 更新任务 |
 
-部分软件包仍属实验功能、仅适配特定设备，或因尚未完成而保持禁用。每项功能应以
+### 开发中
+
+| Tweak | 当前状态 |
+|---|---|
+| Signal Readouts | 数字蜂窝/Wi-Fi 信号显示，当前不可安装 |
+| TypeBanner | iMessage 输入状态横幅，当前不可安装 |
+| Notification Island | 将通知横幅映射到灵动岛，当前不可安装 |
+
+部分软件包仍属实验功能、仅适配特定设备，或因尚未完成而保持禁用。表格描述的是
+功能范围，不代表所有系统版本均已完整验证。每项功能应以
 应用内的软件包说明与警告为准。近期用户可见改动请查看
-[`RELEASE_NOTES.md`](RELEASE_NOTES.md)。
+[`RELEASE_NOTES.md`](RELEASE_NOTES.md)；系统资源与互斥关系请查看
+[`docs/TWEAK_COMPATIBILITY.md`](docs/TWEAK_COMPATIBILITY.md)。
 
 ## 安全说明
 

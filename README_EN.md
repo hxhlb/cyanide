@@ -69,30 +69,73 @@ You can also add the Cyanide AltStore source:
 - Runtime cleanup and session recovery for supported tweaks
 - QuickLoader and RepoTweaks for local or repository-hosted JavaScript tweaks
 
-### SpringBoard
+### Built-in Tweaks
 
-- Status overlays: StatBar, NSBar, and NiceBar Lite
-- Layout and appearance: Apple Watch-style Home Screen layout, SBCustomizer,
-  Home Layout Extras, themes, LiveWP, Metal Lock Light, and Mood Wallpaper
-- Windowing and navigation: MilkyWay Lite, Dynamic Stage Lite, iPad Dock,
-  App Switcher Grid, Upside Down, and UIKit Debug Overlay
-- Additional experiments for notifications, animations, Face ID, orientation,
-  icon physics, and other SpringBoard behavior
+| Category | Tweak | What it does |
+|---|---|---|
+| Status Bar | StatBar | Shows battery temperature, free memory, CPU, and network information near the status bar |
+| Status Bar | NSBar | Displays live upload and download speeds in the status bar |
+| Status Bar | NiceBar Lite | Places custom text, date, weather, and system information in configurable status-bar slots |
+| Home Screen | SBCustomizer | Changes Dock capacity and the Home Screen grid, with an option to hide icon labels |
+| Home Screen | Home Layout Extras | Adjusts Home Screen and Dock insets and icon scaling |
+| Home Screen | Gravity Lite | Adds gravity, collision, bounce, and device-tilt physics to Home Screen icons |
+| Home Screen | Watch Layout | Provides a scrolling Apple Watch-style honeycomb layout for browsing and launching apps |
+| Home Screen | Hide Home Bar | Hides the bottom Home Bar; applying or restoring it requires a respring |
+| Theming | SnowBoard Lite | Imports and applies local SnowBoard/IconBundles-style icon themes |
+| Theming | LiveWP | Plays a local video as the Home and Lock Screen wallpaper |
+| Theming | Metal Lock Light | Renders adjustable metallic lighting over the Lock Screen wallpaper |
+| Theming | Mood Wallpaper | Switches between still wallpapers based on left and right device tilt |
+| SpringBoard | Axon Lite | Groups Notification Center requests by app |
+| SpringBoard | Dynamic Stage Lite | Presents two movable and resizable app windows over SpringBoard |
+| SpringBoard | MilkyWay Lite | Runs multiple apps in movable and resizable floating windows |
+| SpringBoard | iPad Dock | Enables the iPad-style Dock and its App Library entry on iPhone |
+| SpringBoard | App Switcher Grid | Changes the system app switcher to a grid layout |
+| SpringBoard | UIKit Debug Overlay | Opens UIKit's hierarchy debugging overlay by double-tapping the status bar |
+| SpringBoard | Upside Down | Allows SpringBoard and apps to use the upside-down orientation |
+| SpringBoard | FastLockX Lite | Provides Face ID retry and automatic unlock controls |
+| SpringBoard | Disable App Library | Removes the App Library page after the final Home Screen page |
+| SpringBoard | Disable Icon Fly-In | Skips the icon fly-in animation after unlock or returning Home |
+| SpringBoard | Zero Wake Animation | Removes the display wake fade-in animation |
+| SpringBoard | Zero Backlight Fade | Removes the backlight fade during lock and unlock |
+| SpringBoard | Double-Tap to Lock | Locks the device after a double-tap on empty Home Screen space |
+| SpringBoard | Drag Coefficient | Changes the global UIKit animation speed in SpringBoard |
+| System | Powercuff | Limits CPU/GPU performance through simulated thermal pressure until reboot |
 
-### Tools and persistent changes
+### JavaScript Tweaks
 
-- MobileGestalt Editor for selected device identity and capability values
-- App Downgrade for finding and installing historical App Store versions
-- App Update Blocking for preventing App Store updates on selected apps
-- IPA Decryptor (beta) for exporting an installed app with its main executable
-  decrypted; embedded frameworks, extensions, and dylibs may remain encrypted
-- OTA update control, Watch pairing overrides, Home Bar changes, location
-  simulation, and other system-level utilities
+| Feature | What it does |
+|---|---|
+| QuickLoader | Imports and runs local `.js` tweaks |
+| RepoTweaks | Downloads, configures, runs, and cleans up JavaScript tweaks from HTTPS sources |
+
+### Tools and Persistent Changes
+
+| Tool | What it does |
+|---|---|
+| MobileGestalt Editor | Edits selected device identity, model, and capability values |
+| IPA Decryptor (beta) | Exports an installed app with its main executable decrypted; embedded frameworks, extensions, and dylibs may remain encrypted |
+| App Downgrade | Uses a configurable version-history service to find and install older App Store releases |
+| App Update Blocking | Creates or removes App Store update-blocking markers for selected apps |
+| Location Simulator | Simulates a static CoreLocation coordinate |
+| Watch Pairing Override | Changes the watchOS pairing compatibility range stored on the device |
+| Call Recording Sound | Replaces or restores the call-recording start and stop disclosure sounds |
+| OTA Updates | Disables or restores the system OTA update jobs |
+
+### In Development
+
+| Tweak | Current status |
+|---|---|
+| Signal Readouts | Numeric cellular/Wi-Fi signal display; currently not installable |
+| TypeBanner | iMessage typing-status banner; currently not installable |
+| Notification Island | Mirrors notification banners into the Dynamic Island; currently not installable |
 
 Some packages are experimental, device-specific, or intentionally disabled
-while incomplete. The in-app package description and warning are the source of
+while incomplete. The tables describe feature scope, not verified support on
+every OS release. The in-app package description and warning are the source of
 truth for each feature. See [`RELEASE_NOTES.md`](RELEASE_NOTES.md) for recent
-user-visible changes.
+user-visible changes and
+[`docs/TWEAK_COMPATIBILITY.md`](docs/TWEAK_COMPATIBILITY.md) for system-resource
+ownership and conflict details.
 
 ## Safety
 
