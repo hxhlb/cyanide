@@ -73,9 +73,9 @@ You can also add the Cyanide AltStore source:
 
 | Category | Tweak | What it does |
 |---|---|---|
-| Status Bar | StatBar | Shows battery temperature, free memory, CPU, and network information near the status bar |
-| Status Bar | NSBar | Displays live upload and download speeds in the status bar |
-| Status Bar | NiceBar Lite | Places custom text, date, weather, and system information in configurable status-bar slots |
+| Status Bar | StatBar | Uses a separate overlay window to show battery temperature, free memory, CPU, and network information near the status bar |
+| Status Bar | NSBar | Uses a separate overlay window to show live upload and download speeds at the top of the screen |
+| Status Bar | NiceBar Lite | Uses a separate overlay window to show custom text, date, weather, and system information in configurable positions at the top of the screen |
 | Home Screen | SBCustomizer | Changes Dock capacity and the Home Screen grid, with an option to hide icon labels |
 | Home Screen | Home Layout Extras | Adjusts Home Screen and Dock insets and icon scaling |
 | Home Screen | Gravity Lite | Adds gravity, collision, bounce, and device-tilt physics to Home Screen icons |
