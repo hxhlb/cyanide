@@ -134,8 +134,9 @@ static const NSInteger kSecFloatingDock     = 30;
 static const NSInteger kSecDebugOverlay     = 31;
 static const NSInteger kSecUpsideDown       = 32;
 static const NSInteger kSecWatchLayout      = 33;
-static const NSInteger kSecAppDowngrade     = 34;
-static const NSInteger kSecAppUpdateBlocking = 35;
+static const NSInteger kSecCylinderLite     = 34;
+static const NSInteger kSecAppDowngrade     = 35;
+static const NSInteger kSecAppUpdateBlocking = 36;
 
 + (NSArray<Package *> *)allPackages
 {
@@ -482,6 +483,20 @@ static const NSInteger kSecAppUpdateBlocking = 35;
                                           isNew:YES];
         watchLayout.settingsSection = kSecWatchLayout;
 
+        Package *cylinderLite = [[Package alloc] initWithIdentifier:@"com.darksword.cylinderlite"
+                                           name:NSLocalizedString(@"Cylinder Lite", nil)
+                               shortDescription:NSLocalizedString(@"Page-level Home Screen transition animations", nil)
+                                longDescription:NSLocalizedString(@"Animates the current Home Screen page container when you swipe between pages. This RemoteCall-only Lite version does not animate individual icons, does not hook SpringBoard continuously, and does not write icon layout state.\n\nChoose an effect in Settings. The first version uses a lightweight page monitor and Core Animation on SBIconListView.", nil)
+                                        version:version
+                                         author:@"Banana"
+                                       category:@"Home Screen"
+                                     symbolName:@"rotate.3d"
+                                           kind:PackageInstallKindToggle
+                                     enabledKey:kSettingsCylinderLiteEnabled
+                                          isNew:YES];
+        cylinderLite.settingsSection = kSecCylinderLite;
+        cylinderLite.unstableWarning = NSLocalizedString(@"First version: page-level animation only. It may miss a swipe if SpringBoard changes Home Screen internals or if Cyanide is suspended.", nil);
+
         Package *appDowngrade = [[Package alloc] initWithIdentifier:@"com.darksword.appdowngrade"
                                            name:NSLocalizedString(@"App Downgrade", nil)
                                shortDescription:NSLocalizedString(@"Install a selected historical App Store version", nil)
@@ -763,6 +778,7 @@ static const NSInteger kSecAppUpdateBlocking = 35;
             moodWallpaper,
             debugOverlay,
             upsideDown,
+            cylinderLite,
             appSwitcherGrid,
             floatingDock,
             quickLoader,

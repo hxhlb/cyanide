@@ -39,6 +39,13 @@ extern NSString * const kSettingsLayoutDockScalePct;
 
 extern NSString * const kSettingsWatchLayoutEnabled;
 
+extern NSString * const kSettingsCylinderLiteEnabled;
+extern NSString * const kSettingsCylinderLiteEffect;
+extern NSString * const kSettingsCylinderLiteIntensityPct;
+extern NSString * const kSettingsCylinderLiteOpacityPct;
+extern NSString * const kSettingsCylinderLiteFollowGesture;
+extern NSString * const kSettingsCylinderLiteOneShotDurationMs;
+
 extern NSString * const kSettingsStatBarEnabled;
 extern NSString * const kSettingsStatBarCelsius;
 extern NSString * const kSettingsStatBarShowNet;

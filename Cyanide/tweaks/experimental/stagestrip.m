@@ -7978,34 +7978,45 @@ void stagestrip_start_control_loop(void)
 
 void stagestrip_stop_control_loop(void)
 {
+    printf("[STAGE] stop: requesting control loop stop running=%d\n", gStripControlLoopRunning);
     gStripControlLoopStop = 1;
     for (int i = 0; i < 75 && gStripControlLoopRunning; i++)
         usleep(20000);
+    printf("[STAGE] stop: control loop stop wait done running=%d\n", gStripControlLoopRunning);
 }
 
 bool stagestrip_stop_in_session(void)
 {
+    printf("[STAGE] stop: begin\n");
     stagestrip_stop_control_loop();
+    printf("[STAGE] stop: clearing live rendering state\n");
     stagestrip_clear_live_rendering_state();
 
+    printf("[STAGE] stop: resolving UIApplication\n");
     uint64_t UIApplication = r_class("UIApplication");
     if (!r_is_objc_ptr(UIApplication)) return false;
     uint64_t app = r_msg2_main(UIApplication, "sharedApplication", 0, 0, 0, 0);
     if (!r_is_objc_ptr(app)) return false;
 
     uint64_t assocKey = r_sel("cyanideStageStripOverlayWindow");
+    printf("[STAGE] stop: looking up overlay associated window\n");
     uint64_t win = assocKey ? r_dlsym_call(R_TIMEOUT, "objc_getAssociatedObject",
                                            app, assocKey, 0, 0, 0, 0, 0, 0) : 0;
+    printf("[STAGE] stop: associated window=0x%llx\n", (unsigned long long)win);
     if (r_is_objc_ptr(win)) {
+        printf("[STAGE] stop: hiding overlay window\n");
         r_msg2_main(win, "setHidden:", 1, 0, 0, 0);
         if (assocKey) {
+            printf("[STAGE] stop: clearing overlay association\n");
             r_dlsym_call(R_TIMEOUT, "objc_setAssociatedObject",
                          app, assocKey, 0, 1, 0, 0, 0, 0);
         }
     }
     // Also tear down the multitasking probe's floating host window.
+    printf("[STAGE] stop: dismissing floating host\n");
     stagestrip_dismiss_floating_host();
 
+    printf("[STAGE] stop: clearing local state\n");
     gStripRuntimeMilkyWayLite = 0;
     memset(gStripMWLiteSlotBids, 0, sizeof(gStripMWLiteSlotBids));
     gStripWindow = 0;

@@ -31,6 +31,7 @@
 #import "tweaks/mood_wallpaper.h"
 #import "tweaks/gravitylite.h"
 #import "tweaks/watchlayout.h"
+#import "tweaks/cylinderlite.h"
 #import "tweaks/appstoretools.h"
 #import "tweaks/appswitchergrid.h"
 #import "tweaks/debugoverlay.h"
@@ -277,6 +278,12 @@ NSString * const kSettingsLayoutHomeScalePct    = @"LayoutHomeScalePct";
 NSString * const kSettingsLayoutDockScalePct    = @"LayoutDockScalePct";
 
 NSString * const kSettingsWatchLayoutEnabled       = @"WatchLayoutEnabled";
+NSString * const kSettingsCylinderLiteEnabled = @"CylinderLiteEnabled";
+NSString * const kSettingsCylinderLiteEffect = @"CylinderLiteEffect";
+NSString * const kSettingsCylinderLiteIntensityPct = @"CylinderLiteIntensityPct";
+NSString * const kSettingsCylinderLiteOpacityPct = @"CylinderLiteOpacityPct";
+NSString * const kSettingsCylinderLiteFollowGesture = @"CylinderLiteFollowGesture";
+NSString * const kSettingsCylinderLiteOneShotDurationMs = @"CylinderLiteOneShotDurationMs";
 
 static double settings_number_row_normalized_value(NSDictionary *row, double value)
 {
@@ -486,6 +493,8 @@ static volatile int g_notificationisland_live_running = 0;
 static volatile int g_notificationisland_live_stop_requested = 0;
 static volatile int g_gravitylite_background_armed = 0;
 static volatile int g_gravitylite_start_worker_running = 0;
+static volatile int g_cylinderlite_live_running = 0;
+static volatile int g_cylinderlite_live_stop_requested = 0;
 static volatile int g_gravity_motion_stop_requested = 1;
 static volatile uint64_t g_gravity_motion_generation = 0;
 static CMMotionManager *g_gravity_motion_manager = nil;
@@ -924,6 +933,7 @@ static BOOL settings_typebanner_running(void) { return g_typebanner_live_running
 static BOOL settings_notificationisland_running(void) { return g_notificationisland_live_running != 0; }
 static BOOL settings_themer_running(void) { return g_themer_live_running != 0 || g_themer_repair_running != 0; }
 static BOOL settings_livewp_running(void) { return g_livewp_live_running != 0; }
+static BOOL settings_cylinderlite_running(void) { return g_cylinderlite_live_running != 0; }
 
 static bool settings_stop_statbar_registered(BOOL springboardWillDie)
 {
@@ -1011,6 +1021,18 @@ static bool settings_stop_watchlayout_registered(BOOL springboardWillDie)
         return true;
     }
     return watchlayout_stop_in_session();
+}
+
+static void settings_request_cylinderlite_stop(void) { g_cylinderlite_live_stop_requested = 1; }
+
+static bool settings_stop_cylinderlite_registered(BOOL springboardWillDie)
+{
+    g_cylinderlite_live_stop_requested = 1;
+    if (springboardWillDie) {
+        cylinderlite_forget_remote_state();
+        return true;
+    }
+    return cylinderlite_stop_in_session();
 }
 
 static bool settings_stop_themer_registered(BOOL springboardWillDie)
@@ -1129,6 +1151,7 @@ static void settings_each_springboard_cleanup_entry(void (^block)(const Settings
         { kSettingsFloatingDockEnabled, "iPad Dock", NULL, settings_stop_floatingdock_registered, floatingdock_forget_remote_state, NULL, NO, YES },
         { kSettingsGravityLiteEnabled, "Gravity Lite", settings_request_gravitylite_stop, settings_stop_gravitylite_registered, gravitylite_forget_remote_state, NULL, YES, YES },
         { kSettingsWatchLayoutEnabled, "Watch Layout", NULL, settings_stop_watchlayout_registered, watchlayout_forget_remote_state, NULL, YES, YES },
+        { kSettingsCylinderLiteEnabled, "Cylinder Lite", settings_request_cylinderlite_stop, settings_stop_cylinderlite_registered, cylinderlite_forget_remote_state, settings_cylinderlite_running, YES, YES },
         { kSettingsThemerEnabled, "Themer", settings_request_themer_stop, settings_stop_themer_registered, themer_forget_remote_state, settings_themer_running, YES, YES },
         { kSettingsSnowBoardLiteEnabled, "SnowBoard Lite", NULL, settings_stop_themer_registered, themer_forget_remote_state, NULL, YES, YES },
         { kSettingsLiveWPEnabled, "LiveWP", settings_request_livewp_stop, settings_stop_livewp_registered, livewp_forget_remote_state, settings_livewp_running, YES, YES },
@@ -1185,6 +1208,11 @@ static BOOL settings_cleanup_entry_has_runtime_state(NSUserDefaults *d,
     if (entry->key && settings_tweak_is_applied(entry->key)) return YES;
     (void)d;
     return NO;
+}
+
+static BOOL settings_tweak_has_applied_state(NSString *key)
+{
+    return key.length > 0 && settings_tweak_is_applied(key);
 }
 
 static BOOL settings_cleanup_entry_restore_by_preference(NSUserDefaults *d,
@@ -1529,6 +1557,7 @@ static void settings_start_rssi_live_loop(void);
 static void settings_start_typebanner_live_loop(void);
 static void settings_start_notificationisland_live_loop(void);
 static void settings_start_themer_live_loop(void);
+static void settings_start_cylinderlite_live_loop(void);
 static void settings_schedule_themer_repair_burst(const char *reason);
 static void settings_schedule_themer_quiet_repair_burst(const char *reason);
 static void settings_notify_remote_call_state_changed(void);
@@ -3525,6 +3554,128 @@ static bool settings_apply_watchlayout_from_defaults_locked(NSUserDefaults *d)
     return watchlayout_apply_in_session();
 }
 
+static CylinderLiteEffect settings_cylinderlite_effect_from_defaults(NSUserDefaults *d)
+{
+    NSInteger raw = [d integerForKey:kSettingsCylinderLiteEffect];
+    if (raw == 0 || raw < CylinderLiteEffectSlide || raw > CylinderLiteEffectLast) {
+        return CylinderLiteEffectZoomFadeOut;
+    }
+    switch ((CylinderLiteEffect)raw) {
+        case CylinderLiteEffectBackwards:
+        case CylinderLiteEffectHellaFar:
+        case CylinderLiteEffectCubeInside:
+        case CylinderLiteEffectCubeOutside:
+        case CylinderLiteEffectTurn:
+            return CylinderLiteEffectZoomFadeOut;
+        default:
+            break;
+    }
+    return (CylinderLiteEffect)raw;
+}
+
+static bool settings_apply_cylinderlite_from_defaults_locked(NSUserDefaults *d)
+{
+    if (![d boolForKey:kSettingsCylinderLiteEnabled]) return false;
+    return cylinderlite_apply_in_session_with_options(settings_cylinderlite_effect_from_defaults(d),
+                                                      (int)[d integerForKey:kSettingsCylinderLiteIntensityPct],
+                                                      (int)[d integerForKey:kSettingsCylinderLiteOpacityPct],
+                                                      false,
+                                                      (int)[d integerForKey:kSettingsCylinderLiteOneShotDurationMs]);
+}
+
+static NSString *settings_cylinderlite_effect_name(NSInteger raw)
+{
+    switch ((CylinderLiteEffect)raw) {
+        case CylinderLiteEffectSlide:
+            return NSLocalizedString(@"Fade Out", nil);
+        case CylinderLiteEffectFlip:
+            return NSLocalizedString(@"Horizontal Squeeze", nil);
+        case CylinderLiteEffectPageSpin:
+            return NSLocalizedString(@"Page Spin", nil);
+        case CylinderLiteEffectPageFlip:
+            return NSLocalizedString(@"Page Flip", nil);
+        case CylinderLiteEffectPageTwist:
+            return NSLocalizedString(@"Page Twist", nil);
+        case CylinderLiteEffectVerticalScroll:
+            return NSLocalizedString(@"Vertical Scroll", nil);
+        case CylinderLiteEffectBackwards:
+            return NSLocalizedString(@"Backwards", nil);
+        case CylinderLiteEffectHellaFar:
+            return NSLocalizedString(@"Hella Far", nil);
+        case CylinderLiteEffectCubeInside:
+            return NSLocalizedString(@"Cube Inside", nil);
+        case CylinderLiteEffectCubeOutside:
+            return NSLocalizedString(@"Cube Outside", nil);
+        case CylinderLiteEffectCardHorizontal:
+            return NSLocalizedString(@"Card Horizontal", nil);
+        case CylinderLiteEffectCardVertical:
+            return NSLocalizedString(@"Card Vertical", nil);
+        case CylinderLiteEffectWheel:
+            return NSLocalizedString(@"Wheel", nil);
+        case CylinderLiteEffectHinge:
+            return NSLocalizedString(@"Hinge", nil);
+        case CylinderLiteEffectTurn:
+            return NSLocalizedString(@"Turn", nil);
+        case CylinderLiteEffectZoomFadeOut:
+            return NSLocalizedString(@"Zoom Fade Out", nil);
+        case CylinderLiteEffectZoomFadeIn:
+            return NSLocalizedString(@"Zoom Fade In", nil);
+        default:
+            return NSLocalizedString(@"Zoom Fade Out", nil);
+    }
+}
+
+static NSArray<NSNumber *> *settings_cylinderlite_effect_values(void)
+{
+    return @[
+        @(CylinderLiteEffectSlide),
+        @(CylinderLiteEffectFlip),
+        @(CylinderLiteEffectPageSpin),
+        @(CylinderLiteEffectPageFlip),
+        @(CylinderLiteEffectPageTwist),
+        @(CylinderLiteEffectVerticalScroll),
+        @(CylinderLiteEffectCardHorizontal),
+        @(CylinderLiteEffectCardVertical),
+        @(CylinderLiteEffectWheel),
+        @(CylinderLiteEffectHinge),
+        @(CylinderLiteEffectZoomFadeOut),
+        @(CylinderLiteEffectZoomFadeIn),
+    ];
+}
+
+static NSArray<NSString *> *settings_cylinderlite_effect_titles(void)
+{
+    NSMutableArray<NSString *> *titles = [NSMutableArray array];
+    for (NSNumber *value in settings_cylinderlite_effect_values()) {
+        [titles addObject:settings_cylinderlite_effect_name(value.integerValue)];
+    }
+    return titles;
+}
+
+static BOOL settings_cylinderlite_effect_uses_scale_controls(NSInteger raw)
+{
+    CylinderLiteEffect effect = (CylinderLiteEffect)raw;
+    return effect == CylinderLiteEffectZoomFadeOut ||
+           effect == CylinderLiteEffectZoomFadeIn;
+}
+
+static BOOL settings_cylinderlite_effect_uses_opacity_controls(NSInteger raw)
+{
+    switch ((CylinderLiteEffect)raw) {
+        case CylinderLiteEffectSlide:
+        case CylinderLiteEffectFlip:
+        case CylinderLiteEffectVerticalScroll:
+        case CylinderLiteEffectCubeOutside:
+        case CylinderLiteEffectCardHorizontal:
+        case CylinderLiteEffectHinge:
+        case CylinderLiteEffectZoomFadeOut:
+        case CylinderLiteEffectZoomFadeIn:
+            return YES;
+        default:
+            return NO;
+    }
+}
+
 static double settings_fastlockx_lite_retry_interval(NSUserDefaults *d)
 {
     id raw = [d objectForKey:kSettingsFastLockXLiteRetryInterval];
@@ -4604,6 +4755,51 @@ static void settings_start_livewp_live_loop(void)
                    [d boolForKey:kSettingsLiveWPEnabled],
                    g_livewp_live_stop_requested);
             __sync_lock_release(&g_livewp_live_running);
+        }
+    });
+}
+
+static void settings_start_cylinderlite_live_loop(void)
+{
+    if (!settings_device_supported() || settings_cleanup_in_progress()) return;
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    if (![d boolForKey:kSettingsCylinderLiteEnabled] || !g_springboard_rc_ready) return;
+
+    if (__sync_lock_test_and_set(&g_cylinderlite_live_running, 1)) return;
+    g_cylinderlite_live_stop_requested = 0;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSUInteger tick = 0;
+        NSUInteger failures = 0;
+        useconds_t intervalUS = settings_live_interval(80000, 120000);
+        @try {
+            printf("[SETTINGS] Cylinder Lite live loop started interval=%uus\n", intervalUS);
+            while ([d boolForKey:kSettingsCylinderLiteEnabled] &&
+                   settings_tweak_is_applied(kSettingsCylinderLiteEnabled) &&
+                   !settings_cleanup_in_progress() &&
+                   !g_cylinderlite_live_stop_requested) {
+                bool ok = false;
+                @synchronized (settings_rc_lock()) {
+                    if (settings_cleanup_in_progress() ||
+                        g_cylinderlite_live_stop_requested ||
+                        ![d boolForKey:kSettingsCylinderLiteEnabled] ||
+                        !g_springboard_rc_ready) break;
+                    ok = cylinderlite_tick_in_session();
+                }
+
+                failures = ok ? 0 : failures + 1;
+                if (!ok && failures >= settings_live_failure_limit(5)) break;
+                tick++;
+                settings_live_loop_sleep_interruptible(0,
+                                                       intervalUS,
+                                                       &g_cylinderlite_live_stop_requested);
+            }
+        } @finally {
+            printf("[SETTINGS] Cylinder Lite live loop exited ticks=%lu enabled=%d failures=%lu stop=%d\n",
+                   (unsigned long)tick,
+                   [d boolForKey:kSettingsCylinderLiteEnabled],
+                   (unsigned long)failures,
+                   g_cylinderlite_live_stop_requested);
+            __sync_lock_release(&g_cylinderlite_live_running);
         }
     });
 }
@@ -5709,6 +5905,16 @@ static BOOL settings_key_is_floatingdock(NSString *key)
     return [key isEqualToString:kSettingsFloatingDockEnabled];
 }
 
+static BOOL settings_key_is_cylinderlite(NSString *key)
+{
+    return [key isEqualToString:kSettingsCylinderLiteEnabled] ||
+           [key isEqualToString:kSettingsCylinderLiteEffect] ||
+           [key isEqualToString:kSettingsCylinderLiteIntensityPct] ||
+           [key isEqualToString:kSettingsCylinderLiteOpacityPct] ||
+           [key isEqualToString:kSettingsCylinderLiteFollowGesture] ||
+           [key isEqualToString:kSettingsCylinderLiteOneShotDurationMs];
+}
+
 static BOOL settings_key_is_gravitylite(NSString *key)
 {
     return [key isEqualToString:kSettingsGravityLiteEnabled] ||
@@ -6428,16 +6634,17 @@ static void settings_schedule_live_apply_for_key(NSString *key)
                 settings_notify_package_queue_changed_async();
             });
         } else if (![d boolForKey:kSettingsNotificationIslandEnabled]) {
+            BOOL hadApplied = settings_tweak_has_applied_state(kSettingsNotificationIslandEnabled);
             g_notificationisland_live_stop_requested = 1;
             settings_mark_tweak_applied(kSettingsNotificationIslandEnabled, NO);
             settings_notify_package_queue_changed_async();
-            if (g_springboard_rc_ready) {
+            if (hadApplied && g_springboard_rc_ready) {
                 dispatch_async(dispatch_get_global_queue(0, 0), ^{
                     @synchronized (settings_rc_lock()) {
                         if (g_springboard_rc_ready) notificationisland_stop_in_session();
                     }
                 });
-            } else {
+            } else if (hadApplied) {
                 notificationisland_forget_remote_state();
             }
         }
@@ -6459,15 +6666,16 @@ static void settings_schedule_live_apply_for_key(NSString *key)
                 settings_notify_package_queue_changed_async();
             });
         } else if (![d boolForKey:kSettingsAppSwitcherGridEnabled]) {
+            BOOL hadApplied = settings_tweak_has_applied_state(kSettingsAppSwitcherGridEnabled);
             settings_mark_tweak_applied(kSettingsAppSwitcherGridEnabled, NO);
             settings_notify_package_queue_changed_async();
-            if (g_springboard_rc_ready) {
+            if (hadApplied && g_springboard_rc_ready) {
                 dispatch_async(dispatch_get_global_queue(0, 0), ^{
                     @synchronized (settings_rc_lock()) {
                         if (g_springboard_rc_ready) appswitchergrid_stop_in_session();
                     }
                 });
-            } else {
+            } else if (hadApplied) {
                 appswitchergrid_forget_remote_state();
             }
         }
@@ -6489,17 +6697,62 @@ static void settings_schedule_live_apply_for_key(NSString *key)
                 settings_notify_package_queue_changed_async();
             });
         } else if (![d boolForKey:kSettingsFloatingDockEnabled]) {
+            BOOL hadApplied = settings_tweak_has_applied_state(kSettingsFloatingDockEnabled);
             settings_mark_tweak_applied(kSettingsFloatingDockEnabled, NO);
             settings_notify_package_queue_changed_async();
-            if (g_springboard_rc_ready) {
+            if (hadApplied && g_springboard_rc_ready) {
                 dispatch_async(dispatch_get_global_queue(0, 0), ^{
                     @synchronized (settings_rc_lock()) {
                         if (g_springboard_rc_ready) floatingdock_stop_in_session();
                     }
                 });
-            } else {
+            } else if (hadApplied) {
                 floatingdock_forget_remote_state();
             }
+        }
+        return;
+    }
+
+    if (settings_key_is_cylinderlite(key)) {
+        if ([d boolForKey:kSettingsCylinderLiteEnabled] && g_springboard_rc_ready) {
+            dispatch_async(dispatch_get_global_queue(0, 0), ^{
+                bool ok = false;
+                @synchronized (settings_rc_lock()) {
+                    if (settings_cleanup_in_progress() ||
+                        ![d boolForKey:kSettingsCylinderLiteEnabled] ||
+                        !g_springboard_rc_ready) return;
+                    ok = settings_apply_cylinderlite_from_defaults_locked(d);
+                    settings_mark_tweak_applied(kSettingsCylinderLiteEnabled,
+                                                ok && [d boolForKey:kSettingsCylinderLiteEnabled]);
+                    printf("[SETTINGS] live Cylinder Lite apply result=%d effect=%ld minScale=%ld minOpacity=%ld follow=%d durationMs=%ld\n",
+                           ok,
+                           (long)[d integerForKey:kSettingsCylinderLiteEffect],
+                           (long)[d integerForKey:kSettingsCylinderLiteIntensityPct],
+                           (long)[d integerForKey:kSettingsCylinderLiteOpacityPct],
+                           0,
+                           (long)[d integerForKey:kSettingsCylinderLiteOneShotDurationMs]);
+                }
+                if (ok) settings_start_cylinderlite_live_loop();
+                settings_notify_package_queue_changed_async();
+                settings_post_actions_complete_async(ok,
+                    settings_l10n_text(ok ? @"Done" : @"Cylinder Lite did not start cleanly."));
+            });
+        } else if (![d boolForKey:kSettingsCylinderLiteEnabled]) {
+            BOOL hadApplied = settings_tweak_has_applied_state(kSettingsCylinderLiteEnabled);
+            g_cylinderlite_live_stop_requested = 1;
+            settings_mark_tweak_applied(kSettingsCylinderLiteEnabled, NO);
+            settings_notify_package_queue_changed_async();
+            if (hadApplied && g_springboard_rc_ready) {
+                dispatch_async(dispatch_get_global_queue(0, 0), ^{
+                    @synchronized (settings_rc_lock()) {
+                        if (g_springboard_rc_ready) cylinderlite_stop_in_session();
+                    }
+                });
+            } else if (hadApplied) {
+                cylinderlite_forget_remote_state();
+            }
+        } else {
+            settings_notify_package_queue_changed_async();
         }
         return;
     }
@@ -6508,10 +6761,11 @@ static void settings_schedule_live_apply_for_key(NSString *key)
         if ([d boolForKey:kSettingsNSBarEnabled] && g_springboard_rc_ready) {
             settings_apply_nsbar_once_async("live settings");
         } else if (![d boolForKey:kSettingsNSBarEnabled]) {
+            BOOL hadApplied = settings_tweak_has_applied_state(kSettingsNSBarEnabled);
             g_nsbar_live_stop_requested = 1;
             settings_mark_tweak_applied(kSettingsNSBarEnabled, NO);
             settings_notify_package_queue_changed_async();
-            if (g_springboard_rc_ready) {
+            if (hadApplied && g_springboard_rc_ready) {
                 dispatch_async(dispatch_get_global_queue(0, 0), ^{
                     @synchronized (settings_rc_lock()) {
                         if (g_springboard_rc_ready) nsbar_stop_in_session();
@@ -6530,10 +6784,11 @@ static void settings_schedule_live_apply_for_key(NSString *key)
         if ([d boolForKey:kSettingsNiceBarLiteEnabled] && g_springboard_rc_ready) {
             settings_apply_nicebarlite_once_async("live settings");
         } else if (![d boolForKey:kSettingsNiceBarLiteEnabled]) {
+            BOOL hadApplied = settings_tweak_has_applied_state(kSettingsNiceBarLiteEnabled);
             g_nicebarlite_live_stop_requested = 1;
             settings_mark_tweak_applied(kSettingsNiceBarLiteEnabled, NO);
             settings_notify_package_queue_changed_async();
-            if (g_springboard_rc_ready) {
+            if (hadApplied && g_springboard_rc_ready) {
                 dispatch_async(dispatch_get_global_queue(0, 0), ^{
                     @synchronized (settings_rc_lock()) {
                         if (g_springboard_rc_ready) nicebarlite_stop_in_session();
@@ -6565,10 +6820,11 @@ static void settings_schedule_live_apply_for_key(NSString *key)
                 settings_notify_package_queue_changed_async();
             });
         } else if (![d boolForKey:kSettingsLiveWPEnabled]) {
+            BOOL hadApplied = settings_tweak_has_applied_state(kSettingsLiveWPEnabled);
             g_livewp_live_stop_requested = 1;
             settings_mark_tweak_applied(kSettingsLiveWPEnabled, NO);
             settings_notify_package_queue_changed_async();
-            if (g_springboard_rc_ready) {
+            if (hadApplied && g_springboard_rc_ready) {
                 dispatch_async(dispatch_get_global_queue(0, 0), ^{
                     @synchronized (settings_rc_lock()) {
                         if (g_springboard_rc_ready) livewp_stop_in_session();
@@ -6601,16 +6857,17 @@ static void settings_schedule_live_apply_for_key(NSString *key)
                 settings_post_actions_complete_async(ok, settings_l10n_text(ok ? @"Done" : @"Metal Lock Light did not start cleanly."));
             });
         } else if (![d boolForKey:kSettingsMetalLockLightEnabled]) {
+            BOOL hadApplied = settings_tweak_has_applied_state(kSettingsMetalLockLightEnabled);
             settings_stop_metal_lock_light_motion();
             settings_mark_tweak_applied(kSettingsMetalLockLightEnabled, NO);
             settings_notify_package_queue_changed_async();
-            if (g_springboard_rc_ready) {
+            if (hadApplied && g_springboard_rc_ready) {
                 dispatch_async(dispatch_get_global_queue(0, 0), ^{
                     @synchronized (settings_rc_lock()) {
                         if (g_springboard_rc_ready) metal_lock_light_stop_in_session();
                     }
                 });
-            } else {
+            } else if (hadApplied) {
                 metal_lock_light_forget_remote_state();
             }
         } else {
@@ -6636,16 +6893,17 @@ static void settings_schedule_live_apply_for_key(NSString *key)
                 settings_post_actions_complete_async(ok, settings_l10n_text(ok ? @"Done" : @"Mood Wallpaper did not start cleanly."));
             });
         } else if (![d boolForKey:kSettingsMoodWallpaperEnabled]) {
+            BOOL hadApplied = settings_tweak_has_applied_state(kSettingsMoodWallpaperEnabled);
             settings_stop_mood_wallpaper_motion();
             settings_mark_tweak_applied(kSettingsMoodWallpaperEnabled, NO);
             settings_notify_package_queue_changed_async();
-            if (g_springboard_rc_ready) {
+            if (hadApplied && g_springboard_rc_ready) {
                 dispatch_async(dispatch_get_global_queue(0, 0), ^{
                     @synchronized (settings_rc_lock()) {
                         if (g_springboard_rc_ready) mood_wallpaper_stop_in_session();
                     }
                 });
-            } else {
+            } else if (hadApplied) {
                 mood_wallpaper_forget_remote_state();
             }
         } else {
@@ -6669,10 +6927,11 @@ static void settings_schedule_live_apply_for_key(NSString *key)
                 settings_notify_package_queue_changed_async();
             });
         } else if (![d boolForKey:kSettingsGravityLiteEnabled]) {
+            BOOL hadApplied = settings_tweak_has_applied_state(kSettingsGravityLiteEnabled);
             __sync_lock_test_and_set(&g_gravitylite_background_armed, 0);
             settings_mark_tweak_applied(kSettingsGravityLiteEnabled, NO);
             settings_notify_package_queue_changed_async();
-            if (g_springboard_rc_ready) {
+            if (hadApplied && g_springboard_rc_ready) {
                 dispatch_async(dispatch_get_global_queue(0, 0), ^{
                     @synchronized (settings_rc_lock()) {
                         if (g_springboard_rc_ready) gravitylite_stop_in_session();
@@ -6711,10 +6970,11 @@ static void settings_schedule_live_apply_for_key(NSString *key)
                 settings_notify_package_queue_changed_async();
             });
         } else if (![d boolForKey:kSettingsAxonLiteEnabled]) {
+            BOOL hadApplied = settings_tweak_has_applied_state(kSettingsAxonLiteEnabled);
             g_axonlite_live_stop_requested = 1;
             settings_mark_tweak_applied(kSettingsAxonLiteEnabled, NO);
             settings_notify_package_queue_changed_async();
-            if (g_springboard_rc_ready) {
+            if (hadApplied && g_springboard_rc_ready) {
                 dispatch_async(dispatch_get_global_queue(0, 0), ^{
                     @synchronized (settings_rc_lock()) {
                         if (g_springboard_rc_ready) axonlite_stop_in_session();
@@ -6743,11 +7003,12 @@ static void settings_schedule_live_apply_for_key(NSString *key)
                 settings_notify_package_queue_changed_async();
             });
         } else if (![d boolForKey:kSettingsStatBarEnabled]) {
+            BOOL hadApplied = settings_tweak_has_applied_state(kSettingsStatBarEnabled);
             g_statbar_live_stop_requested = 1;
             settings_mark_tweak_applied(kSettingsStatBarEnabled, NO);
             settings_notify_package_queue_changed_async();
             settings_end_statbar_background_task_async("StatBar disabled");
-            if (g_springboard_rc_ready) {
+            if (hadApplied && g_springboard_rc_ready) {
                 dispatch_async(dispatch_get_global_queue(0, 0), ^{
                     @synchronized (settings_rc_lock()) {
                         if (g_springboard_rc_ready) statbar_stop_in_session();
@@ -6759,6 +7020,7 @@ static void settings_schedule_live_apply_for_key(NSString *key)
 
     if (settings_key_is_rssi(key)) {
         if (!settings_rssi_install_allowed()) {
+            BOOL hadApplied = settings_tweak_has_applied_state(kSettingsRSSIDisplayEnabled);
             if ([d boolForKey:kSettingsRSSIDisplayEnabled]) {
                 [d setBool:NO forKey:kSettingsRSSIDisplayEnabled];
                 [d synchronize];
@@ -6766,7 +7028,7 @@ static void settings_schedule_live_apply_for_key(NSString *key)
             g_rssi_live_stop_requested = 1;
             settings_mark_tweak_applied(kSettingsRSSIDisplayEnabled, NO);
             settings_notify_package_queue_changed_async();
-            if (g_springboard_rc_ready) {
+            if (hadApplied && g_springboard_rc_ready) {
                 dispatch_async(dispatch_get_global_queue(0, 0), ^{
                     @synchronized (settings_rc_lock()) {
                         if (g_springboard_rc_ready) rssidisplay_stop_in_session();
@@ -6789,10 +7051,11 @@ static void settings_schedule_live_apply_for_key(NSString *key)
                 settings_notify_package_queue_changed_async();
             });
         } else if (![d boolForKey:kSettingsRSSIDisplayEnabled]) {
+            BOOL hadApplied = settings_tweak_has_applied_state(kSettingsRSSIDisplayEnabled);
             g_rssi_live_stop_requested = 1;
             settings_mark_tweak_applied(kSettingsRSSIDisplayEnabled, NO);
             settings_notify_package_queue_changed_async();
-            if (g_springboard_rc_ready) {
+            if (hadApplied && g_springboard_rc_ready) {
                 dispatch_async(dispatch_get_global_queue(0, 0), ^{
                     @synchronized (settings_rc_lock()) {
                         if (g_springboard_rc_ready) rssidisplay_stop_in_session();
@@ -6850,9 +7113,10 @@ static void settings_schedule_live_apply_for_key(NSString *key)
                 settings_notify_package_queue_changed_async();
             });
         } else if (![d boolForKey:key]) {
+            BOOL hadApplied = settings_tweak_has_applied_state(key);
             settings_mark_tweak_applied(key, NO);
             settings_notify_package_queue_changed_async();
-            if (g_springboard_rc_ready) {
+            if (hadApplied && g_springboard_rc_ready) {
                 dispatch_async(dispatch_get_global_queue(0, 0), ^{
                     @synchronized (settings_rc_lock()) {
                         if (!g_springboard_rc_ready) return;
@@ -6889,11 +7153,12 @@ static void settings_schedule_live_apply_for_key(NSString *key)
                 settings_notify_package_queue_changed_async();
             });
         } else if (![d boolForKey:kSettingsGravityLiteEnabled]) {
+            BOOL hadApplied = settings_tweak_has_applied_state(kSettingsGravityLiteEnabled);
             __sync_lock_test_and_set(&g_gravitylite_background_armed, 0);
             settings_stop_gravity_motion();
             settings_mark_tweak_applied(kSettingsGravityLiteEnabled, NO);
             settings_notify_package_queue_changed_async();
-            if (g_springboard_rc_ready) {
+            if (hadApplied && g_springboard_rc_ready) {
                 dispatch_async(dispatch_get_global_queue(0, 0), ^{
                     @synchronized (settings_rc_lock()) {
                         if (g_springboard_rc_ready) gravitylite_stop_in_session();
@@ -6918,10 +7183,11 @@ static void settings_schedule_live_apply_for_key(NSString *key)
                 settings_notify_package_queue_changed_async();
             });
         } else if (![d boolForKey:kSettingsLiveWPEnabled]) {
+            BOOL hadApplied = settings_tweak_has_applied_state(kSettingsLiveWPEnabled);
             g_livewp_live_stop_requested = 1;
             settings_mark_tweak_applied(kSettingsLiveWPEnabled, NO);
             settings_notify_package_queue_changed_async();
-            if (g_springboard_rc_ready) {
+            if (hadApplied && g_springboard_rc_ready) {
                 dispatch_async(dispatch_get_global_queue(0, 0), ^{
                     @synchronized (settings_rc_lock()) {
                         if (g_springboard_rc_ready) livewp_stop_in_session();
@@ -6991,6 +7257,12 @@ void settings_register_defaults(void)
         kSettingsLayoutDockScalePct:        @100,
 
         kSettingsWatchLayoutEnabled:       @NO,
+        kSettingsCylinderLiteEnabled:      @NO,
+        kSettingsCylinderLiteEffect:       @(CylinderLiteEffectZoomFadeOut),
+        kSettingsCylinderLiteIntensityPct: @90,
+        kSettingsCylinderLiteOpacityPct:   @35,
+        kSettingsCylinderLiteFollowGesture: @NO,
+        kSettingsCylinderLiteOneShotDurationMs: @520,
 
         kSettingsStatBarEnabled: @NO,
         kSettingsStatBarCelsius: @NO,
@@ -7213,6 +7485,7 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             BOOL mwLiteEnabled = settings_stagestrip_install_allowed() && cyanide_tweak_enabled_with_compatibility(d, kSettingsMWLiteEnabled);
             BOOL gravityLiteEnabled = [d boolForKey:kSettingsGravityLiteEnabled];
             BOOL watchLayoutEnabled = cyanide_tweak_enabled_with_compatibility(d, kSettingsWatchLayoutEnabled);
+            BOOL cylinderLiteEnabled = cyanide_tweak_enabled_with_compatibility(d, kSettingsCylinderLiteEnabled);
             BOOL runSBC = settings_enabled_tweak_should_run(d, kSettingsSBCEnabled, springBoardPendingOnly);
             BOOL runDarkTweaks = settings_dark_tweaks_should_run(d, springBoardPendingOnly);
             BOOL runStatBar = settings_enabled_tweak_should_run(d, kSettingsStatBarEnabled, springBoardPendingOnly);
@@ -7237,6 +7510,7 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             BOOL runFastLockXLite = settings_fastlockx_lite_install_allowed() && settings_enabled_tweak_should_run(d, kSettingsFastLockXLiteEnabled, springBoardPendingOnly);
             BOOL runGravityLite = settings_enabled_tweak_should_run(d, kSettingsGravityLiteEnabled, springBoardPendingOnly);
             BOOL runWatchLayout = settings_enabled_tweak_should_run(d, kSettingsWatchLayoutEnabled, springBoardPendingOnly);
+            BOOL runCylinderLite = settings_enabled_tweak_should_run(d, kSettingsCylinderLiteEnabled, springBoardPendingOnly);
             BOOL runQuickLoader = settings_enabled_tweak_should_run(d, kSettingsQuickLoaderEnabled, springBoardPendingOnly);
             BOOL runRepoTweaks = settings_enabled_tweak_should_run(d, kSettingsRepoTweaksEnabled, springBoardPendingOnly);
             BOOL stagePausesThemerLive = settings_themer_dynamic_updates_blocked_by_stage(d);
@@ -7260,7 +7534,7 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                          blockedName.UTF8String,
                          reason.UTF8String);
             }
-            BOOL needsSpringBoardWork = runSBC || runDarkTweaks || runStatBar || runNSBar || runNiceBarLite || runRSSI || runAxonLite || runGravityLite || runWatchLayout || runLayoutExtras || runTypeBanner || runNotificationIsland || runDebugOverlay || runUpsideDown || runAppSwitcherGrid || runFloatingDock || runThemer || runSnowBoardLite || runLiveWP || runMetalLockLight || runMoodWallpaper || runStageStrip || runMWLite || runFastLockXLite || runQuickLoader || runRepoTweaks || cleanupDisabledSpringBoardTweaks;
+            BOOL needsSpringBoardWork = runSBC || runDarkTweaks || runStatBar || runNSBar || runNiceBarLite || runRSSI || runAxonLite || runGravityLite || runWatchLayout || runCylinderLite || runLayoutExtras || runTypeBanner || runNotificationIsland || runDebugOverlay || runUpsideDown || runAppSwitcherGrid || runFloatingDock || runThemer || runSnowBoardLite || runLiveWP || runMetalLockLight || runMoodWallpaper || runStageStrip || runMWLite || runFastLockXLite || runQuickLoader || runRepoTweaks || cleanupDisabledSpringBoardTweaks;
             BOOL runSandboxEscape = [d boolForKey:kSettingsRunSandboxEscape] && (!pendingOnly || needsSpringBoardWork);
             // TypeBanner prewarms its hidden SpringBoard window during Apply
             // and reuses the open SpringBoard session for text-only updates.
@@ -7293,6 +7567,7 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             if (runAxonLite) total++;
             if (runGravityLite) total++;
             if (runWatchLayout) total++;
+            if (runCylinderLite) total++;
             if (runTypeBanner) total++;
             if (runNotificationIsland) total++;
             if (runDebugOverlay) total++;
@@ -7324,6 +7599,7 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             if (runFloatingDock) [enabledTweaks addObject:@"floating-dock"];
             if (runGravityLite) [enabledTweaks addObject:[NSString stringWithFormat:@"gravity(%ld%%)", (long)[d integerForKey:kSettingsGravityLiteMagnitudePct]]];
             if (runWatchLayout) [enabledTweaks addObject:@"watch-layout"];
+            if (runCylinderLite) [enabledTweaks addObject:@"cylinder-lite"];
             if (runPowercuff) [enabledTweaks addObject:[NSString stringWithFormat:@"power(%@)", [d stringForKey:kSettingsPowercuffLevel] ?: @"nominal"]];
             if (runDarkTweaks) [enabledTweaks addObject:@"dark"];
             if (runThemer) [enabledTweaks addObject:@"themer"];
@@ -7359,6 +7635,7 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                 if (!metalLockLightEnabled) settings_stop_metal_lock_light_motion();
                 if (!moodWallpaperEnabled) settings_stop_mood_wallpaper_motion();
                 if (!gravityLiteEnabled) settings_request_gravitylite_stop();
+                if (!cylinderLiteEnabled) settings_request_cylinderlite_stop();
                 if (!stageStripEnabled) settings_request_stagestrip_stop();
                 log_user("[DONE] No pending runtime changes to apply.\n");
                 runSucceeded = YES;
@@ -7538,12 +7815,41 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         }
                     }
 
+                    if (runCylinderLite) {
+                        settings_progress(&step, total, "Starting Cylinder Lite page animations");
+                        bool ok = settings_apply_cylinderlite_from_defaults_locked(d);
+                        settings_mark_tweak_applied(kSettingsCylinderLiteEnabled,
+                                                    ok && cylinderLiteEnabled);
+                        printf("[SETTINGS] Cylinder Lite result=%d effect=%ld minScale=%ld minOpacity=%ld follow=%d durationMs=%ld\n",
+                               ok,
+                               (long)[d integerForKey:kSettingsCylinderLiteEffect],
+                               (long)[d integerForKey:kSettingsCylinderLiteIntensityPct],
+                               (long)[d integerForKey:kSettingsCylinderLiteOpacityPct],
+                               0,
+                               (long)[d integerForKey:kSettingsCylinderLiteOneShotDurationMs]);
+                        log_user("%s Cylinder Lite %s.\n",
+                                 ok ? "[OK]" : "[WARN]",
+                                 ok ? "armed" : "did not start cleanly");
+                        if (ok) {
+                            settings_start_cylinderlite_live_loop();
+                        } else {
+                            runHadBlockingFailure = YES;
+                            runCompletionMessage = @"Cylinder Lite did not start cleanly.";
+                        }
+                    } else if (!cylinderLiteEnabled &&
+                               settings_tweak_has_applied_state(kSettingsCylinderLiteEnabled)) {
+                        g_cylinderlite_live_stop_requested = 1;
+                        cylinderlite_stop_in_session();
+                    }
+
                     if (runGravityLite) {
                         settings_progress(&step, total, "Starting Gravity Lite icon physics");
                         log_user("[GRAVITY] Preparing icon physics state...\n");
                         __sync_lock_test_and_set(&g_gravitylite_background_armed, 0);
                         settings_stop_gravity_motion();
-                        gravitylite_stop_in_session();
+                        if (settings_tweak_has_applied_state(kSettingsGravityLiteEnabled)) {
+                            gravitylite_stop_in_session();
+                        }
                         GravityLiteConfig glConfig = settings_gravitylite_config_from_defaults(d);
                         bool ok = gravitylite_apply_in_session(glConfig);
                         settings_mark_tweak_applied(kSettingsGravityLiteEnabled,
@@ -7560,7 +7866,8 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                             runHadBlockingFailure = YES;
                             runCompletionMessage = @"Gravity Lite did not start cleanly.";
                         }
-                    } else if (!gravityLiteEnabled) {
+                    } else if (!gravityLiteEnabled &&
+                               settings_tweak_has_applied_state(kSettingsGravityLiteEnabled)) {
                         __sync_lock_test_and_set(&g_gravitylite_background_armed, 0);
                         settings_stop_gravity_motion();
                         gravitylite_stop_in_session();
@@ -7707,7 +8014,8 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         log_user("%s UIKit Debug Overlay %s.\n",
                                  ok ? "[OK]" : "[WARN]",
                                  ok ? "enabled" : "did not apply cleanly");
-                    } else if (!debugOverlayEnabled) {
+                    } else if (!debugOverlayEnabled &&
+                               settings_tweak_has_applied_state(kSettingsDebugOverlayEnabled)) {
                         debugoverlay_stop_in_session();
                     }
 
@@ -7720,7 +8028,8 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         log_user("%s Upside Down %s.\n",
                                  ok ? "[OK]" : "[WARN]",
                                  ok ? "enabled" : "did not apply cleanly");
-                    } else if (!upsideDownEnabled) {
+                    } else if (!upsideDownEnabled &&
+                               settings_tweak_has_applied_state(kSettingsUpsideDownEnabled)) {
                         upsidedown_stop_in_session();
                     }
 
@@ -7733,7 +8042,8 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         log_user("%s App Switcher Grid %s.\n",
                                  ok ? "[OK]" : "[WARN]",
                                  ok ? "enabled" : "did not apply cleanly");
-                    } else if (!appSwitcherGridEnabled) {
+                    } else if (!appSwitcherGridEnabled &&
+                               settings_tweak_has_applied_state(kSettingsAppSwitcherGridEnabled)) {
                         appswitchergrid_stop_in_session();
                     }
 
@@ -7746,7 +8056,8 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         log_user("%s iPad Dock %s.\n",
                                  ok ? "[OK]" : "[WARN]",
                                  ok ? "created" : "did not apply");
-                    } else if (!floatingDockEnabled) {
+                    } else if (!floatingDockEnabled &&
+                               settings_tweak_has_applied_state(kSettingsFloatingDockEnabled)) {
                         floatingdock_stop_in_session();
                     }
 
@@ -7794,7 +8105,9 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         log_user("%s Dynamic Stage Lite %s.\n",
                                  ok ? "[OK]" : "[WARN]",
                                  ok ? "overlay active" : "did not install cleanly");
-                    } else if (!stageStripEnabled && !mwLiteEnabled) {
+                    } else if (!stageStripEnabled && !mwLiteEnabled &&
+                               (settings_tweak_is_applied(kSettingsStageStripEnabled) ||
+                                settings_tweak_is_applied(kSettingsMWLiteEnabled))) {
                         // Uninstall path: tear down the overlay if one survived
                         // from a prior Run. No-op when the strip was never up.
                         stagestrip_stop_in_session();
@@ -7870,6 +8183,11 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                 } else if (!notificationIslandEnabled) {
                     g_notificationisland_live_stop_requested = 1;
                 }
+                if (runCylinderLite) {
+                    settings_start_cylinderlite_live_loop();
+                } else if (!cylinderLiteEnabled) {
+                    g_cylinderlite_live_stop_requested = 1;
+                }
             }
 
             if (runTypeBanner) {
@@ -7890,7 +8208,7 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             if (startStageStripControlLoopAfterInstall) {
                 stagestrip_start_control_loop();
             }
-            if (runStatBar || runNSBar || runNiceBarLite || runRSSI || runAxonLite || runTypeBanner || runNotificationIsland || runLiveWP || startStageStripControlLoopAfterInstall)
+            if (runStatBar || runNSBar || runNiceBarLite || runRSSI || runAxonLite || runTypeBanner || runNotificationIsland || runLiveWP || runCylinderLite || startStageStripControlLoopAfterInstall)
 
             if (!settings_has_persistent_springboard_remote_call_user()) {
                 BOOL closedNonLiveRemoteCall = NO;
@@ -7994,6 +8312,7 @@ typedef NS_ENUM(NSInteger, SettingsSection) {
     SectionDebugOverlay,
     SectionUpsideDown,
     SectionWatchLayout,
+    SectionCylinderLite,
     SectionAppDowngrade,
     SectionAppUpdateBlocking,
     SectionCount,
@@ -8961,6 +9280,63 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     ];
 }
 
+- (NSArray<NSDictionary *> *)cylinderLiteRows
+{
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    NSMutableArray<NSDictionary *> *rows = [@[
+        @{ @"kind": @"info",
+           @"title": NSLocalizedString(@"Page Animation", nil),
+           @"subtitle": NSLocalizedString(@"Animates the current Home Screen page container when the page changes. It does not animate individual icons or write icon layout state.", nil) },
+        @{ @"kind": @"choice",
+           @"key": kSettingsCylinderLiteEffect,
+           @"title": NSLocalizedString(@"Effect", nil),
+           @"titles": settings_cylinderlite_effect_titles(),
+           @"values": settings_cylinderlite_effect_values() },
+    ] mutableCopy];
+    NSInteger effect = settings_cylinderlite_effect_from_defaults(d);
+    if (settings_cylinderlite_effect_uses_scale_controls(effect)) {
+        [rows addObject:@{ @"kind": @"slider",
+                           @"key": kSettingsCylinderLiteIntensityPct,
+                           @"title": NSLocalizedString(@"Minimum scale", nil),
+                           @"min": @70,
+                           @"max": @100,
+                           @"step": @5,
+                           @"unit": @"%",
+                           @"default": @90 }];
+    } else {
+        [rows addObject:@{ @"kind": @"slider",
+                           @"key": kSettingsCylinderLiteIntensityPct,
+                           @"title": NSLocalizedString(@"Animation strength", nil),
+                           @"min": @70,
+                           @"max": @100,
+                           @"step": @5,
+                           @"unit": @"%",
+                           @"default": @90 }];
+    }
+    if (settings_cylinderlite_effect_uses_opacity_controls(effect)) {
+        [rows addObject:@{ @"kind": @"slider",
+                           @"key": kSettingsCylinderLiteOpacityPct,
+                           @"title": NSLocalizedString(@"Minimum opacity", nil),
+                           @"min": @10,
+                           @"max": @100,
+                           @"step": @5,
+                           @"unit": @"%",
+                           @"default": @35 }];
+    }
+    [rows addObject:@{ @"kind": @"slider",
+                       @"key": kSettingsCylinderLiteOneShotDurationMs,
+                       @"title": NSLocalizedString(@"Animation duration", nil),
+                       @"min": @250,
+                       @"max": @800,
+                       @"step": @50,
+                       @"unit": @"ms",
+                       @"default": @520 }];
+    [rows addObject:@{ @"kind": @"info",
+                       @"title": NSLocalizedString(@"Compatibility", nil),
+                       @"subtitle": NSLocalizedString(@"Cylinder Lite, Watch Layout, Gravity Lite, SBCustomizer, and Home Layout Extras all affect Home Screen page/icon layout. Only one should be active at a time.", nil) }];
+    return rows;
+}
+
 - (NSArray<NSDictionary *> *)appDowngradeRows
 {
     return @[
@@ -9556,6 +9932,9 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         [out addObject:@{@"title": @"Friction",     @"value": [NSString stringWithFormat:@"%ld%%", (long)[d integerForKey:kSettingsGravityLiteFrictionPct]]}];
         [out addObject:@{@"title": @"Resistance",   @"value": [NSString stringWithFormat:@"%ld%%", (long)[d integerForKey:kSettingsGravityLiteResistancePct]]}];
         [out addObject:@{@"title": @"Spin resist.", @"value": [NSString stringWithFormat:@"%ld%%", (long)[d integerForKey:kSettingsGravityLiteAngularResistancePct]]}];
+    } else if (section == SectionCylinderLite) {
+        [out addObject:@{@"title": NSLocalizedString(@"Effect", nil),
+                         @"value": settings_cylinderlite_effect_name(settings_cylinderlite_effect_from_defaults(d))}];
     }
     return out;
 }
@@ -9586,6 +9965,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         case SectionFastLockXLite: return settings_fastlockx_lite_install_allowed() ? self.fastLockXLiteRows : @[];
         case SectionGravityLite: return self.gravityLiteRows;
         case SectionWatchLayout: return self.watchLayoutRows;
+        case SectionCylinderLite: return self.cylinderLiteRows;
         case SectionAppDowngrade: return self.appDowngradeRows;
         case SectionAppUpdateBlocking: return self.appUpdateBlockingRows;
         case SectionLocationSim: return self.locationSimRows;
@@ -9627,6 +10007,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 #endif
         @{ @"title": @"Gravity Lite",       @"icon": @"arrow.down.circle.fill",              @"color": [UIColor systemGreenColor],  @"section": @(SectionGravityLite) },
         @{ @"title": @"Watch Layout",       @"icon": @"circle.grid.3x3.fill",                @"color": [UIColor systemGreenColor],  @"section": @(SectionWatchLayout) },
+        @{ @"title": @"Cylinder Lite",      @"icon": @"rotate.3d",                           @"color": [UIColor systemGreenColor],  @"section": @(SectionCylinderLite) },
         @{ @"title": @"App Switcher Grid",  @"icon": @"square.grid.2x2.fill",                @"color": [UIColor systemOrangeColor], @"section": @(SectionAppSwitcherGrid) },
         @{ @"title": @"iPad Dock", @"icon": @"rectangle.on.rectangle", @"color": [UIColor systemOrangeColor], @"section": @(SectionFloatingDock) },
         @{ @"title": @"UIKit Debug Overlay", @"icon": @"ladybug.fill", @"color": [UIColor systemRedColor], @"section": @(SectionDebugOverlay) },
@@ -9986,6 +10367,9 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     }
     if (s == SectionGravityLite) {
         return settings_l10n_text(@"RemoteCall-only core port of Julio Verne's Gravity. Run applies UIDynamicAnimator gravity, collision, bounce, friction, optional dock physics, and accelerometer steering to SpringBoard icon snapshots. It can restore the icon layout or fire a manual explosion pulse while the SpringBoard session is active.\n\nNot included in this core port: Activator/Home-button hooks, drag gestures, automatic shake effects, and preference-daemon notifications.");
+    }
+    if (s == SectionCylinderLite) {
+        return settings_l10n_text(@"Page-level Home Screen transition animations. Cyanide watches the active SpringBoard icon page and applies a lightweight Core Animation effect when the page changes.\n\nIt does not animate individual icons, does not write icon layout state, and Clean Up restores the stock page behavior for the current session.");
     }
     if (s == SectionLocationSim) {
         return settings_l10n_text(@"Beta CoreLocation simulation. Requires Apple Maps installed and set up — Maps is the RemoteCall host process that drives the simulation.\n\nThis is a manual tool, not an installable package. Use Simulate Current Target to start; use Restore Real Location to stop simulation and return CoreLocation to the device's real providers. Each run opens the activity log and marks completion when the request returns.\n\nNot all apps respect the simulated location. Apps that use their own location validation or additional signals may ignore it.\n\nCredits: kolbicz for the RemoteCall/CLSimulationManager GPS spoofer prototype, and ezzuldinSt's LSpoof for picker/route references.\n\nWarning: this can affect more than maps. Location-tied system behavior, including time zone and date/time handling, may behave unexpectedly. Only use this if you know what you're doing.");
@@ -12353,6 +12737,42 @@ void cyanide_present_contact(UIViewController *host)
         return cell;
     }
 
+    if ([kind isEqualToString:@"choice"]) {
+        UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"choice"];
+        if (!cell) {
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"choice"];
+        }
+        cell.selectionStyle = supported ? UITableViewCellSelectionStyleDefault : UITableViewCellSelectionStyleNone;
+        cell.userInteractionEnabled = supported;
+        cell.accessoryView = nil;
+        cell.accessoryType = supported ? UITableViewCellAccessoryDisclosureIndicator : UITableViewCellAccessoryNone;
+        cell.contentConfiguration = nil;
+
+        NSString *key = row[@"key"];
+        NSArray *values = [row[@"values"] isKindOfClass:NSArray.class] ? row[@"values"] : @[];
+        NSArray *titles = [row[@"titles"] isKindOfClass:NSArray.class] ? row[@"titles"] : @[];
+        NSInteger cur = [key isEqualToString:kSettingsCylinderLiteEffect]
+            ? settings_cylinderlite_effect_from_defaults(d)
+            : [d integerForKey:key];
+        NSUInteger idx = NSNotFound;
+        for (NSUInteger i = 0; i < values.count; i++) {
+            if ([values[i] integerValue] == cur) {
+                idx = i;
+                break;
+            }
+        }
+        NSString *valueTitle = idx != NSNotFound && idx < titles.count
+            ? settings_l10n_text(titles[idx])
+            : settings_cylinderlite_effect_name(cur);
+        cell.textLabel.text = settings_l10n_text(row[@"title"]);
+        cell.textLabel.textColor = supported ? UIColor.labelColor : UIColor.tertiaryLabelColor;
+        cell.detailTextLabel.text = valueTitle;
+        cell.detailTextLabel.textColor = supported ? UIColor.secondaryLabelColor : UIColor.tertiaryLabelColor;
+        cell.detailTextLabel.adjustsFontSizeToFitWidth = YES;
+        cell.detailTextLabel.minimumScaleFactor = 0.72;
+        return cell;
+    }
+
     if ([kind isEqualToString:@"slider"]) {
         UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"slider" forIndexPath:dequeuePath];
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
@@ -13059,6 +13479,9 @@ void settings_set_app_update_blocked(UIViewController *host,
     [[NSUserDefaults standardUserDefaults] setBool:sender.isOn forKey:key];
     printf("[SETTINGS] toggle %s=%d\n", key.UTF8String, sender.isOn);
     settings_note_package_configuration_changed(key);
+    if ([key isEqualToString:kSettingsCylinderLiteFollowGesture]) {
+        [self.tableView reloadData];
+    }
     if ([key isEqualToString:kSettingsKeepAlive]) {
         ds_keepalive_apply_enabled(sender.isOn);
         return;
@@ -14018,6 +14441,62 @@ void settings_set_app_update_blocked(UIViewController *host,
     }
 }
 
+- (void)presentChoiceForRow:(NSDictionary *)row section:(NSInteger)section
+{
+    NSString *key = row[@"key"];
+    if (key.length == 0) return;
+    NSArray *values = [row[@"values"] isKindOfClass:NSArray.class] ? row[@"values"] : @[];
+    NSArray *titles = [row[@"titles"] isKindOfClass:NSArray.class] ? row[@"titles"] : @[];
+    if (values.count == 0 || titles.count == 0) return;
+
+    UIAlertController *ac = [UIAlertController
+        alertControllerWithTitle:settings_l10n_text(row[@"title"] ?: @"Select")
+                         message:nil
+                  preferredStyle:UIAlertControllerStyleActionSheet];
+    ac.view.tintColor = self.view.tintColor;
+
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    __weak typeof(self) weakSelf = self;
+    NSUInteger count = MIN(values.count, titles.count);
+    UIColor *actionColor = self.view.tintColor ?: UIColor.systemBlueColor;
+    for (NSUInteger i = 0; i < count; i++) {
+        id value = values[i];
+        NSString *title = settings_l10n_text(titles[i]);
+        BOOL selected = NO;
+        if ([value isKindOfClass:NSString.class]) {
+            selected = [[d stringForKey:key] isEqualToString:value];
+        } else if ([key isEqualToString:kSettingsCylinderLiteEffect]) {
+            selected = (NSInteger)settings_cylinderlite_effect_from_defaults(d) == [value integerValue];
+        } else {
+            selected = [d integerForKey:key] == [value integerValue];
+        }
+        NSString *displayTitle = selected ? [NSString stringWithFormat:@"✓ %@", title] : title;
+        UIAlertAction *choiceAction = [UIAlertAction actionWithTitle:displayTitle
+                                                               style:UIAlertActionStyleDefault
+                                                             handler:^(UIAlertAction *_) {
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
+            if ([value isKindOfClass:NSString.class]) {
+                [d setObject:value forKey:key];
+            } else {
+                [d setInteger:[value integerValue] forKey:key];
+            }
+            settings_note_package_configuration_changed(key);
+            settings_schedule_live_apply_for_key(key);
+            [strongSelf presentApplyLogIfRunning];
+            [strongSelf.tableView reloadData];
+        }];
+        [choiceAction setValue:actionColor forKey:@"titleTextColor"];
+        [ac addAction:choiceAction];
+    }
+    UIAlertAction *cancelAction = [UIAlertAction actionWithTitle:settings_l10n_text(@"Cancel")
+                                                           style:UIAlertActionStyleCancel
+                                                         handler:nil];
+    [cancelAction setValue:actionColor forKey:@"titleTextColor"];
+    [ac addAction:cancelAction];
+    settings_present_controller(ac, self);
+}
+
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
@@ -14115,6 +14594,10 @@ void settings_set_app_update_blocked(UIViewController *host,
         NSDictionary *row = rows[indexPath.row];
         if ([row[@"kind"] isEqualToString:@"number"]) {
             [self presentNumberEntryForRow:row section:indexPath.section];
+            return;
+        }
+        if ([row[@"kind"] isEqualToString:@"choice"]) {
+            [self presentChoiceForRow:row section:indexPath.section];
             return;
         }
     }
