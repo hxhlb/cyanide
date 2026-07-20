@@ -30,10 +30,13 @@ activity, omit it.
 
 ## Pending
 
-- [ ] 新增 Cylinder Lite 主屏幕翻页动画，支持多种页面级过渡效果。
-  Added Cylinder Lite Home Screen page animations with multiple page-level transition effects.
 
 ## Released
+
+### v1.5.2 - 2026-07-20
+
+- [x] 新增 Cylinder Lite 主屏幕翻页动画，支持多种页面级过渡效果。
+  Added Cylinder Lite Home Screen page animations with multiple page-level transition effects.
 
 ### v1.5.1 - 2026-07-17
 
