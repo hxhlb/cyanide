@@ -21,9 +21,8 @@ Cyanide 将 DarkSword 内核利用链、Installer 风格界面与基于 RemoteCa
 SpringBoard tweak 结合在一起。它不是传统越狱：多数运行时 tweak 由应用直接应用，
 并仅在当前 SpringBoard 会话中保持生效；少数工具会有意写入持久化文件或偏好设置。
 
-本仓库是原始 [`zeroxjf/cyanide`](https://github.com/zeroxjf/cyanide)（原名
-`cyanide-ios`）项目的活跃维护分支 [`hxhlb/cyanide`](https://github.com/hxhlb/cyanide)。Patreon
-集成已经移除，所有可安装的内置 tweak 均无需关联账户。
+本仓库是原始 [`zeroxjf/cyanide`](https://github.com/zeroxjf/cyanide)
+项目的活跃维护分支 [`hxhlb/cyanide`](https://github.com/hxhlb/cyanide)。
 
 ## 兼容性
 
@@ -74,6 +73,7 @@ iOS/iPadOS 18.7.2 与 26.1 中修复。SpringBoard 私有 API 也会随系统版
 | 主屏幕 | Home Layout Extras | 调整主屏幕与 Dock 的边距和图标缩放 |
 | 主屏幕 | Gravity Lite | 为主屏幕图标加入重力、碰撞、弹性和设备倾斜效果 |
 | 主屏幕 | Watch Layout | 使用可滚动的 Apple Watch 风格蜂窝布局浏览并启动应用 |
+| 主屏幕 | Cylinder Lite | 为主屏幕翻页添加多种页面级过渡动画 |
 | 主屏幕 | Hide Home Bar | 隐藏底部 Home Bar；应用或恢复后需要 respring |
 | 主题 | SnowBoard Lite | 导入并应用本地 SnowBoard/IconBundles 风格图标主题 |
 | 主题 | LiveWP | 在主屏幕和锁屏播放本地视频壁纸 |

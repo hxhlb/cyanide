@@ -25,8 +25,7 @@ write persistent files or preferences.
 
 This repository is the actively developed [`hxhlb/cyanide`](https://github.com/hxhlb/cyanide)
 fork of the original [`zeroxjf/cyanide`](https://github.com/zeroxjf/cyanide)
-project (formerly `cyanide-ios`). Patreon integration has been removed; all
-installable built-in tweaks are available without account linking.
+project.
 
 ## Compatibility
 
@@ -80,6 +79,7 @@ You can also add the Cyanide AltStore source:
 | Home Screen | Home Layout Extras | Adjusts Home Screen and Dock insets and icon scaling |
 | Home Screen | Gravity Lite | Adds gravity, collision, bounce, and device-tilt physics to Home Screen icons |
 | Home Screen | Watch Layout | Provides a scrolling Apple Watch-style honeycomb layout for browsing and launching apps |
+| Home Screen | Cylinder Lite | Adds multiple page-level transition animations to Home Screen swipes |
 | Home Screen | Hide Home Bar | Hides the bottom Home Bar; applying or restoring it requires a respring |
 | Theming | SnowBoard Lite | Imports and applies local SnowBoard/IconBundles-style icon themes |
 | Theming | LiveWP | Plays a local video as the Home and Lock Screen wallpaper |

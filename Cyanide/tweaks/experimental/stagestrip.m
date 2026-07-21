@@ -6239,7 +6239,7 @@ static void stagestrip_install_hot_corner_window(uint64_t app,
             if (r_is_objc_ptr(blur)) {
                 stagestrip_set_frame_fast(blur, (StripRect){ 0.0, 0.0, hotW, hotH });
                 r_msg2_main(blur, "setUserInteractionEnabled:", 0, 0, 0, 0);
-                stagestrip_send_double(blur, "setAlpha:", 0.90);
+                stagestrip_send_double(blur, "setAlpha:", 0.45);
                 uint64_t blurLayer = r_msg2_main(blur, "layer", 0, 0, 0, 0);
                 if (r_is_objc_ptr(blurLayer)) {
                     stagestrip_send_double(blurLayer, "setCornerRadius:", hotW / 2.0);
@@ -6247,7 +6247,7 @@ static void stagestrip_install_hot_corner_window(uint64_t app,
                 }
                 r_msg2_main(hot, "addSubview:", blur, 0, 0, 0);
             } else {
-                stagestrip_set_background_white(hot, 0.08, 0.88);
+                stagestrip_set_background_white(hot, 0.08, 0.45);
             }
 
             uint64_t UIImage = r_class("UIImage");
@@ -6272,11 +6272,15 @@ static void stagestrip_install_hot_corner_window(uint64_t app,
                     ? r_msg2_main(UIColor, "whiteColor", 0, 0, 0, 0) : 0;
                 if (r_is_objc_ptr(white) && r_responds(imageView, "setTintColor:"))
                     r_msg2_main(imageView, "setTintColor:", white, 0, 0, 0);
+                if (r_responds(imageView, "setAlpha:"))
+                    stagestrip_send_double(imageView, "setAlpha:", 0.68);
                 r_msg2_main(hot, "addSubview:", imageView, 0, 0, 0);
             } else {
                 uint64_t fallback = stagestrip_make_text_label("MW", 0.0, 0.0, hotW, hotH);
                 if (r_is_objc_ptr(fallback)) {
                     r_msg2_main(fallback, "setUserInteractionEnabled:", 0, 0, 0, 0);
+                    if (r_responds(fallback, "setAlpha:"))
+                        stagestrip_send_double(fallback, "setAlpha:", 0.68);
                     r_msg2_main(hot, "addSubview:", fallback, 0, 0, 0);
                 }
             }
