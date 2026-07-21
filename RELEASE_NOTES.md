@@ -30,6 +30,8 @@ activity, omit it.
 
 ## Pending
 
+- [ ] 优化 MilkyWay Lite 入口图标与透明度，减少对主屏幕内容的遮挡。
+  Improved the MilkyWay Lite launcher icon and transparency to reduce Home Screen obstruction.
 
 ## Released
 

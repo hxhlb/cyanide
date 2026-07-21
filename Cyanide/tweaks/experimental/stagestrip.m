@@ -6251,7 +6251,7 @@ static void stagestrip_install_hot_corner_window(uint64_t app,
             }
 
             uint64_t UIImage = r_class("UIImage");
-            uint64_t symbolName = r_nsstr_retained("square.grid.2x2.fill");
+            uint64_t symbolName = r_nsstr_retained("square.on.square.dashed");
             uint64_t image = r_is_objc_ptr(UIImage) && r_is_objc_ptr(symbolName) &&
                              r_responds(UIImage, "systemImageNamed:")
                 ? r_msg2_main(UIImage, "systemImageNamed:", symbolName, 0, 0, 0) : 0;
@@ -6273,14 +6273,14 @@ static void stagestrip_install_hot_corner_window(uint64_t app,
                 if (r_is_objc_ptr(white) && r_responds(imageView, "setTintColor:"))
                     r_msg2_main(imageView, "setTintColor:", white, 0, 0, 0);
                 if (r_responds(imageView, "setAlpha:"))
-                    stagestrip_send_double(imageView, "setAlpha:", 0.68);
+                    stagestrip_send_double(imageView, "setAlpha:", 0.42);
                 r_msg2_main(hot, "addSubview:", imageView, 0, 0, 0);
             } else {
                 uint64_t fallback = stagestrip_make_text_label("MW", 0.0, 0.0, hotW, hotH);
                 if (r_is_objc_ptr(fallback)) {
                     r_msg2_main(fallback, "setUserInteractionEnabled:", 0, 0, 0, 0);
                     if (r_responds(fallback, "setAlpha:"))
-                        stagestrip_send_double(fallback, "setAlpha:", 0.68);
+                        stagestrip_send_double(fallback, "setAlpha:", 0.42);
                     r_msg2_main(hot, "addSubview:", fallback, 0, 0, 0);
                 }
             }
