@@ -30,10 +30,13 @@ activity, omit it.
 
 ## Pending
 
-- [ ] 优化 MilkyWay Lite 入口图标与透明度，减少对主屏幕内容的遮挡。
-  Improved the MilkyWay Lite launcher icon and transparency to reduce Home Screen obstruction.
 
 ## Released
+
+### v1.5.3 - 2026-07-21
+
+- [x] 优化 MilkyWay Lite 入口图标与透明度，减少对主屏幕内容的遮挡。
+  Improved the MilkyWay Lite launcher icon and transparency to reduce Home Screen obstruction.
 
 ### v1.5.2 - 2026-07-20
 
